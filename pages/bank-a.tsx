@@ -632,7 +632,7 @@ export default function BankA() {
               <p style={{ marginBottom: 8 }}>
                 Connect your embedded Privy wallet to start the demo.
               </p>
-              <button onClick={login}>Login with Privy</button>
+              <button onClick={login}>Connect with wallet</button>
             </>
           ) : (
             <>
