@@ -64,7 +64,7 @@ const DIR_ABI = [
       { name: "domainHash", type: "bytes32" },
       { name: "operator", type: "address" },
     ],
-  },,
+  },
   {
     type: "function",
     name: "bankHpkePubKey",

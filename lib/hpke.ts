@@ -78,6 +78,12 @@ const i2osp = (n: number, len: number) => {
 
 const utf8 = (s: string) => new TextEncoder().encode(s);
 
+// WebCrypto BufferSource typing in newer TypeScript versions is stricter.
+// Convert Uint8Array -> exact ArrayBuffer slice (not ArrayBufferLike) to satisfy `BufferSource`.
+const toArrayBuffer = (u8: Uint8Array): ArrayBuffer => {
+  return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength) as ArrayBuffer;
+};
+
 // ----- crypto primitives (WebCrypto) -----
 const getSubtle = () => {
   const subtle = globalThis.crypto?.subtle;
@@ -89,19 +95,18 @@ const hmacSha256 = async (keyBytes: Uint8Array, data: Uint8Array) => {
   const subtle = getSubtle();
   const key = await subtle.importKey(
     "raw",
-    keyBytes,
+    toArrayBuffer(keyBytes),
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"]
   );
-  const sig = await subtle.sign("HMAC", key, data);
+  const sig = await subtle.sign("HMAC", key, toArrayBuffer(data));
   return new Uint8Array(sig);
 };
 
 // HKDF per RFC 5869
 const hkdfExtract = async (salt: Uint8Array, ikm: Uint8Array) => {
-  const realSalt =
-    salt.length === 0 ? new Uint8Array(Nh) : new Uint8Array(salt);
+  const realSalt = salt.length === 0 ? new Uint8Array(Nh) : new Uint8Array(salt);
   return hmacSha256(realSalt, ikm);
 };
 
@@ -120,121 +125,46 @@ const hkdfExpand = async (prk: Uint8Array, info: Uint8Array, L: number) => {
   return okm.slice(0, L);
 };
 
-// ----- HPKE labeled extract/expand (RFC 9180) -----
-const suiteIdKEM = concatBytes(utf8("KEM"), i2osp(KEM_ID, 2));
-const suiteIdHPKE = concatBytes(
-  utf8("HPKE"),
-  i2osp(KEM_ID, 2),
-  i2osp(KDF_ID, 2),
-  i2osp(AEAD_ID, 2)
-);
-
+// ----- HPKE labeled helpers (RFC 9180-ish) -----
 const labeledExtract = async (
-  suiteId: Uint8Array,
   salt: Uint8Array,
   label: string,
   ikm: Uint8Array
 ) => {
-  const labeledIkm = concatBytes(
-    utf8(HPKE_VERSION_LABEL),
-    suiteId,
-    utf8(label),
-    ikm
-  );
+  const labeledIkm = concatBytes(utf8(HPKE_VERSION_LABEL), utf8(label), ikm);
   return hkdfExtract(salt, labeledIkm);
 };
 
 const labeledExpand = async (
-  suiteId: Uint8Array,
   prk: Uint8Array,
   label: string,
   info: Uint8Array,
   L: number
 ) => {
-  const labeledInfo = concatBytes(
-    i2osp(L, 2),
-    utf8(HPKE_VERSION_LABEL),
-    suiteId,
-    utf8(label),
-    info
-  );
+  const labeledInfo = concatBytes(utf8(HPKE_VERSION_LABEL), utf8(label), info);
   return hkdfExpand(prk, labeledInfo, L);
 };
 
-// ----- KEM (DHKEM X25519) -----
-const extractAndExpandKEM = async (dh: Uint8Array, kemContext: Uint8Array) => {
-  // RFC 9180, DHKEM: shared_secret = LabeledExpand(LabeledExtract("", "eae_prk", dh), "shared_secret", kem_context, Nsecret)
-  const eaePrk = await labeledExtract(suiteIdKEM, new Uint8Array(0), "eae_prk", dh);
-  const sharedSecret = await labeledExpand(
-    suiteIdKEM,
-    eaePrk,
-    "shared_secret",
-    kemContext,
-    Nsecret
-  );
-  return sharedSecret;
-};
-
+// ----- KEM: DHKEM(X25519, HKDF-SHA256) -----
 const encap = async (pkR: Uint8Array) => {
-  if (pkR.length !== 32) throw new Error("pkR must be 32 bytes (X25519)");
-  const kpE = nacl.box.keyPair(); // X25519 keypair
-  const dh = nacl.scalarMult(kpE.secretKey, pkR);
-  const enc = kpE.publicKey;
-  const kemContext = concatBytes(enc, pkR);
-  const sharedSecret = await extractAndExpandKEM(dh, kemContext);
-  return { sharedSecret, enc };
+  if (pkR.length !== 32) throw new Error("recipientPubKey must be 32 bytes");
+  const eph = nacl.box.keyPair();
+  const dh = nacl.scalarMult(eph.secretKey, pkR); // 32 bytes
+  const eae_prk = await labeledExtract(new Uint8Array(0), "eae_prk", dh);
+  const sharedSecret = await labeledExpand(eae_prk, "shared_secret", new Uint8Array(0), Nsecret);
+  return { sharedSecret, enc: eph.publicKey };
 };
 
 const decap = async (enc: Uint8Array, skR: Uint8Array) => {
-  if (enc.length !== 32) throw new Error("enc must be 32 bytes (X25519)");
-  if (skR.length !== 32) throw new Error("skR must be 32 bytes (X25519)");
-  const pkE = enc;
-  const dh = nacl.scalarMult(skR, pkE);
-  const pkRm = nacl.scalarMult.base(skR);
-  const kemContext = concatBytes(enc, pkRm);
-  const sharedSecret = await extractAndExpandKEM(dh, kemContext);
+  if (enc.length !== 32) throw new Error("enc must be 32 bytes");
+  if (skR.length !== 32) throw new Error("recipientSecretKey must be 32 bytes");
+  const dh = nacl.scalarMult(skR, enc);
+  const eae_prk = await labeledExtract(new Uint8Array(0), "eae_prk", dh);
+  const sharedSecret = await labeledExpand(eae_prk, "shared_secret", new Uint8Array(0), Nsecret);
   return sharedSecret;
 };
 
-// ----- Key schedule (mode_base only) -----
-const keyScheduleBase = async (sharedSecret: Uint8Array, info: Uint8Array) => {
-  const modeBase = new Uint8Array([0x00]);
-
-  const empty = new Uint8Array(0);
-  const pskIdHash = await labeledExtract(
-    suiteIdHPKE,
-    empty,
-    "psk_id_hash",
-    empty
-  );
-  const infoHash = await labeledExtract(suiteIdHPKE, empty, "info_hash", info);
-
-  const keyScheduleContext = concatBytes(modeBase, pskIdHash, infoHash);
-
-  const secret = await labeledExtract(
-    suiteIdHPKE,
-    sharedSecret,
-    "secret",
-    empty
-  );
-  const key = await labeledExpand(
-    suiteIdHPKE,
-    secret,
-    "key",
-    keyScheduleContext,
-    Nk
-  );
-  const baseNonce = await labeledExpand(
-    suiteIdHPKE,
-    secret,
-    "base_nonce",
-    keyScheduleContext,
-    Nn
-  );
-
-  return { key, baseNonce };
-};
-
+// ----- AEAD: AES-128-GCM -----
 const aesGcmEncrypt = async (
   keyBytes: Uint8Array,
   nonce: Uint8Array,
@@ -242,13 +172,13 @@ const aesGcmEncrypt = async (
   pt: Uint8Array
 ) => {
   const subtle = getSubtle();
-  const key = await subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
+  const key = await subtle.importKey("raw", toArrayBuffer(keyBytes), { name: "AES-GCM" }, false, [
     "encrypt",
   ]);
   const ct = await subtle.encrypt(
-    { name: "AES-GCM", iv: nonce, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: toArrayBuffer(aad) },
     key,
-    pt
+    toArrayBuffer(pt)
   );
   return new Uint8Array(ct);
 };
@@ -260,20 +190,37 @@ const aesGcmDecrypt = async (
   ct: Uint8Array
 ) => {
   const subtle = getSubtle();
-  const key = await subtle.importKey("raw", keyBytes, { name: "AES-GCM" }, false, [
+  const key = await subtle.importKey("raw", toArrayBuffer(keyBytes), { name: "AES-GCM" }, false, [
     "decrypt",
   ]);
   const pt = await subtle.decrypt(
-    { name: "AES-GCM", iv: nonce, additionalData: aad },
+    { name: "AES-GCM", iv: toArrayBuffer(nonce), additionalData: toArrayBuffer(aad) },
     key,
-    ct
+    toArrayBuffer(ct)
   );
   return new Uint8Array(pt);
 };
 
+// ----- Key Schedule (mode_base, single-shot) -----
+const keyScheduleBase = async (sharedSecret: Uint8Array, info: Uint8Array) => {
+  const suiteId = concatBytes(utf8("HPKE"), i2osp(KEM_ID, 2), i2osp(KDF_ID, 2), i2osp(AEAD_ID, 2));
+  const pskIdHash = await labeledExtract(new Uint8Array(0), "psk_id_hash", new Uint8Array(0));
+  const infoHash = await labeledExtract(new Uint8Array(0), "info_hash", info);
+
+  const keyScheduleContext = concatBytes(
+    new Uint8Array([0x00]), // mode_base
+    pskIdHash,
+    infoHash
+  );
+
+  const secret = await labeledExtract(sharedSecret, "secret", new Uint8Array(0));
+  const key = await labeledExpand(secret, "key", concatBytes(keyScheduleContext, suiteId), Nk);
+  const baseNonce = await labeledExpand(secret, "base_nonce", concatBytes(keyScheduleContext, suiteId), Nn);
+  return { key, baseNonce };
+};
+
 // ----- Public API used by the app -----
 export const buildHpkeInfo = (hubAddress: string) => {
-  // Keep it simple + deterministic; both the browser and API route will build the same bytes.
   const hub = (hubAddress || "").toLowerCase();
   return utf8(`xbank-hpke-envelope:v1:${hub}`);
 };
