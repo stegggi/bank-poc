@@ -9,14 +9,22 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@biconomy/account": "^4.5.7",
+    "@biconomy/paymaster": "^3.1.4",
+    "@privy-io/react-auth": "^3.8.0",
+    "cbor-x": "^1.6.0",
+    "ethers": "^6.15.0",
     "next": "16.0.4",
+    "pako": "^2.1.0",
     "react": "19.2.0",
     "react-dom": "19.2.0",
+    "tweetnacl": "^1.0.3",
     "viem": "^2.40.2",
     "zod": "^4.1.13"
   },
   "devDependencies": {
     "@types/node": "^20",
+    "@types/pako": "^2.0.4",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
