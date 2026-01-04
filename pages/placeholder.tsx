@@ -5,7 +5,7 @@ import NavBar from "../components/NavBar";
 export default function PlaceholderUseCase() {
   return (
     <>
-      <NavBar active="placeholder" />
+      <NavBar active={"placeholder" as any} />
 
       <div style={wrap}>
         <div style={panel}>
