@@ -1075,6 +1075,9 @@ for (let i = 0; i < logs.length; i += 1) {
   const visibleReqs = rows.slice(0, reqLimit);
   const visibleLogs = logEvents.slice(0, logLimit);
 
+  const pendingCount = rows.filter((r) => r.requireAck && (r.status ?? "pending") === "pending").length;
+  const ackedCount = rows.filter((r) => r.status === "acked").length;
+
   if (!ready) {
     return (
       <>
@@ -2029,7 +2032,442 @@ for (let i = 0; i < logs.length; i += 1) {
           browser (local storage). If you reload the page or navigate away, the
           view may reset or need to rescan recent blocks.
         </p>
+
+        {/* ✅ Premium sticky accordion: Why this matters */}
+        <WhyThisMatters pendingCount={pendingCount} ackedCount={ackedCount} />
+
       </div>
     </>
   );
 }
+
+/* ---------- Premium “Why this matters” (same component style as Bank A) ---------- */
+
+function WhyThisMatters({ pendingCount, ackedCount }: { pendingCount: number; ackedCount: number }) {
+  const [open, setOpen] = useState(false);
+  const innerRef = useRef<HTMLDivElement | null>(null);
+  const [maxH, setMaxH] = useState(0);
+
+  useEffect(() => {
+    const update = () => {
+      if (!innerRef.current) return;
+      setMaxH(open ? innerRef.current.scrollHeight : 0);
+    };
+    update();
+    if (typeof window !== "undefined") window.addEventListener("resize", update);
+    return () => {
+      if (typeof window !== "undefined") window.removeEventListener("resize", update);
+    };
+  }, [open]);
+
+  const inboxLabel =
+    pendingCount > 0 ? `Inbox: ${pendingCount} pending` : ackedCount > 0 ? `ACKs sent: ${ackedCount}` : "Inbox clear ✅";
+
+  return (
+    <div style={whyStickyWrap}>
+      <div style={whyShell}>
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} style={whyHeaderBtn}>
+          <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <span style={whyBadge}>Why this matters</span>
+            <span style={whyTitle}>Receiving bank controls: decrypt, review, and ACK before settlement</span>
+          </span>
+
+          <span style={whyRight}>
+            <span style={whyHint}>{inboxLabel}</span>
+            <span style={{ ...chevWrap, transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
+              <Chevron />
+            </span>
+          </span>
+        </button>
+
+        <div
+          style={{
+            ...whyBodyOuter,
+            maxHeight: open ? maxH : 0,
+            opacity: open ? 1 : 0,
+            transform: open ? "translateY(0px)" : "translateY(-4px)",
+          }}
+        >
+          <div ref={innerRef} style={whyBodyInner}>
+            <Section
+              k="1"
+              title="What you’re doing on this page"
+              subtitle="You’re acting as the receiving bank: you verify the incoming request, then ACK it so settlement can proceed."
+            >
+              <ul style={whyList}>
+                <li>
+                  You monitor the Payment Hub for <strong>outbound payment messages</strong> addressed to Bank B.
+                </li>
+                <li>
+                  You open the <strong>encrypted Travel Rule envelope</strong> and review the originator + beneficiary data.
+                </li>
+                <li>
+                  If everything checks out, you send an on-chain <strong>ACK</strong> — a simple but powerful safety gate.
+                </li>
+              </ul>
+
+              <div style={bannerNote}>
+                <strong>Key idea:</strong> Bank B can “see and verify” compliance data without exposing it publicly —
+                and without having to trust Bank A’s database.
+              </div>
+            </Section>
+
+            <Section
+              k="2"
+              title="How you find and open the envelope (grandma-friendly)"
+              subtitle="Think: you receive a sealed envelope with a tracking number. You can verify it arrived, then open it privately."
+            >
+              <div style={whyGrid2}>
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>Finding the message</div>
+                  <div style={whyText}>
+                    The Payment Hub emits an <strong>OutboundPayment</strong> event with a <strong>txRef</strong> (reference) and a{" "}
+                    <strong>payloadHash</strong>. Your UI scans recent blocks and filters messages where{" "}
+                    <strong>toBankId = Bank B</strong>.
+                  </div>
+                  <div style={pillRow}>
+                    <span style={pill}>Event logs</span>
+                    <span style={pill}>txRef</span>
+                    <span style={pill}>Routing by bankId</span>
+                  </div>
+                </div>
+
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>Opening it safely</div>
+                  <div style={whyText}>
+                    The encrypted payload is created with <strong>HPKE</strong> to Bank B’s on-chain public key (read from Directory).{" "}
+                    Bank B holds the matching private key. In this demo, decryption happens via{" "}
+                    <code style={whyCode}>/api/hpke-open</code> so the browser never exposes the private key.
+                  </div>
+                  <div style={pillRow}>
+                    <span style={pill}>HPKE</span>
+                    <span style={pill}>Private key</span>
+                    <span style={pill}>No plaintext PII on-chain</span>
+                  </div>
+                </div>
+              </div>
+            </Section>
+
+            <Section
+              k="3"
+              title="What goes on-chain (and what doesn’t)"
+              subtitle="The chain is the shared audit rail — but the sensitive content stays sealed."
+            >
+              <div style={whyGrid2}>
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>On-chain</div>
+                  <ul style={whyList}>
+                    <li>
+                      Bank A calls the Payment Hub:{" "}
+                      <code style={whyCode}>submitPayment(toBankId, requireAck, payload, txRef)</code>
+                    </li>
+                    <li>
+                      You send: <code style={whyCode}>acknowledge(txRef)</code> (as Bank B operator)
+                    </li>
+                    <li>
+                      Both actions are timestamped and discoverable via events — useful for audit and dispute resolution.
+                    </li>
+                  </ul>
+                </div>
+
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>Not on-chain</div>
+                  <ul style={whyList}>
+                    <li>No plaintext names, addresses, DOB, or other Travel Rule PII</li>
+                    <li>No internal bank case notes or screening results</li>
+                    <li>
+                      The envelope is bound to <strong>txRef</strong> (AAD) to prevent swapping messages between references
+                    </li>
+                  </ul>
+                </div>
+              </div>
+
+              <div style={nextStep}>
+                <div style={{ fontWeight: 950, marginBottom: 4 }}>Two-window tip</div>
+                <div style={{ color: "#333", lineHeight: 1.5 }}>
+                  For the best “interbank” feel: keep <strong>Bank A</strong> open in one window, then open{" "}
+                  <strong>Bank B</strong> in a second window. Bank A submits; Bank B reviews + ACKs; then settlement proceeds.
+                </div>
+              </div>
+            </Section>
+
+            <Section
+              k="4"
+              title="Why banks (and regulators) should care"
+              subtitle="This is a compact model of Travel Rule messaging & controlled settlement."
+            >
+              <div style={whyGrid2}>
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>Regulatory lens</div>
+                  <ul style={whyList}>
+                    <li>
+                      Travel Rule requires originator/beneficiary information to accompany certain crypto transfers (Swiss minimum fields).
+                    </li>
+                    <li>
+                      Data minimization: prove a message was delivered (txRef + events) without publishing PII on a public chain.
+                    </li>
+                    <li>
+                      A receiving bank can enforce an operational control: “review → ACK → release”.
+                    </li>
+                  </ul>
+                </div>
+
+                <div style={whyCard}>
+                  <div style={whyCardTitle}>Technical & operational lens</div>
+                  <ul style={whyList}>
+                    <li>
+                      <strong>Directory registry:</strong> bank keys and operator roles are discoverable on-chain (governance via MetaMask in this demo).
+                    </li>
+                    <li>
+                      <strong>Separation of concerns:</strong> settlement (token transfer) can be decoupled from messaging and gated by ACK.
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </Section>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Section({
+  k,
+  title,
+  subtitle,
+  children,
+}: {
+  k: string;
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div style={secWrap}>
+      <div style={secHead}>
+        <div style={secK}>{k}</div>
+        <div style={{ minWidth: 0 }}>
+          <div style={secTitle}>{title}</div>
+          <div style={secSub}>{subtitle}</div>
+        </div>
+      </div>
+      <div style={{ marginTop: 10 }}>{children}</div>
+    </div>
+  );
+}
+
+function Chevron() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+/* ---------- Component Styles (same as Bank A / eBanking) ---------- */
+
+const whyStickyWrap: React.CSSProperties = {
+  marginTop: 18,
+  position: "sticky",
+  bottom: 14,
+  zIndex: 20,
+};
+
+const whyShell: React.CSSProperties = {
+  border: "1px solid #e6e8eb",
+  borderRadius: 16,
+  overflow: "hidden",
+  background: "rgba(255,255,255,0.88)",
+  backdropFilter: "blur(10px)",
+  boxShadow: "0 10px 24px rgba(0,0,0,0.06)",
+};
+
+const whyHeaderBtn: React.CSSProperties = {
+  width: "100%",
+  border: "none",
+  background: "transparent",
+  padding: 14,
+  cursor: "pointer",
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+};
+
+const whyBadge: React.CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "4px 10px",
+  borderRadius: 999,
+  background: "#111",
+  color: "#fff",
+  fontWeight: 900,
+  fontSize: 12,
+  flex: "0 0 auto",
+};
+
+const whyTitle: React.CSSProperties = {
+  fontWeight: 900,
+  color: "#111",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const whyRight: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flex: "0 0 auto",
+};
+
+const whyHint: React.CSSProperties = {
+  fontSize: 12,
+  color: "#666",
+  fontWeight: 800,
+};
+
+const chevWrap: React.CSSProperties = {
+  width: 32,
+  height: 32,
+  borderRadius: 12,
+  border: "1px solid #e6e8eb",
+  display: "grid",
+  placeItems: "center",
+  color: "#111",
+  background: "#fff",
+  transition: "transform 180ms ease",
+};
+
+const whyBodyOuter: React.CSSProperties = {
+  borderTop: "1px solid #e6e8eb",
+  overflow: "hidden",
+  transition: "max-height 260ms ease, opacity 200ms ease, transform 200ms ease",
+  willChange: "max-height, opacity, transform",
+};
+
+const whyBodyInner: React.CSSProperties = {
+  padding: 14,
+  background: "#fff",
+};
+
+const secWrap: React.CSSProperties = {
+  padding: 12,
+  borderRadius: 14,
+  border: "1px solid #eef0f2",
+  background: "#fafafa",
+  marginBottom: 10,
+};
+
+const secHead: React.CSSProperties = {
+  display: "flex",
+  gap: 10,
+  alignItems: "flex-start",
+};
+
+const secK: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: 12,
+  display: "grid",
+  placeItems: "center",
+  background: "#111",
+  color: "#fff",
+  fontWeight: 950,
+  fontSize: 13,
+  flex: "0 0 auto",
+};
+
+const secTitle: React.CSSProperties = {
+  fontWeight: 950,
+  color: "#111",
+  lineHeight: 1.2,
+};
+
+const secSub: React.CSSProperties = {
+  marginTop: 4,
+  fontSize: 12,
+  color: "#666",
+  lineHeight: 1.45,
+};
+
+const whyGrid2: React.CSSProperties = {
+  display: "grid",
+  gap: 10,
+  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+};
+
+const whyCard: React.CSSProperties = {
+  border: "1px solid #eef0f2",
+  borderRadius: 14,
+  padding: 12,
+  background: "#fff",
+};
+
+const whyCardTitle: React.CSSProperties = {
+  fontWeight: 900,
+  marginBottom: 8,
+  color: "#111",
+};
+
+const whyText: React.CSSProperties = {
+  color: "#333",
+  lineHeight: 1.55,
+  fontSize: 13,
+};
+
+const whyList: React.CSSProperties = {
+  margin: 0,
+  paddingLeft: 18,
+  color: "#333",
+  lineHeight: 1.55,
+};
+
+const whyCode: React.CSSProperties = {
+  fontFamily:
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
+  fontSize: 12,
+  background: "#f6f8fa",
+  border: "1px solid #e6e8eb",
+  padding: "1px 6px",
+  borderRadius: 8,
+};
+
+const pillRow: React.CSSProperties = {
+  marginTop: 10,
+  display: "flex",
+  gap: 8,
+  flexWrap: "wrap",
+};
+
+const pill: React.CSSProperties = {
+  display: "inline-flex",
+  padding: "4px 10px",
+  borderRadius: 999,
+  border: "1px solid #e6e8eb",
+  background: "#fafafa",
+  fontSize: 12,
+  fontWeight: 800,
+  color: "#444",
+};
+
+const bannerNote: React.CSSProperties = {
+  marginTop: 10,
+  padding: 12,
+  borderRadius: 14,
+  border: "1px solid #e6e8eb",
+  background: "#fafafa",
+  color: "#333",
+  lineHeight: 1.5,
+};
+
+const nextStep: React.CSSProperties = {
+  marginTop: 10,
+  padding: 12,
+  borderRadius: 14,
+  border: "1px solid #e6e8eb",
+  background: "#fff",
+  color: "#333",
+};
+
