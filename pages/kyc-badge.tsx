@@ -395,7 +395,7 @@ export default function KYCBadge() {
       gap: 8,
       borderRadius: 999,
       padding: "6px 12px",
-      fontSize: 12,
+      fontSize: 14,
       fontWeight: 900,
       border: "1px solid #e6e8eb",
       background: "#fff",
@@ -443,8 +443,8 @@ export default function KYCBadge() {
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
             <div>
               <h3 style={{ margin: 0 }}>Bank issuer panel</h3>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-                This panel will <strong>auto-claim operator role</strong> before issuing/revoking.
+              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
+                This panel simulates the bank's POV when issuing/revoking a KYC badge for a customer.
               </div>
             </div>
             <a
@@ -510,7 +510,7 @@ export default function KYCBadge() {
         {/* Verifier UI */}
         <div style={card}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0 }}>Verifier UI (no wallet required)</h3>
+            <h3 style={{ margin: 0 }}>Verifier POV (no wallet required)</h3>
             {badgePill}
           </div>
 
@@ -533,7 +533,7 @@ export default function KYCBadge() {
                 </div>
                 <div style={miniCard}>
                   <div style={miniTitle}>Valid until</div>
-                  <div style={{ color: "#333", fontSize: 13 }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
+                  <div style={{ color: "#333", fontSize: 14 }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
                 </div>
               </div>
 
@@ -547,7 +547,7 @@ export default function KYCBadge() {
           {/* ✅ Hydration-safe now */}
           <div style={{ ...note, marginTop: 12 }}>
             <strong>Share link:</strong>{" "}
-            <span style={{ fontFamily: "monospace", fontSize: 12, wordBreak: "break-all" }}>
+            <span style={{ fontFamily: "monospace", fontSize: 14, wordBreak: "break-all" }}>
               {shareUrl || "—"}
             </span>
           </div>
@@ -797,7 +797,7 @@ const whyTitle: React.CSSProperties = {
 };
 
 const whyMiniTag: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 14,
   fontWeight: 900,
   padding: "4px 8px",
   borderRadius: 999,
@@ -807,14 +807,14 @@ const whyMiniTag: React.CSSProperties = {
 };
 
 const whySubtitle: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: 14,
   color: "#666",
   lineHeight: 1.45,
   maxWidth: 720,
 };
 
 const whyHint: React.CSSProperties = {
-  fontSize: 12,
+  fontSize: 14,
   color: "#666",
   fontWeight: 800,
 };
@@ -850,12 +850,12 @@ const secK: React.CSSProperties = {
   background: "#111",
   color: "#fff",
   fontWeight: 950,
-  fontSize: 12,
+  fontSize: 14,
   flex: "0 0 auto",
 };
 
 const secTitle: React.CSSProperties = {
-  fontSize: 13,
+  fontSize: 14,
   fontWeight: 950,
   color: "#111",
   lineHeight: 1.25,
@@ -863,7 +863,7 @@ const secTitle: React.CSSProperties = {
 
 const secSub: React.CSSProperties = {
   marginTop: 4,
-  fontSize: 12,
+  fontSize: 14,
   color: "#666",
   lineHeight: 1.45,
 };
@@ -884,13 +884,13 @@ const whyCard: React.CSSProperties = {
 const whyCardTitle: React.CSSProperties = {
   fontWeight: 950,
   color: "#111",
-  fontSize: 12,
+  fontSize: 14,
   letterSpacing: "0.01em",
 };
 
 const whyCardText: React.CSSProperties = {
   marginTop: 6,
-  fontSize: 12,
+  fontSize: 14,
   color: "#444",
   lineHeight: 1.5,
 };
@@ -903,7 +903,7 @@ const whyPills: React.CSSProperties = {
 };
 
 const whyPill: React.CSSProperties = {
-  fontSize: 11,
+  fontSize: 14,
   fontWeight: 900,
   padding: "4px 8px",
   borderRadius: 999,
@@ -919,7 +919,7 @@ const whyNote: React.CSSProperties = {
   border: "1px solid #e6e8eb",
   background: "#f9fafb",
   color: "#333",
-  fontSize: 12,
+  fontSize: 14,
   lineHeight: 1.5,
 };
 
@@ -939,7 +939,7 @@ function Pill({ state, label }: { state: "on" | "off" | "revoked"; label: string
         gap: 8,
         borderRadius: 999,
         padding: "6px 10px",
-        fontSize: 12,
+        fontSize: 14,
         fontWeight: 900,
         border: "1px solid #e6e8eb",
         background: bg,
@@ -974,7 +974,7 @@ const miniTitle: React.CSSProperties = { fontWeight: 900, marginBottom: 6 };
 const mono: React.CSSProperties = {
   fontFamily:
     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 12,
+  fontSize: 14,
   wordBreak: "break-all",
 };
 
@@ -1030,14 +1030,14 @@ const linkBtn: React.CSSProperties = {
   color: "#111",
   fontWeight: 900,
   textDecoration: "none",
-  fontSize: 12,
+  fontSize: 14,
 };
 
 const checkRow: React.CSSProperties = {
   display: "flex",
   alignItems: "center",
   gap: 8,
-  fontSize: 13,
+  fontSize: 14,
   color: "#333",
   marginTop: 6,
 };

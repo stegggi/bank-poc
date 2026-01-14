@@ -1168,7 +1168,7 @@ for (let i = 0; i < logs.length; i += 1) {
                   padding: 10,
                   borderRadius: 8,
                   background: "#e6f9f0",
-                  fontSize: 12,
+                  fontSize: 24,
                 }}
               >
                 <p style={{ margin: 0, marginBottom: 4 }}>
@@ -1713,7 +1713,7 @@ for (let i = 0; i < logs.length; i += 1) {
             <h3 style={{ marginTop: 0 }}>Directory Registry</h3>
             <p style={{ fontSize: 12, color: "#777", marginTop: 6 }}>
               This table reads the on-chain DirectoryRegistry. For HPKE to work,
-              Bank B must have a non-empty HPKE public key stored on-chain.
+              the receiving must have a non-empty HPKE public key stored on-chain.
             </p>
 
             <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -2061,7 +2061,7 @@ function WhyThisMatters({ pendingCount, ackedCount }: { pendingCount: number; ac
   }, [open]);
 
   const inboxLabel =
-    pendingCount > 0 ? `Inbox: ${pendingCount} pending` : ackedCount > 0 ? `ACKs sent: ${ackedCount}` : "Inbox clear ✅";
+    pendingCount > 0 ? `Inbox: ${pendingCount} pending` : ackedCount > 0 ? `ACKs sent: ${ackedCount}` : "";
 
   return (
     <div style={whyStickyWrap}>

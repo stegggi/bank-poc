@@ -265,7 +265,7 @@ export default function Home() {
                 <StepList
                   steps={[
                     <>
-                      Log in to <strong>eBanking</strong> with the demo password.
+                      Log in to <strong>eBanking</strong> with the demo password (finalix).
                     </>,
                     <>
                       Click <strong>Log-in or create wallet</strong> to open your <strong>embedded wallet</strong>.
@@ -298,8 +298,7 @@ export default function Home() {
                 <div style={insightBox}>
                   <div style={insightTitle}>Your assets are real on-chain</div>
                   <div style={insightText}>
-                    The wallet address and ERC-20 balances are public (that’s how blockchains work). What stays private
-                    comes later: the travel-rule details are encrypted.
+                    The wallet address and ERC-20 balances are public (that’s how blockchains work).
                   </div>
                 </div>
               </div>
@@ -307,7 +306,7 @@ export default function Home() {
 
             <div style={{ marginTop: 14 }}>
               <FlowBlock
-                title={<>Wallet issuance + xBank purchase (what happens on-chain)</>}
+                title={<>What happens on-chain</>}
                 steps={FLOW1_STEPS}
                 footerTags={[
                   {
@@ -451,7 +450,7 @@ export default function Home() {
 
             <div style={{ marginTop: 14 }}>
               <FlowBlock
-                title={<>Interbank payment: encrypt → ACK → transfer (what happens on-chain)</>}
+                title={<>What happens on-chain</>}
                 steps={FLOW2_STEPS}
                 footerTags={[
                   { kind: "public", text: "The chain can see an envelope was posted and its txRef." },
@@ -539,7 +538,7 @@ export default function Home() {
 
             <div style={{ marginTop: 14 }}>
               <FlowBlock
-                title={<>KYC badge: issue → verify → revoke (what happens on-chain)</>}
+                title={<>What happens on-chain</>}
                 steps={FLOW3_STEPS}
                 footerTags={[
                   { kind: "public", text: "Badge validity / expiry / revocation is publicly verifiable." },

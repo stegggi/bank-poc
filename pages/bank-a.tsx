@@ -554,7 +554,7 @@ export default function BankA() {
       setStatus("Sending xBank transfer…");
       const tx = await signer.sendTransaction({ to: XBANK, data });
       setPaymentTxHash(tx.hash as `0x${string}`);
-      setStatus(`Sent!`);
+      setStatus(`Sent! Interbank payment complete. ${arbTx(tx.hash)}`);
       await refreshXBankBalances(from);
     } catch (e: any) {
       setStatus(`Send failed: ${e?.message ?? e}`);
@@ -894,7 +894,7 @@ function WhyThisMatters({ requireAck, ackSeen }: { requireAck: boolean; ackSeen:
     return () => window.removeEventListener("resize", update);
   }, [open]);
 
-  const ackModeLabel = requireAck ? (ackSeen ? "ACK received ✅" : "ACK required ⏳") : "ACK disabled";
+  const ackModeLabel = requireAck ? (ackSeen ? "ACK received ✅" : "") : "ACK disabled";
 
   return (
     <div style={whyStickyWrap}>
@@ -1191,7 +1191,7 @@ const whyBodyOuter: React.CSSProperties = {
 
 const whyBodyInner: React.CSSProperties = {
   padding: 14,
-  background: "#fff",
+  background: "#eee",
 };
 
 const secWrap: React.CSSProperties = {
