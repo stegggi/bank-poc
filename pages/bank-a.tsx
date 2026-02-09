@@ -577,7 +577,9 @@ export default function BankA() {
     return (
       <>
         <NavBar active="bankA" />
-        <div style={{ padding: 24 }}>Loading…</div>
+        <div style={bankAccentWrap}>
+          <div style={{ padding: 24 }}>Loading…</div>
+        </div>
       </>
     );
   }
@@ -585,7 +587,8 @@ export default function BankA() {
   return (
     <>
       <NavBar active="bankA" />
-      <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
+      <div style={bankAccentWrap}>
+        <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
         <h2>Travel-rule complaint payment (Bank A)</h2>
 
         {/* Wallet summary */}
@@ -872,6 +875,7 @@ export default function BankA() {
 
         {/* ✅ Premium sticky accordion: Why this matters */}
         <WhyThisMatters requireAck={requireAck} ackSeen={ackSeen} />
+        </div>
       </div>
     </>
   );
@@ -1311,4 +1315,8 @@ const nextStep: React.CSSProperties = {
   border: "1px solid #e6e8eb",
   background: "#fff",
   color: "#333",
+};
+
+const bankAccentWrap: React.CSSProperties = {
+  background: "linear-gradient(180deg, rgba(64, 118, 255, 0.10) 0%, rgba(255,255,255,0) 220px)",
 };

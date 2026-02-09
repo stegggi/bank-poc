@@ -10,6 +10,7 @@ type NavActive =
   | "bankA"
   | "bankB"
   | "kyc-badge"
+  | "context-vault"
   // placeholders (safe even if you never pass these)
   | "uc4"
   | "uc5"
@@ -22,6 +23,7 @@ export default function NavBar({ active }: NavBarProps) {
   const isBankA = active === "bank-a" || active === "bankA";
   const isBankB = active === "bank-b" || active === "bankB";
   const isKyc = active === "kyc-badge";
+  const isUc4 = active === "uc4" || active === "context-vault";
 
   const groups = useMemo<
     Array<{
@@ -65,11 +67,18 @@ export default function NavBar({ active }: NavBarProps) {
           pills: [{ href: "/kyc-badge", label: "KYC badge", on: isKyc }],
         },
       },
+      {
+        uc: "UC4",
+        title: "Context Passport",
+        items: {
+          kind: "pills",
+          pills: [{ href: "/context-vault", label: "Context vault", on: isUc4 }],
+        },
+      },
 
       // Placeholders (disabled so they don’t navigate)
-      
     ],
-    [active, isBankA, isBankB, isKyc]
+    [active, isBankA, isBankB, isKyc, isUc4]
   );
 
   return (
@@ -125,7 +134,7 @@ export default function NavBar({ active }: NavBarProps) {
         {/* Left: Brand + Home icon */}
         <div style={styles.left}>
           <div style={styles.brand}>
-            <span style={{ fontWeight: 950, letterSpacing: -0.2 }}>finalix</span>
+            <span style={{ fontWeight: 950, letterSpacing: -0.2 }}>blockchain</span>
             <span style={{ opacity: 0.6, marginLeft: 6 }}>concept bank</span>
           </div>
 
@@ -143,12 +152,7 @@ export default function NavBar({ active }: NavBarProps) {
                 : g.items.left.on || g.items.right.on;
 
             return (
-              <UseCaseCluster
-                key={g.uc}
-                uc={g.uc}
-                title={g.title}
-                active={clusterActive}
-              >
+              <UseCaseCluster key={g.uc} uc={g.uc} title={g.title} active={clusterActive}>
                 {g.items.kind === "pills" ? (
                   <div style={styles.pillRow}>
                     {g.items.pills.map((p) => (
@@ -550,7 +554,7 @@ const styles: Record<string, CSSProperties> = {
     display: "flex",
     alignItems: "center",
     justifyContent: "space-between",
-    gap: 12,
+    gap: 18,
     flexWrap: "nowrap",
   },
   left: {

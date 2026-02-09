@@ -338,14 +338,14 @@ export default function EBanking() {
             </div>
 
             <div style={panel}>
-              <h3>Crypto Wallet</h3>
+              <h3>Crypto Wallet (EVM) </h3>
 
               {!authenticated ? (
                 <button onClick={onLoginOrOpen}>Log-in or create wallet</button>
               ) : (
                 <>
                   <p>
-                    <strong>Wallet Address (EOA):</strong>{' '}
+                    <strong>Wallet Address:</strong>{' '}
                     {eoa ? (
                       <>
                         <span style={{ fontFamily: 'monospace' }}>{eoa}</span>{' '}

@@ -1082,7 +1082,9 @@ for (let i = 0; i < logs.length; i += 1) {
     return (
       <>
         <NavBar active="bankB" />
-        <div style={{ padding: 24 }}>Loading…</div>
+        <div style={bankAccentWrap}>
+          <div style={{ padding: 24 }}>Loading…</div>
+        </div>
       </>
     );
   }
@@ -1090,7 +1092,8 @@ for (let i = 0; i < logs.length; i += 1) {
   return (
     <>
       <NavBar active="bankB" />
-      <div style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
+      <div style={bankAccentWrap}>
+        <div style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
         <h2 style={{ marginTop: 0, marginBottom: 8 }}>Travel-rule compliant receiving (Bank B)</h2>
 
         {/* Receiver wallet summary (fixed beneficiary address) */}
@@ -2036,6 +2039,7 @@ for (let i = 0; i < logs.length; i += 1) {
         {/* ✅ Premium sticky accordion: Why this matters */}
         <WhyThisMatters pendingCount={pendingCount} ackedCount={ackedCount} />
 
+        </div>
       </div>
     </>
   );
@@ -2452,6 +2456,10 @@ const pill: React.CSSProperties = {
   color: "#444",
 };
 
+const bankAccentWrap: React.CSSProperties = {
+  background: "linear-gradient(180deg, rgba(46, 170, 110, 0.10) 0%, rgba(255,255,255,0) 220px)",
+};
+
 const bannerNote: React.CSSProperties = {
   marginTop: 10,
   padding: 12,
@@ -2470,4 +2478,3 @@ const nextStep: React.CSSProperties = {
   background: "#fff",
   color: "#333",
 };
-

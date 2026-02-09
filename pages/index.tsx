@@ -26,159 +26,6 @@ type FlowStep = {
   onChain: ReactNode;
 };
 
-const FLOW1_STEPS: FlowStep[] = [
-  {
-    whatYouDo: (
-      <>
-        Log in to <strong>eBanking</strong> and open/create your embedded wallet.
-      </>
-    ),
-    onChain: (
-      <>
-        No transaction yet — the wallet is created via <strong>Privy</strong> (seedless), and you get an address you
-        can use on-chain.
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        If your wallet is new, you’ll receive a <strong>bank-sponsored ETH top-up</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        A tiny amount of test ETH is sent to your wallet so your first transactions can succeed (gas sponsorship).
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        Click <strong>Buy 100 xBank</strong> (demo purchase).
-      </>
-    ),
-    onChain: (
-      <>
-        The <strong>xBank ERC-20</strong> contract credits your wallet (mint/transfer), so your token balance becomes
-        visible on-chain.
-      </>
-    ),
-  },
-];
-
-const FLOW2_STEPS: FlowStep[] = [
-  {
-    whatYouDo: (
-      <>
-        In <strong>Bank A</strong>, enter travel‑rule minimum fields (originator + beneficiary + purpose).
-      </>
-    ),
-    onChain: (
-      <>
-        Bank A reads <strong>Bank B’s public encryption key</strong> from the on-chain Directory (routing + keys).
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        Click <strong>Encrypt &amp; post request</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        The Payment Hub records a submission keyed by <strong>txRef</strong> plus an <strong>encrypted envelope</strong>{" "}
-        (emitted as an event).
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        In <strong>Bank B</strong>, refresh incoming requests and review the decrypted payload.
-      </>
-    ),
-    onChain: (
-      <>
-        Bank B scans hub events on-chain; decryption happens <strong>off-chain</strong> using Bank B’s private key.
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        If required, Bank B clicks <strong>ACK</strong> (or reject for the demo).
-      </>
-    ),
-    onChain: (
-      <>
-        An <strong>ACK transaction</strong> is written to the hub (a small approval signal that Bank A can verify).
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        Back in <strong>Bank A</strong>, click <strong>Send payment</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        The xBank ERC‑20 transfer executes to the receiver wallet address (after ACK, if the toggle is enabled).
-      </>
-    ),
-  },
-];
-
-const FLOW3_STEPS: FlowStep[] = [
-  {
-    whatYouDo: (
-      <>
-        Open <strong>KYC Badge</strong>. As the “bank operator”, log in with your embedded wallet.
-      </>
-    ),
-    onChain: <>No transaction yet — you’re just preparing an operator session.</>,
-  },
-  {
-    whatYouDo: (
-      <>
-        Issue (or renew) a badge for a target wallet: set <strong>validity</strong> + <strong>claims</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        The KYC Badge contract writes a revocable attestation registry on-chain status record (expiry + claims). If needed, the operator role is
-        auto-claimed first.
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        Share the verification link. Anyone can paste an address and click <strong>Verify</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        The verifier performs a <strong>read</strong> call (no wallet required) to check “valid / expired / revoked”.
-      </>
-    ),
-  },
-  {
-    whatYouDo: (
-      <>
-        If risk changes (or a key export is requested), click <strong>Revoke</strong>.
-      </>
-    ),
-    onChain: (
-      <>
-        A revocation transaction is recorded. From that moment on, verifiers see the badge as <strong>revoked</strong>.
-      </>
-    ),
-  },
-];
-
 export default function Home() {
   const envStatus = useMemo(() => {
     const missing: string[] = [];
@@ -215,7 +62,7 @@ export default function Home() {
               </h1>
 
               <p style={heroSub}>
-                A bank-grade, hands-on exploration of blockchain-based payment infrastructure solutions; <br />Make the customer relationship, operating model, and economics tangible in a real on-chain environment.
+                A bank-grade, hands-on exploration of blockchain-based payment infrastructure solutions. <br />Make the customer relationship, operating model, and economics tangible in a real on-chain environment.
               </p>
 
               {!envStatus.ok && (
@@ -304,18 +151,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <FlowBlock
-                title={<>What happens on-chain</>}
-                steps={FLOW1_STEPS}
-                footerTags={[
-                  {
-                    kind: "public",
-                    text: "Wallet address + ERC-20 balances are public (normal for blockchains).",
-                  },
-                ]}
-              />
-            </div>
           </div>
         </section>
 
@@ -448,17 +283,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <FlowBlock
-                title={<>What happens on-chain</>}
-                steps={FLOW2_STEPS}
-                footerTags={[
-                  { kind: "public", text: "The chain can see an envelope was posted and its txRef." },
-                  { kind: "private", text: "The travel-rule details inside the envelope are encrypted." },
-                ]}
-              />
-            </div>
-
             <div style={twoWindowBanner}>
               <div style={{ fontWeight: 900, marginBottom: 4 }}>Two-window tip</div>
               <div style={{ fontSize: 14, lineHeight: 1.45 }}>
@@ -536,16 +360,6 @@ export default function Home() {
               </div>
             </div>
 
-            <div style={{ marginTop: 14 }}>
-              <FlowBlock
-                title={<>What happens on-chain</>}
-                steps={FLOW3_STEPS}
-                footerTags={[
-                  { kind: "public", text: "Badge validity / expiry / revocation is publicly verifiable." },
-                  { kind: "private", text: "Full KYC evidence stays off-chain; only a status proof is anchored on-chain." },
-                ]}
-              />
-            </div>
           </div>
         </section>
 
