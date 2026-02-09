@@ -52,13 +52,15 @@ function normalizeBase64(input: string): string {
     .trim()
     .replace(/\s+/g, "")
     .replace(/-/g, "+")
-    .replace(/_/g, "/");
-  const pad = cleaned.length % 4;
-  if (pad === 0) return cleaned;
-  return cleaned + "=".repeat(4 - pad);
+    .replace(/_/g, "/")
+    .replace(/^"+|"+$/g, "");
+  const base = cleaned.replace(/[^A-Za-z0-9+/=]/g, "");
+  const pad = base.length % 4;
+  if (pad === 0) return base;
+  return base + "=".repeat(4 - pad);
 }
 
-function b64ToBytes(b64: string): Uint8Array {
+export function b64ToBytes(b64: string): Uint8Array {
   const binary = atob(normalizeBase64(b64));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
@@ -154,7 +156,8 @@ function pemToArrayBufferSpki(pem: string): ArrayBuffer {
   const cleaned = String(pem || "")
     .replace(/-----BEGIN[^-]+-----/g, "")
     .replace(/-----END[^-]+-----/g, "")
-    .replace(/\s+/g, "");
+    .replace(/\s+/g, "")
+    .replace(/^"+|"+$/g, "");
   const binary = atob(normalizeBase64(cleaned));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);

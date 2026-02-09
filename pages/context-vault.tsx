@@ -8,6 +8,7 @@ import {
   BankWrappedDekV1,
   decryptAesGcm,
   downloadJson,
+  b64ToBytes,
   encryptAesGcm,
   sha256Hex,
   toBankStoredPackage,
@@ -613,7 +614,7 @@ export default function ContextVaultPage() {
 
       const plaintext = buildPlaintextForSelectedModule();
       const enc = await encryptAesGcm(plaintext);
-      const ciphertextBytes = Uint8Array.from(atob(enc.ciphertextB64), (c) => c.charCodeAt(0));
+      const ciphertextBytes = b64ToBytes(enc.ciphertextB64);
       const contentHash = ethers.keccak256(ciphertextBytes);
       const policyHash = ethers.keccak256(utf8ToBytes(policy));
 
