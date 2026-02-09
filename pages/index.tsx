@@ -363,6 +363,74 @@ export default function Home() {
           </div>
         </section>
 
+        {/* USE CASE 4 */}
+        <section style={{ marginTop: 16 }}>
+          <div style={useCaseCard}>
+            <div style={useCaseHeader}>
+              <div>
+                <div style={useCaseEyebrow}>Use case 4</div>
+                <h2 style={{ margin: 0 }}>Context passport for banking AI agents</h2>
+                <div style={useCaseSub}>
+                  Customers create KYC context modules and grant banks AI agents time‑bound access. Allowing the bank to serve the client better while keeping the customer in control of their data.
+                </div>
+              </div>
+              <div style={useCaseActions}>
+                <Link href="/context-vault" style={btnSecondary}>
+                  Open context vault →
+                </Link>
+              </div>
+            </div>
+
+            <div style={twoPane}>
+              <div style={pane}>
+                <div style={paneTitle}>Flow (what you do)</div>
+                <StepList
+                  steps={[
+                    <>
+                      Log in as the customer and select a module (Suitability, Sustainability, Service Scope).
+                    </>,
+                    <>
+                      Fill in preferences and click <strong>Save module</strong> to encrypt locally.
+                    </>,
+                    <>
+                      As a bank, request access for a purpose via MetaMask.
+                    </>,
+                    <>
+                      Back as the customer, click <strong>Grant</strong> — the bank can now load &amp; decrypt.
+                    </>,
+                  ]}
+                />
+              </div>
+
+              <div style={pane}>
+                <div style={paneTitle}>What you’ll notice</div>
+
+                <div style={insightBox}>
+                  <div style={insightTitle}>Customer‑owned portability</div>
+                  <div style={insightText}>
+                    Modules can be exported and reused across bank's AI agents without re‑entering data.
+                  </div>
+                </div>
+
+                <div style={insightBox}>
+                  <div style={insightTitle}>Consent is enforceable</div>
+                  <div style={insightText}>
+                    Grants are on‑chain, time‑bound, and revocable — banks can’t decrypt without explicit consent.
+                  </div>
+                </div>
+
+                <div style={insightBox}>
+                  <div style={insightTitle}>No plaintext in bank storage</div>
+                  <div style={insightText}>
+                    Banks store ciphertext + wrapped keys; the plaintext never leaves the customer’s device.
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </section>
+
         <p style={{ color: "#777", marginTop: 24, fontSize: 14 }}>
           Prototype for discussion. Use testnet only. Don’t send real funds.
         </p>
