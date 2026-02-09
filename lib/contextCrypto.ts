@@ -47,8 +47,19 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(binary);
 }
 
+function normalizeBase64(input: string): string {
+  const cleaned = String(input || "")
+    .trim()
+    .replace(/\s+/g, "")
+    .replace(/-/g, "+")
+    .replace(/_/g, "/");
+  const pad = cleaned.length % 4;
+  if (pad === 0) return cleaned;
+  return cleaned + "=".repeat(4 - pad);
+}
+
 function b64ToBytes(b64: string): Uint8Array {
-  const binary = atob(b64);
+  const binary = atob(normalizeBase64(b64));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes;
@@ -140,11 +151,11 @@ export async function decryptAesGcm(ciphertextB64: string, ivB64: string, dekB64
 // ---- RSA-OAEP wrap (demo key release) ----
 
 function pemToArrayBufferSpki(pem: string): ArrayBuffer {
-  const cleaned = pem
-    .replace("-----BEGIN PUBLIC KEY-----", "")
-    .replace("-----END PUBLIC KEY-----", "")
+  const cleaned = String(pem || "")
+    .replace(/-----BEGIN[^-]+-----/g, "")
+    .replace(/-----END[^-]+-----/g, "")
     .replace(/\s+/g, "");
-  const binary = atob(cleaned);
+  const binary = atob(normalizeBase64(cleaned));
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
   return bytes.buffer;

@@ -1238,7 +1238,7 @@ export default function ContextVaultPage() {
     <>
       <NavBar active="context-vault" />
       <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 8 }}>Context Passport for AI Agents</h2>
+        <h2 style={{ marginTop: 0, marginBottom: 8 }}>AI Context Passport</h2>
         <p style={{ marginTop: 0, color: "#555", lineHeight: 1.55 }}>
           Customer-owned encrypted context modules with onchain consent and <b>per-bank storage</b>. Banks can store ciphertext, but only decrypt after explicit consent.
         </p>
