@@ -54,6 +54,12 @@ function b64ToBytes(b64: string): Uint8Array {
   return bytes;
 }
 
+function toArrayBuffer(bytes: Uint8Array): ArrayBuffer {
+  // Force an ArrayBuffer-backed copy to satisfy WebCrypto typings in strict builds.
+  const copy = new Uint8Array(bytes);
+  return copy.buffer;
+}
+
 export function utf8ToBytes(s: string): Uint8Array {
   return new TextEncoder().encode(s);
 }
@@ -75,8 +81,7 @@ export function randomBytes32Hex(): string {
 
 export async function sha256Hex(data: Uint8Array): Promise<string> {
   // Ensure ArrayBuffer-backed view for WebCrypto (avoids SharedArrayBuffer typing issues in CI)
-  const input = new Uint8Array(data);
-  const digest = await crypto.subtle.digest("SHA-256", input);
+  const digest = await crypto.subtle.digest("SHA-256", toArrayBuffer(data));
   const bytes = new Uint8Array(digest);
   return "0x" + Array.from(bytes).map((x) => x.toString(16).padStart(2, "0")).join("");
 }
@@ -91,16 +96,16 @@ export async function encryptAesGcm(plaintext: string): Promise<{
 
   const key = await crypto.subtle.importKey(
     "raw",
-    dekRaw,
+    toArrayBuffer(dekRaw),
     { name: "AES-GCM" },
     false,
     ["encrypt"]
   );
 
   const ciphertext = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     key,
-    utf8ToBytes(plaintext)
+    toArrayBuffer(utf8ToBytes(plaintext))
   );
 
   return {
@@ -117,16 +122,16 @@ export async function decryptAesGcm(ciphertextB64: string, ivB64: string, dekB64
 
   const key = await crypto.subtle.importKey(
     "raw",
-    dekRaw,
+    toArrayBuffer(dekRaw),
     { name: "AES-GCM" },
     false,
     ["decrypt"]
   );
 
   const plaintext = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
+    { name: "AES-GCM", iv: toArrayBuffer(iv) },
     key,
-    ciphertext
+    toArrayBuffer(ciphertext)
   );
 
   return bytesToUtf8(new Uint8Array(plaintext));
@@ -155,7 +160,7 @@ export async function wrapDekRsaOaepB64(publicKeyPem: string, dekB64: string): P
     ["encrypt"]
   );
 
-  const enc = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, dekRaw);
+  const enc = await crypto.subtle.encrypt({ name: "RSA-OAEP" }, pubKey, toArrayBuffer(dekRaw));
   return bytesToB64(new Uint8Array(enc));
 }
 
