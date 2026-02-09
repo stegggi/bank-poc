@@ -16,7 +16,8 @@ function isBytes32(s: string): boolean {
 const BANK: "bank-a" | "bank-b" = "bank-b";
 function pemFromEnv(value?: string): string {
   if (!value) return "";
-  return value.includes("\\n") ? value.replace(/\\n/g, "\n") : value;
+  const cleaned = value.replace(/^"+|"+$/g, "").replace(/\r/g, "");
+  return cleaned.includes("\\n") ? cleaned.replace(/\\n/g, "\n") : cleaned;
 }
 function contextPath(bank: string, owner: string, moduleId: string): string {
   // Must match put() path in /api/bank/<bank>/context
