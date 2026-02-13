@@ -2,30 +2,44 @@
 """
 UC5 Ethereal Autopilot Bot (mainnet)
 
-- Reads config + commands from your Vercel dashboard
-- Stores price history + online-learning weights in SQLite
-- Places MARKET orders via linked signer (recommended) using ethereal-sdk
-- Posts status back to /api/uc5/bot/status
+Changes vs prior version:
+- NO high-frequency writes to Vercel Blob anymore (prevents Advanced Ops burn).
+- Runs a small HTTP telemetry server on the VPS:
+    GET /status  -> latest status JSON for the dashboard
+    GET /health  -> "ok"
+- Throttles dashboard reads (config/commands) so you don’t burn simple ops either.
 
 IMPORTANT:
 This is a demo trading bot. It can lose money. Start tiny (e.g. 100 USDe) and keep leverage low.
 """
 
-import os, time, json, math, sqlite3, requests, asyncio
-from dataclasses import dataclass
+import os, time, json, math, sqlite3, requests, asyncio, threading
 from typing import Optional, Dict, Any, List, Tuple
+from http.server import BaseHTTPRequestHandler, HTTPServer
 
 # ethereal-sdk (async)
 from ethereal.async_rest_client import AsyncRESTClient
 
+# ---- Env ----
 DASH_BASE = os.environ.get("UC5_DASHBOARD_BASE_URL", "").rstrip("/")
 BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
 BOT_PRIVKEY = os.environ.get("UC5_BOT_SIGNER_PRIVATE_KEY", "")  # linked signer EOA private key (0x...)
 
+DB_PATH = os.environ.get("UC5_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "uc5.sqlite"))
+
+# Telemetry server (VPS)
+TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
+TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
+
+# Reduce dashboard polling
+CFG_REFRESH_SECONDS = int(os.environ.get("UC5_CFG_REFRESH_SECONDS", "30"))      # config fetch at most every 30s
+CMDS_REFRESH_SECONDS = int(os.environ.get("UC5_CMDS_REFRESH_SECONDS", "5"))     # commands fetch at most every 5s
+
 if not DASH_BASE or not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_DASHBOARD_BASE_URL and/or UC5_BOT_TOKEN")
 
-DB_PATH = os.environ.get("UC5_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "uc5.sqlite"))
+def bot_headers() -> Dict[str,str]:
+  return {"x-uc5-bot-token": BOT_TOKEN}
 
 def http_get(path: str) -> Any:
   r = requests.get(f"{DASH_BASE}{path}", timeout=20)
@@ -39,10 +53,12 @@ def http_post(path: str, payload: Any, headers: Optional[Dict[str,str]]=None) ->
   r.raise_for_status()
   return r.json()
 
-def bot_headers() -> Dict[str,str]:
-  return {"x-uc5-bot-token": BOT_TOKEN}
-
+# ---- SQLite ----
 def db_connect():
+  # ensure parent directory exists (common SQLite error)
+  parent = os.path.dirname(os.path.abspath(DB_PATH))
+  os.makedirs(parent, exist_ok=True)
+
   conn = sqlite3.connect(DB_PATH)
   conn.execute("PRAGMA journal_mode=WAL;")
   conn.execute("""
@@ -96,7 +112,6 @@ def ensure_model(conn) -> List[float]:
   row = conn.execute("SELECT w0,w1,w2,w3,w4,w5,w6 FROM model WHERE id=1").fetchone()
   if row:
     return list(row)
-  # start near-neutral
   w = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
   conn.execute("INSERT INTO model(id,w0,w1,w2,w3,w4,w5,w6,updated_ms) VALUES (1,?,?,?,?,?,?,?,?)",
                (w[0],w[1],w[2],w[3],w[4],w[5],w[6], int(time.time()*1000)))
@@ -114,15 +129,6 @@ def last_prices(conn, n: int) -> List[Tuple[int,float]]:
   return rows
 
 def compute_features(conn) -> Tuple[List[float], str]:
-  """
-  Simple pattern features (starter):
-  f1: 1m return
-  f2: 5m return
-  f3: SMA(20)-SMA(60) normalized
-  f4: RSI(14) normalized
-  f5: short-term volatility (std of returns)
-  f6: oracle deviation (price-oracle)/oracle
-  """
   rows = last_prices(conn, 400)
   if len(rows) < 80:
     return [1.0, 0,0,0,0,0,0], "warming up (need more history)"
@@ -133,7 +139,6 @@ def compute_features(conn) -> Tuple[List[float], str]:
   def ret_over(ms_back: int) -> float:
     t_now = ts[-1]
     target = t_now - ms_back
-    # find first ts >= target
     i = 0
     while i < len(ts) and ts[i] < target:
       i += 1
@@ -147,8 +152,7 @@ def compute_features(conn) -> Tuple[List[float], str]:
 
   def sma(window: int) -> float:
     if len(px) < window: return sum(px)/len(px)
-    s = sum(px[-window:])
-    return s / window
+    return sum(px[-window:]) / window
 
   sma20 = sma(20)
   sma60 = sma(60)
@@ -164,7 +168,7 @@ def compute_features(conn) -> Tuple[List[float], str]:
   rsi = 100.0 - (100.0 / (1.0 + rs))
   rsi_n = (rsi - 50.0) / 50.0  # -1..+1
 
-  # volatility
+  # volatility (last ~60 returns)
   rets = []
   for i in range(max(1, len(px)-60), len(px)):
     rets.append((px[i]/px[i-1]) - 1.0)
@@ -172,12 +176,10 @@ def compute_features(conn) -> Tuple[List[float], str]:
   var = sum((x-mu)*(x-mu) for x in rets)/max(1, len(rets)-1)
   vol = math.sqrt(var)
 
-  # oracle deviation (use last oracle from prices table if present)
   row = conn.execute("SELECT oracle FROM prices ORDER BY ts_ms DESC LIMIT 1").fetchone()
   oracle = row[0] if row else None
   dev = ((px[-1] - oracle)/oracle) if (oracle and oracle > 0) else 0.0
 
-  # intercept + 6 features
   feats = [1.0, r1m, r5m, trend, rsi_n, vol, dev]
   reason = f"r1m={r1m:.4f}, r5m={r5m:.4f}, trend={trend:.4f}, rsiN={rsi_n:.3f}, vol={vol:.5f}, dev={dev:.5f}"
   return feats, reason
@@ -187,13 +189,8 @@ def predict(w: List[float], feats: List[float]) -> float:
   return sigmoid(x)
 
 def train_online(conn, w: List[float], lr: float = 0.5):
-  """
-  Once horizon has passed, label decision y (1 if price went up vs decision time).
-  Then run one SGD step per labeled row.
-  """
-  # find unlabeled decisions older than horizon
   rows = conn.execute("""
-    SELECT id, ts_ms, horizon_sec, f1,f2,f3,f4,f5,f6, trained
+    SELECT id, ts_ms, horizon_sec, f1,f2,f3,f4,f5,f6
     FROM decisions
     WHERE y IS NULL
     ORDER BY id ASC
@@ -203,10 +200,8 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   if not rows:
     return w
 
-  # need future price to label
-  for (did, ts_ms, horizon, f1,f2,f3,f4,f5,f6, trained) in rows:
+  for (did, ts_ms, horizon, f1,f2,f3,f4,f5,f6) in rows:
     future_ts = ts_ms + int(horizon*1000)
-    # get price at/after future_ts
     fut = conn.execute("SELECT price FROM prices WHERE ts_ms >= ? ORDER BY ts_ms ASC LIMIT 1", (future_ts,)).fetchone()
     nowp = conn.execute("SELECT price FROM prices WHERE ts_ms = ?", (ts_ms,)).fetchone()
     if not fut or not nowp:
@@ -216,17 +211,16 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   conn.commit()
 
   labeled = conn.execute("""
-    SELECT id, p_up, f1,f2,f3,f4,f5,f6, y, trained
+    SELECT id, f1,f2,f3,f4,f5,f6, y
     FROM decisions
     WHERE y IS NOT NULL AND trained=0
     ORDER BY id ASC
     LIMIT 200
   """).fetchall()
 
-  for (did, p_up, f1,f2,f3,f4,f5,f6, y, trained) in labeled:
+  for (did, f1,f2,f3,f4,f5,f6, y) in labeled:
     feats = [1.0, f1,f2,f3,f4,f5,f6]
     p = predict(w, feats)
-    # gradient of logloss: (p - y) * x
     err = (p - y)
     for i in range(len(w)):
       w[i] = w[i] - lr * err * feats[i]
@@ -234,20 +228,50 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   conn.commit()
   return w
 
+# ---- Telemetry server (in-memory latest status) ----
+LATEST_STATUS: Dict[str, Any] = {"bot": {"alive": False, "message": "starting"}}
+STATUS_LOCK = threading.Lock()
+
+class TelemetryHandler(BaseHTTPRequestHandler):
+  def _send_json(self, code: int, obj: Any):
+    body = json.dumps(obj).encode("utf-8")
+    self.send_response(code)
+    self.send_header("Content-Type", "application/json")
+    # If you call this directly from browser, CORS helps. If you proxy via Vercel, it’s harmless.
+    self.send_header("Access-Control-Allow-Origin", "*")
+    self.send_header("Cache-Control", "no-store")
+    self.end_headers()
+    self.wfile.write(body)
+
+  def do_GET(self):
+    if self.path.startswith("/health"):
+      return self._send_json(200, {"ok": True})
+    if self.path.startswith("/status"):
+      with STATUS_LOCK:
+        data = LATEST_STATUS
+      return self._send_json(200, data)
+    return self._send_json(404, {"error": "not found"})
+
+  def log_message(self, format, *args):
+    # silence default request logs
+    return
+
+def start_telemetry_server():
+  srv = HTTPServer((TELEMETRY_HOST, TELEMETRY_PORT), TelemetryHandler)
+  t = threading.Thread(target=srv.serve_forever, daemon=True)
+  t.start()
+  return srv
+
+# ---- Trading helpers ----
 async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: AsyncRESTClient) -> Dict[str,Any]:
-  """
-  Finalize LINK_SIGNER by providing signerSignature (bot) and calling Ethereal endpoint.
-  """
   eth_base = cfg["etherealApiBase"]
   payload = cmd["payload"]
 
-  # fetch EIP712 domain
   rpc = requests.get(f"{eth_base}/v1/rpc/config", timeout=20).json()
   domain = rpc.get("domain")
   if not domain:
     raise RuntimeError("Could not fetch /v1/rpc/config domain")
 
-  # build typed data dict for eth-account compatible signing
   typed = {
     "types": {
       "EIP712Domain": [
@@ -275,11 +299,8 @@ async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: As
     },
   }
 
-  # ethereal-sdk uses eth-account under the hood; easiest is to use its signing utilities indirectly:
-  # We'll sign by using client._account (internal). If SDK changes, we fall back to raw eth_account.
   signer_sig = None
   try:
-    # best-effort: use client.account if available
     acct = getattr(client, "_account", None) or getattr(client, "account", None)
     if acct is None:
       raise Exception("no account on client")
@@ -287,7 +308,6 @@ async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: As
     msg = encode_typed_data(full_message=typed)
     signer_sig = acct.sign_message(msg).signature.hex()
   except Exception:
-    # fallback
     from eth_account import Account
     from eth_account.messages import encode_typed_data
     acct = Account.from_key(BOT_PRIVKEY)
@@ -313,11 +333,10 @@ async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: As
   return r.json()
 
 async def place_close(client: AsyncRESTClient, ticker: str):
-  # Ethereal: close entire position => close=True + reduce_only=True + quantity="0" on MARKET
   await client.create_order(
     order_type="MARKET",
     quantity="0",
-    side="BUY",  # ignored when close=True; SDK may still require a side; it will close regardless
+    side="BUY",
     price=None,
     ticker=ticker,
     reduce_only=True,
@@ -325,36 +344,60 @@ async def place_close(client: AsyncRESTClient, ticker: str):
   )
 
 async def main():
+  # Start telemetry server immediately
+  start_telemetry_server()
+
   conn = db_connect()
   w = ensure_model(conn)
 
-  # build client (linked signer key)
   if not BOT_PRIVKEY:
     raise SystemExit("Missing env UC5_BOT_SIGNER_PRIVATE_KEY (bot signer private key).")
 
-  # We'll initialize client lazily after config load (needs api_url)
   client: Optional[AsyncRESTClient] = None
-  last_order_ts = []  # timestamps of orders (rate limit)
+  last_order_ts: List[float] = []
   last_position_opened_ms: Optional[int] = None
+
+  # Cache config + commands so you don’t hammer Vercel (and Blob reads)
+  cfg_cache: Optional[Dict[str, Any]] = None
+  cfg_last_fetch = 0.0
+  cmds_last_fetch = 0.0
+  cmds_cache: List[Dict[str, Any]] = []
+
+  def get_cfg() -> Dict[str, Any]:
+    nonlocal cfg_cache, cfg_last_fetch
+    now = time.time()
+    if cfg_cache is None or (now - cfg_last_fetch) >= CFG_REFRESH_SECONDS:
+      cfg_cache = http_get("/api/uc5/config")
+      cfg_last_fetch = now
+    return cfg_cache
+
+  def get_cmds() -> List[Dict[str, Any]]:
+    nonlocal cmds_cache, cmds_last_fetch
+    now = time.time()
+    if (now - cmds_last_fetch) >= CMDS_REFRESH_SECONDS:
+      cmds_file = requests.get(f"{DASH_BASE}/api/uc5/bot/commands", headers=bot_headers(), timeout=20).json()
+      cmds_cache = cmds_file.get("commands", [])
+      cmds_last_fetch = now
+    return cmds_cache
 
   while True:
     loop_started = time.time()
+    status_payload: Dict[str, Any] = {}
+
     try:
-      cfg = http_get("/api/uc5/config")
+      cfg = get_cfg()
+
       if client is None:
         client = await AsyncRESTClient.create(
           private_key=BOT_PRIVKEY,
           api_url=cfg.get("etherealApiBase", "https://api.ethereal.trade"),
-          chain_rpc_url="https://rpc.ethereal.trade",  # not used for REST-only actions, ok
+          chain_rpc_url="https://rpc.ethereal.trade",
           subaccount="primary",
         )
 
-      # Commands
-      cmds_file = requests.get(f"{DASH_BASE}/api/uc5/bot/commands", headers=bot_headers(), timeout=20).json()
-      cmds = cmds_file.get("commands", [])
+      # ---- Commands ----
+      cmds = get_cmds()
       updates = []
-
-      # process NEW commands
       for c in cmds:
         if c.get("status") != "NEW":
           continue
@@ -374,42 +417,46 @@ async def main():
       if updates:
         http_post("/api/uc5/bot/commands", {"updates": updates}, headers=bot_headers())
 
-      # Market price (REST)
-      product_id = cfg.get("productId", "")
+      # ---- Market price ----
       ticker = cfg.get("ticker", "BTCUSD")
+      product_id = cfg.get("productId", "")
 
-      # Discover productId if not present (optional, but useful for position/active)
       if not product_id:
         prod = requests.get(f"{cfg['etherealApiBase']}/v1/product", params={"ticker": ticker}, timeout=20).json()
         if prod.get("data"):
           product_id = prod["data"][0]["id"]
 
-      mp = requests.get(f"{cfg['etherealApiBase']}/v1/product/market-price", params={"productId": product_id}, timeout=20).json()
+      mp = requests.get(
+        f"{cfg['etherealApiBase']}/v1/product/market-price",
+        params={"productId": product_id},
+        timeout=20
+      ).json()
+
       best_bid = float(mp.get("bestBidPrice") or 0)
       best_ask = float(mp.get("bestAskPrice") or 0)
       oracle = float(mp.get("oraclePrice") or 0)
       mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else (oracle or best_bid or best_ask)
 
       ts_ms = int(time.time() * 1000)
-      conn.execute("INSERT OR REPLACE INTO prices(ts_ms, price, oracle, bid, ask) VALUES (?,?,?,?,?)",
-                   (ts_ms, mid, oracle, best_bid, best_ask))
+      conn.execute(
+        "INSERT OR REPLACE INTO prices(ts_ms, price, oracle, bid, ask) VALUES (?,?,?,?,?)",
+        (ts_ms, mid, oracle, best_bid, best_ask)
+      )
       conn.commit()
 
-      # Online learning update
+      # ---- Learning ----
       w = train_online(conn, w, lr=0.25)
       set_model(conn, w)
 
       feats, reason = compute_features(conn)
       p_up = predict(w, feats)
 
-      # store decision row for future labeling
       conn.execute(
         "INSERT INTO decisions(ts_ms, horizon_sec, p_up, f1,f2,f3,f4,f5,f6) VALUES (?,?,?,?,?,?,?,?,?)",
         (ts_ms, int(cfg.get("predictionHorizonSeconds", 60)), p_up, feats[1],feats[2],feats[3],feats[4],feats[5],feats[6])
       )
       conn.commit()
 
-      # Desired action
       thr = float(cfg.get("confidenceThreshold", 0.6))
       desired = "FLAT"
       if p_up > thr:
@@ -417,13 +464,16 @@ async def main():
       elif p_up < (1.0 - thr):
         desired = "SHORT"
 
-      # Position (requires subaccountId + productId)
+      # ---- Position ----
       pos = None
       sub_id = cfg.get("subaccountId", "")
       if sub_id and product_id:
         try:
-          pos = requests.get(f"{cfg['etherealApiBase']}/v1/position/active",
-                             params={"subaccountId": sub_id, "productId": product_id}, timeout=20).json()
+          pos = requests.get(
+            f"{cfg['etherealApiBase']}/v1/position/active",
+            params={"subaccountId": sub_id, "productId": product_id},
+            timeout=20
+          ).json()
         except Exception:
           pos = None
 
@@ -436,11 +486,10 @@ async def main():
         pos_open = abs(pos_size) > 0
         side_int = pos.get("side")
         pos_side = "LONG" if side_int == 0 else "SHORT"
-        # unrealized pnl isn't always in active response; use realizedPnl etc if present
         if pos.get("realizedPnl") is not None:
           pos_upnl = float(pos.get("realizedPnl") or 0)
 
-      # Hold windows
+      # ---- Hold windows ----
       min_hold = int(cfg.get("minHoldSeconds", 60))
       max_hold = int(cfg.get("maxHoldSeconds", 900))
       min_hold_until = None
@@ -449,47 +498,39 @@ async def main():
         min_hold_until = last_position_opened_ms + min_hold*1000
         max_hold_until = last_position_opened_ms + max_hold*1000
 
-      # Trading gate
       trading_enabled = bool(cfg.get("tradingEnabled", True))
       kill = bool(cfg.get("killSwitch", False))
 
       action_taken = {"type": None, "ok": True, "info": None}
 
-      # If kill switch is on: do not place orders, but still update status
+      # ---- Trade gate ----
       if trading_enabled and (not kill) and client is not None:
-        # Rate guard: maxOrdersPerHour
         max_oph = int(cfg.get("maxOrdersPerHour", 120))
         now = time.time()
         last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
         can_order = len(last_order_ts) < max_oph
 
-        # Decide trade
         if can_order:
-          # max hold: exit if exceeded
           if pos_open and max_hold_until and ts_ms >= max_hold_until:
             await place_close(client, ticker)
             last_order_ts.append(now)
             action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
             last_position_opened_ms = None
-
           else:
-            # If no position and desired is LONG/SHORT => enter
             if (not pos_open) and desired in ("LONG", "SHORT"):
-              # size by confidence (0..1)
               conf = abs(p_up - 0.5) * 2.0
               conf = clamp(conf, 0.0, 1.0)
 
-              # find available margin
               avail = None
-              used = None
-              total = None
               if sub_id:
-                bal = requests.get(f"{cfg['etherealApiBase']}/v1/subaccount/balance", params={"subaccountId": sub_id}, timeout=20).json()
+                bal = requests.get(
+                  f"{cfg['etherealApiBase']}/v1/subaccount/balance",
+                  params={"subaccountId": sub_id},
+                  timeout=20
+                ).json()
                 if bal.get("data"):
                   row = bal["data"][0]
                   avail = float(row.get("available") or 0)
-                  used = float(row.get("totalUsed") or 0)
-                  total = float(row.get("amount") or 0)
 
               max_margin = float(cfg.get("maxMarginUsd", 100))
               lev = float(cfg.get("maxLeverage", 2))
@@ -498,7 +539,6 @@ async def main():
               qty = notional / mid if mid > 0 else 0.0
               qty = max(0.0, qty)
 
-              # place MARKET
               side = "BUY" if desired == "LONG" else "SELL"
               if qty > 0:
                 await client.create_order(
@@ -514,7 +554,6 @@ async def main():
                 last_position_opened_ms = ts_ms
                 action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
 
-            # If position exists and desired is opposite => flip (but only after min hold)
             if pos_open and desired in ("LONG", "SHORT") and pos_side and desired != pos_side:
               if (not min_hold_until) or (ts_ms >= min_hold_until):
                 await place_close(client, ticker)
@@ -522,14 +561,14 @@ async def main():
                 action_taken = {"type": "CLOSE_FOR_FLIP", "ok": True, "info": {"from": pos_side, "to": desired}}
                 last_position_opened_ms = None
 
-      # Post status
-      st = {
+      # ---- Build status for dashboard ----
+      status_payload = {
         "updatedAt": int(time.time()*1000),
         "bot": {
           "alive": True,
           "lastLoopAt": int(time.time()*1000),
           "message": "running",
-          "version": "uc5-bot/0.1",
+          "version": "uc5-bot/0.2 (vps-telemetry)",
         },
         "market": {
           "ticker": ticker,
@@ -559,22 +598,25 @@ async def main():
         },
         "lastAction": action_taken,
       }
-      http_post("/api/uc5/bot/status", st, headers=bot_headers())
 
     except Exception as e:
-      # Post error status (but don't crash)
-      try:
-        http_post("/api/uc5/bot/status", {
-          "updatedAt": int(time.time()*1000),
-          "bot": {"alive": True, "lastLoopAt": int(time.time()*1000), "message": f"error: {str(e)}", "version": "uc5-bot/0.1"},
-        }, headers=bot_headers())
-      except Exception:
-        pass
+      status_payload = {
+        "updatedAt": int(time.time()*1000),
+        "bot": {
+          "alive": True,
+          "lastLoopAt": int(time.time()*1000),
+          "message": f"error: {str(e)}",
+          "version": "uc5-bot/0.2 (vps-telemetry)",
+        },
+      }
 
-    # sleep based on config if possible
+    # Update telemetry (served from VPS)
+    with STATUS_LOCK:
+      LATEST_STATUS = status_payload
+
+    # Sleep — use config if available, else 3s
     try:
-      cfg2 = http_get("/api/uc5/config")
-      interval = int(cfg2.get("pollIntervalSeconds", 3))
+      interval = int((cfg_cache or {}).get("pollIntervalSeconds", 3))
     except Exception:
       interval = 3
 
