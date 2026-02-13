@@ -1,0 +1,5313 @@
+[
+  {
+    "type": "constructor",
+    "inputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "error",
+    "name": "ActionAlreadyProcessed",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "previousId",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "lastCompleteId",
+        "type": "uint64",
+        "internalType": "ActionId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ActionExpired",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "blockTime",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "signedAt",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "buffer",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "AlreadyInitialized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ApproveFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DelegationFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DepositCapacityExceeded",
+    "inputs": [
+      {
+        "name": "capacity",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DepositInsufficient",
+    "inputs": [
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DepositOnBehalfBatchSizeExceeded",
+    "inputs": [
+      {
+        "name": "maxBatchSize",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "DivFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "DivWadFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ETHTransferFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "EmptyActions",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExchangeNotPaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExchangePaused",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ExcludedAccount",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ExpOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FactorialOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "FeeNotCoveredByBalance",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "FullMulDivFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InsufficientBalance",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidAction",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "actionType",
+        "type": "uint8",
+        "internalType": "enum ActionType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidActionEncoding",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "actionType",
+        "type": "uint8",
+        "internalType": "enum ActionType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidActionEncodingHeader",
+    "inputs": [
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidCost",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "cost",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidDepositOnBehalf",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "reason",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidDepositToken",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidEngineType",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "engineType",
+        "type": "uint8",
+        "internalType": "enum EngineType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFillNotional",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "internalValue",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidFillQuantity",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "fillQuantity",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "calculatedFillQuantity",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidInitialization",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidLiquidationBalanceTransfer",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "internalValue",
+        "type": "int256",
+        "internalType": "int256"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidMatchZeroQuantity",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "makerFillableQty",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "takerFillableQty",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidNonIncreasingId",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "currentId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "lastId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidNonce",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "nonce",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderPrice",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "price",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderPriceNotCrossed",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "makerPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "takerPrice",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderProduct",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "makerProductId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "takerProductId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderQuantity",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "quantity",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderSameSide",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "side",
+        "type": "uint8",
+        "internalType": "enum OrderSide"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidOrderZeroPrice",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidParameter",
+    "inputs": [
+      {
+        "name": "parameter",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "reason",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRealizePnlCostDelta",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "positionSize",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "costDelta",
+        "type": "int128",
+        "internalType": "int128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRealizePnlNegativeCost",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "currentCost",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "costDelta",
+        "type": "int128",
+        "internalType": "int128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRealizedPnl",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "internalValue",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReduceOnlyFill",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "positionSize",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "int128",
+        "internalType": "int128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidReduceOnlyFillQuantity",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "fillQuantity",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "maxFillableQuantity",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidRegistryRecord",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "InvalidSignature",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "signature",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "InvalidSigner",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateAboveMaintenanceMargin",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "remainingMargin",
+        "type": "int256",
+        "internalType": "int256"
+      },
+      {
+        "name": "requiredMaintenanceMargin",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateEmptyProducts",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateProductsMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "openPositions",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "products",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateSizeNotNetZero",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "sizeDelta",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "netSize",
+        "type": "int128",
+        "internalType": "int128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateZeroAccount",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateZeroMargin",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidateZeroSubaccount",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LiquidatorInsufficientBalance",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "liquidatorAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "liquidatorSubaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "delta",
+        "type": "int256",
+        "internalType": "int256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "LnWadUndefined",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MantissaOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MulDivFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "MulWadFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NewOwnerIsZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NoHandoverRequest",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotInitializing",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotSequencer",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "OutOfDomain",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Overflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PendingDepositFound",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PendingDepositMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PendingDepositNotFound",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PendingRevokeNotFound",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "Permit2AmountOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Permit2Failed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "PositionNotFound",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PriceFeedInvalidProperty",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "property",
+        "type": "uint8",
+        "internalType": "enum PythLazerLib.PriceFeedProperty"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PriceFeedsTooMany",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "length",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PriceInvalidExponent",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "exponent",
+        "type": "int16",
+        "internalType": "int16"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PriceInvalidFeedId",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "priceFeedId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "productFeedId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "PriceTooOld",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "priceTimestamp",
+        "type": "uint64",
+        "internalType": "uint64"
+      },
+      {
+        "name": "timestamp",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ProductIdMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "expectedId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "actualId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ProductNotFound",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "engineType",
+        "type": "uint8",
+        "internalType": "enum EngineType"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ProductStatusViolation",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "engineType",
+        "type": "uint8",
+        "internalType": "enum EngineType"
+      },
+      {
+        "name": "status",
+        "type": "uint8",
+        "internalType": "enum ProductStatus"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RPowOverflow",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "RealizeFundingProductsMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "openPositions",
+        "type": "uint128",
+        "internalType": "uint128"
+      },
+      {
+        "name": "products",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "RescueTooEarly",
+    "inputs": [
+      {
+        "name": "rescueReadyTimestamp",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SDivWadFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SMulWadFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "SequencerPaused",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SignerDepositUnauthorized",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SignerNotFound",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "SubaccountNotFound",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenDepositPaused",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenRemoveProtected",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TokenWithdrawPaused",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "TransferFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "TransferFromFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "USDeTransferFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "Unauthorized",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedAccount",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "UnauthorizedCallContext",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UpgradeFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WithdrawNotFound",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "WithdrawOftFailed",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "WithdrawOftInsufficientFees",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "fee",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ]
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAmount",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroLength",
+    "inputs": []
+  },
+  {
+    "type": "event",
+    "name": "AccountReferred",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "referralCode",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ActionExpiryBufferUpdated",
+    "inputs": [
+      {
+        "name": "action",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum ActionType"
+      },
+      {
+        "name": "buffer",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ActionsProcessed",
+    "inputs": [
+      {
+        "name": "firstActionId",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "lastActionId",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "length",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Approval",
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "spender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ClaimerUpdated",
+    "inputs": [
+      {
+        "name": "claimer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "granted",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DelegateDepositMaxBatchSizeUpdated",
+    "inputs": [
+      {
+        "name": "delegateDepositMaxBatchSize",
+        "type": "uint16",
+        "indexed": false,
+        "internalType": "uint16"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DelegateDepositorUpdated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "granted",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DepositFinalized",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "initiatedTxHash",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "initiatedLogIdx",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "DepositInitiated",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "EmergencyPauserUpdated",
+    "inputs": [
+      {
+        "name": "pauser",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "enabled",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "ExchangePauseUpdated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "isPaused",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeAccrued",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "feeAmount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "balance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeCollectorUpdated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeScheduleAdded",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeScheduleUpdated",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeesClaimed",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FundsRescued",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Initialized",
+    "inputs": [
+      {
+        "name": "version",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidationBalanceTransferMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "internalValue",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidationMarginCheckMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "maintenanceMargin",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "equity",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidatorRealizedPnlMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "internalValue",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LiquidatorUpdated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "LzEndpointIdUpdated",
+    "inputs": [
+      {
+        "name": "lzEndpointId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverCanceled",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipHandoverRequested",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "OwnershipTransferred",
+    "inputs": [
+      {
+        "name": "oldOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "newOwner",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpFillNotionalMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "internalValue",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpFundingRealized",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productIds",
+        "type": "uint32[]",
+        "indexed": false,
+        "internalType": "uint32[]"
+      },
+      {
+        "name": "realizedFundingUsd",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpOrderMatched",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "maker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "taker",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "makerSubaccount",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "takerSubaccount",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "makerSide",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum OrderSide"
+      },
+      {
+        "name": "takerSide",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum OrderSide"
+      },
+      {
+        "name": "fillQuantity",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "price",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpPnlRealized",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "costDelta",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpProductFundingUpdated",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "fundingUsd",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "cumulativeFundingUsd",
+        "type": "int256",
+        "indexed": false,
+        "internalType": "int256"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpProductRegistered",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "baseTokenName",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "quoteTokenName",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpProductUpdated",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PerpRealizedPnlMismatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "ActionId"
+      },
+      {
+        "name": "externalValue",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "internalValue",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "tolerance",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionLiquidated",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "liquidatedAccount",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "liquidatedSubaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "engineType",
+        "type": "uint8",
+        "indexed": false,
+        "internalType": "enum EngineType"
+      },
+      {
+        "name": "size",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PositionTransferred",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "indexed": true,
+        "internalType": "uint32"
+      },
+      {
+        "name": "engineType",
+        "type": "uint8",
+        "indexed": true,
+        "internalType": "enum EngineType"
+      },
+      {
+        "name": "accountFrom",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccountFrom",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "accountTo",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccountTo",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "amount",
+        "type": "int128",
+        "indexed": false,
+        "internalType": "int128"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "PythLazerUpdated",
+    "inputs": [
+      {
+        "name": "pythLazer",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "maxAge",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RegistryRecordUpdated",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "record",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "RescueDelayUpdated",
+    "inputs": [
+      {
+        "name": "rescueDelay",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SequencerAdded",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SequencerPausedUpdated",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "paused",
+        "type": "bool",
+        "indexed": false,
+        "internalType": "bool"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SequencerRemoved",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SignerLinkRejected",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "rejectedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SignerLinked",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "linkedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SignerRevokeRejected",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "rejectedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "SignerRevoked",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "signer",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "revokedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenAdded",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenPromoted",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenRemoved",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "TokenUpdated",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Transfer",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "Upgraded",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "WithdrawFinalized",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "finalizedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "destinationAddress",
+        "type": "bytes32",
+        "indexed": false,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "destinationEndpointId",
+        "type": "uint32",
+        "indexed": false,
+        "internalType": "uint32"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "WithdrawInitiated",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "indexed": true,
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "indexed": false,
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "fee",
+        "type": "uint128",
+        "indexed": false,
+        "internalType": "uint128"
+      },
+      {
+        "name": "initiatedTimestamp",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "function",
+    "name": "INITIATE_WITHDRAW_ABI_PARAM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "LINK_SIGNER_ABI_PARAM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "REVOKE_LINKED_SIGNER_ABI_PARAM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "TRADE_ORDER_ABI_PARAM",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "addClaimer",
+    "inputs": [
+      {
+        "name": "claimer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addDelegateDepositor",
+    "inputs": [
+      {
+        "name": "delegateDepositor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addEmergencyPauser",
+    "inputs": [
+      {
+        "name": "pauser",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addFeeSchedule",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IExchangeConfig.AddFeeScheduleParams",
+        "components": [
+          {
+            "name": "makerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "takerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addSequencer",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "addToken",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oftAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "allowance",
+    "inputs": [
+      {
+        "name": "owner",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "spender",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "approve",
+    "inputs": [
+      {
+        "name": "spender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "balanceOf",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "cancelOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "claimFees",
+    "inputs": [
+      {
+        "name": "feeToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "completeOwnershipHandover",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "deposit",
+    "inputs": [
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "depositToken",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "amount",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "referralCode",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "depositOnBehalf",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple[]",
+        "internalType": "struct ICollateralManager.DepositOnBehalfRequest[]",
+        "components": [
+          {
+            "name": "account",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "subaccount",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "tokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          }
+        ]
+      },
+      {
+        "name": "referralCode",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "depositUsd",
+    "inputs": [
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "referralCode",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "eip712Domain",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "fields",
+        "type": "bytes1",
+        "internalType": "bytes1"
+      },
+      {
+        "name": "name",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "version",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
+        "name": "chainId",
+        "type": "uint256",
+        "internalType": "uint256"
+      },
+      {
+        "name": "verifyingContract",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "salt",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "extensions",
+        "type": "uint256[]",
+        "internalType": "uint256[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "emergencyPause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "emergencyUnpause",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "executeMatch",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "action",
+        "type": "tuple",
+        "internalType": "struct IActionHandler.MatchOrdersAction",
+        "components": [
+          {
+            "name": "maker",
+            "type": "tuple",
+            "internalType": "struct IActionHandler.TradeOrder",
+            "components": [
+              {
+                "name": "sender",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "subaccount",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint128",
+                "internalType": "uint128"
+              },
+              {
+                "name": "price",
+                "type": "uint128",
+                "internalType": "uint128"
+              },
+              {
+                "name": "reduceOnly",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "side",
+                "type": "uint8",
+                "internalType": "enum OrderSide"
+              },
+              {
+                "name": "engineType",
+                "type": "uint8",
+                "internalType": "enum EngineType"
+              },
+              {
+                "name": "productId",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "nonce",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "signedAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          },
+          {
+            "name": "taker",
+            "type": "tuple",
+            "internalType": "struct IActionHandler.TradeOrder",
+            "components": [
+              {
+                "name": "sender",
+                "type": "address",
+                "internalType": "address"
+              },
+              {
+                "name": "subaccount",
+                "type": "bytes32",
+                "internalType": "bytes32"
+              },
+              {
+                "name": "quantity",
+                "type": "uint128",
+                "internalType": "uint128"
+              },
+              {
+                "name": "price",
+                "type": "uint128",
+                "internalType": "uint128"
+              },
+              {
+                "name": "reduceOnly",
+                "type": "bool",
+                "internalType": "bool"
+              },
+              {
+                "name": "side",
+                "type": "uint8",
+                "internalType": "enum OrderSide"
+              },
+              {
+                "name": "engineType",
+                "type": "uint8",
+                "internalType": "enum EngineType"
+              },
+              {
+                "name": "productId",
+                "type": "uint32",
+                "internalType": "uint32"
+              },
+              {
+                "name": "nonce",
+                "type": "uint64",
+                "internalType": "uint64"
+              },
+              {
+                "name": "signedAt",
+                "type": "uint64",
+                "internalType": "uint64"
+              }
+            ]
+          },
+          {
+            "name": "makerSignature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "takerSignature",
+            "type": "bytes",
+            "internalType": "bytes"
+          },
+          {
+            "name": "makerFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "takerFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "makerRealizedPnl",
+            "type": "int128",
+            "internalType": "int128"
+          },
+          {
+            "name": "takerRealizedPnl",
+            "type": "int128",
+            "internalType": "int128"
+          },
+          {
+            "name": "fillQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "fillNotional",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "messageIdx",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      },
+      {
+        "name": "digests",
+        "type": "tuple",
+        "internalType": "struct IPerpEngine.ExecuteMatchDigests",
+        "components": [
+          {
+            "name": "maker",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "taker",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "finalizeRevokeLinkedSigner",
+    "inputs": [
+      {
+        "name": "message",
+        "type": "tuple",
+        "internalType": "struct IActionHandler.RevokeLinkedSignerMessage",
+        "components": [
+          {
+            "name": "sender",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "signer",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "subaccount",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "nonce",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "signedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "finalizeWithdraw",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "digest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "getAccountBalance",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountGlobalLinkedSignersToAccount",
+    "inputs": [
+      {
+        "name": "linkedSigner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountGlobalTotalBalance",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountGlobalTotalPendingBalance",
+    "inputs": [
+      {
+        "name": "token",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountGlobalUsdToken",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountHasRegistered",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountLinkedSigners",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "address[]",
+        "internalType": "address[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountOpenPositions",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint128",
+        "internalType": "uint128"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountPendingDeposit",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct Deposit.Data",
+        "components": [
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fee",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountPendingWithdraw",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "withdrawDigest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct Withdraw.Data",
+        "components": [
+          {
+            "name": "destinationAddress",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "destinationEndpointId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "token",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "amount",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "fee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "messageIdx",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "initiatedAt",
+            "type": "uint64",
+            "internalType": "uint64"
+          },
+          {
+            "name": "signature",
+            "type": "bytes",
+            "internalType": "bytes"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getAccountRegisteredSubaccounts",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeActionExpiryBuffer",
+    "inputs": [
+      {
+        "name": "action",
+        "type": "uint8",
+        "internalType": "enum ActionType"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeDelegateDepositMaxBatchSize",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangePythLazer",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "pythLazer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "pythMaxAge",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeRescueDelay",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeSequencer",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "isApproved",
+        "type": "bool",
+        "internalType": "bool"
+      },
+      {
+        "name": "isPaused",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getExchangeTokens",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32[]",
+        "internalType": "bytes32[]"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getFeeCollector",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "feeCollectorAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "feeCollectorSubaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getFeeSchedule",
+    "inputs": [
+      {
+        "name": "feeScheduleId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct FeeSchedule.Data",
+        "components": [
+          {
+            "name": "isRegistered",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "makerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "takerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "getLiquidator",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "liquidatorAccount",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "liquidatorSubaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPerpPosition",
+    "inputs": [
+      {
+        "name": "sender",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PerpPosition.Data",
+        "components": [
+          {
+            "name": "size",
+            "type": "int128",
+            "internalType": "int128"
+          },
+          {
+            "name": "cost",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "lastFundingUsd",
+            "type": "int128",
+            "internalType": "int128"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getPerpProduct",
+    "inputs": [
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct PerpProduct.Info",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "feeScheduleId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum ProductStatus"
+          },
+          {
+            "name": "maxLeverage",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "pythFeedId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "cumulativeFundingUsd",
+            "type": "int128",
+            "internalType": "int128"
+          },
+          {
+            "name": "baseTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "quoteTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "maxQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "tickSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "lotSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "openInterest",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxOpenInterestUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxPositionNotionalUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "getToken",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "tuple",
+        "internalType": "struct Token.Data",
+        "components": [
+          {
+            "name": "tokenAddress",
+            "type": "address",
+            "internalType": "address"
+          },
+          {
+            "name": "depositEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "removeProtected",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "depositCapacity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minDeposit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "withdrawFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "depositFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "oftAddress",
+            "type": "address",
+            "internalType": "address"
+          }
+        ]
+      }
+    ],
+    "stateMutability": "pure"
+  },
+  {
+    "type": "function",
+    "name": "initialize",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "isClaimer",
+    "inputs": [
+      {
+        "name": "claimer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isDelegateDepositor",
+    "inputs": [
+      {
+        "name": "delegateDepositor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isEmergencyPaused",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isEmergencyPauser",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "isSequencerApproved",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "liquidateSubaccount",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "actionData",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "owner",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "ownershipHandoverExpiresAt",
+    "inputs": [
+      {
+        "name": "pendingOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "result",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "processActions",
+    "inputs": [
+      {
+        "name": "actions",
+        "type": "bytes[]",
+        "internalType": "bytes[]"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "promoteToken",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "tokenAddress",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "oftAddress",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "proxiableUUID",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "realizeFunding",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productIds",
+        "type": "uint32[]",
+        "internalType": "uint32[]"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "realizePnl",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "costDelta",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "register",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IPerpEngine.RegisterPerpProductParams",
+        "components": [
+          {
+            "name": "baseTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "quoteTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum ProductStatus"
+          },
+          {
+            "name": "maxLeverage",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "feeScheduleId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "pythFeedId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "tickSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "lotSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxOpenInterestUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxPositionNotionalUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "registerPerpProduct",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IPerpEngine.RegisterPerpProductParams",
+        "components": [
+          {
+            "name": "baseTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "quoteTokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum ProductStatus"
+          },
+          {
+            "name": "maxLeverage",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "feeScheduleId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "pythFeedId",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "tickSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "lotSize",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxOpenInterestUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxPositionNotionalUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeClaimer",
+    "inputs": [
+      {
+        "name": "claimer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeDelegateDepositor",
+    "inputs": [
+      {
+        "name": "delegateDepositor",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeEmergencyPauser",
+    "inputs": [
+      {
+        "name": "pauser",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeSequencer",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeToken",
+    "inputs": [
+      {
+        "name": "tokenName",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "renounceOwnership",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "requestOwnershipHandover",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "rescueFunds",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "digest",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "totalSupply",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "transfer",
+    "inputs": [
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "transferFrom",
+    "inputs": [
+      {
+        "name": "from",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "to",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "value",
+        "type": "uint256",
+        "internalType": "uint256"
+      }
+    ],
+    "outputs": [
+      {
+        "name": "",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "transferOwnership",
+    "inputs": [
+      {
+        "name": "newOwner",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "update",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IPerpEngine.UpdatePerpProductParams",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum ProductStatus"
+          },
+          {
+            "name": "maxLeverage",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxOpenInterestUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxPositionNotionalUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateActionExpiryBuffer",
+    "inputs": [
+      {
+        "name": "action",
+        "type": "uint8",
+        "internalType": "enum ActionType"
+      },
+      {
+        "name": "buffer",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateDelegateDepositMaxBatchSize",
+    "inputs": [
+      {
+        "name": "maxDepositsPerBatch",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateFeeCollector",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateFeeSchedule",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IExchangeConfig.UpdateFeeScheduleParams",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "makerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "takerFee",
+            "type": "uint32",
+            "internalType": "uint32"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateFunding",
+    "inputs": [
+      {
+        "name": "id",
+        "type": "uint64",
+        "internalType": "ActionId"
+      },
+      {
+        "name": "productId",
+        "type": "uint32",
+        "internalType": "uint32"
+      },
+      {
+        "name": "fundingDeltaUsd",
+        "type": "int128",
+        "internalType": "int128"
+      },
+      {
+        "name": "messageIdx",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  },
+  {
+    "type": "function",
+    "name": "updateLiquidator",
+    "inputs": [
+      {
+        "name": "account",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "subaccount",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateLzEndpointId",
+    "inputs": [
+      {
+        "name": "updatedEndpointId",
+        "type": "uint32",
+        "internalType": "uint32"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updatePerpProduct",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IPerpEngine.UpdatePerpProductParams",
+        "components": [
+          {
+            "name": "id",
+            "type": "uint32",
+            "internalType": "uint32"
+          },
+          {
+            "name": "status",
+            "type": "uint8",
+            "internalType": "enum ProductStatus"
+          },
+          {
+            "name": "maxLeverage",
+            "type": "uint16",
+            "internalType": "uint16"
+          },
+          {
+            "name": "maxQuantity",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxOpenInterestUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "maxPositionNotionalUsd",
+            "type": "uint128",
+            "internalType": "uint128"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updatePythLazer",
+    "inputs": [
+      {
+        "name": "updatedContract",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "updatedMaxAge",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateRegistryRecord",
+    "inputs": [
+      {
+        "name": "name",
+        "type": "bytes32",
+        "internalType": "bytes32"
+      },
+      {
+        "name": "record",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateRescueDelay",
+    "inputs": [
+      {
+        "name": "rescueDelay",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateSequencerPaused",
+    "inputs": [
+      {
+        "name": "sequencer",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "paused",
+        "type": "bool",
+        "internalType": "bool"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "updateToken",
+    "inputs": [
+      {
+        "name": "params",
+        "type": "tuple",
+        "internalType": "struct IExchangeConfig.UpdateTokenParams",
+        "components": [
+          {
+            "name": "tokenName",
+            "type": "bytes32",
+            "internalType": "bytes32"
+          },
+          {
+            "name": "depositCapacity",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "minDeposit",
+            "type": "uint256",
+            "internalType": "uint256"
+          },
+          {
+            "name": "depositFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "withdrawFee",
+            "type": "uint128",
+            "internalType": "uint128"
+          },
+          {
+            "name": "depositEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          },
+          {
+            "name": "withdrawEnabled",
+            "type": "bool",
+            "internalType": "bool"
+          }
+        ]
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "upgradeToAndCall",
+    "inputs": [
+      {
+        "name": "newImplementation",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "data",
+        "type": "bytes",
+        "internalType": "bytes"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "payable"
+  }
+]
