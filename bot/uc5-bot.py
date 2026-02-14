@@ -6,8 +6,8 @@ Changes vs prior version:
 - NO high-frequency writes to Vercel Blob anymore (prevents Advanced Ops burn).
 - Runs a small HTTP telemetry server on the VPS:
     GET /status  -> latest status JSON for the dashboard
-    GET /health  -> "ok"
-- Throttles dashboard reads (config/commands) so you don’t burn simple ops either.
+    GET /health  -> {"ok": true}
+- Throttles dashboard reads (config/commands) so you don’t burn ops.
 
 IMPORTANT:
 This is a demo trading bot. It can lose money. Start tiny (e.g. 100 USDe) and keep leverage low.
@@ -20,6 +20,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 # ethereal-sdk (async)
 from ethereal.async_rest_client import AsyncRESTClient
 
+
 # ---- Env ----
 DASH_BASE = os.environ.get("UC5_DASHBOARD_BASE_URL", "").rstrip("/")
 BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
@@ -31,27 +32,32 @@ DB_PATH = os.environ.get("UC5_SQLITE_PATH", os.path.join(os.path.dirname(__file_
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
 
-# Reduce dashboard polling
-CFG_REFRESH_SECONDS = int(os.environ.get("UC5_CFG_REFRESH_SECONDS", "30"))      # config fetch at most every 30s
-CMDS_REFRESH_SECONDS = int(os.environ.get("UC5_CMDS_REFRESH_SECONDS", "5"))     # commands fetch at most every 5s
+# Reduce dashboard polling (set via env if you want faster UX)
+CFG_REFRESH_SECONDS = int(os.environ.get("UC5_CFG_REFRESH_SECONDS", "300"))     # config fetch at most every 5 min
+CMDS_REFRESH_SECONDS = int(os.environ.get("UC5_CMDS_REFRESH_SECONDS", "30"))    # commands fetch at most every 30s
 
 if not DASH_BASE or not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_DASHBOARD_BASE_URL and/or UC5_BOT_TOKEN")
 
-def bot_headers() -> Dict[str,str]:
+
+def bot_headers() -> Dict[str, str]:
   return {"x-uc5-bot-token": BOT_TOKEN}
+
 
 def http_get(path: str) -> Any:
   r = requests.get(f"{DASH_BASE}{path}", timeout=20)
   r.raise_for_status()
   return r.json()
 
-def http_post(path: str, payload: Any, headers: Optional[Dict[str,str]]=None) -> Any:
+
+def http_post(path: str, payload: Any, headers: Optional[Dict[str, str]] = None) -> Any:
   h = {"Content-Type": "application/json"}
-  if headers: h.update(headers)
+  if headers:
+    h.update(headers)
   r = requests.post(f"{DASH_BASE}{path}", data=json.dumps(payload), headers=h, timeout=20)
   r.raise_for_status()
   return r.json()
+
 
 # ---- SQLite ----
 def db_connect():
@@ -97,6 +103,7 @@ def db_connect():
   conn.commit()
   return conn
 
+
 def sigmoid(x: float) -> float:
   if x >= 0:
     z = math.exp(-x)
@@ -105,33 +112,42 @@ def sigmoid(x: float) -> float:
     z = math.exp(x)
     return z / (1.0 + z)
 
+
 def clamp(x: float, a: float, b: float) -> float:
   return max(a, min(b, x))
+
 
 def ensure_model(conn) -> List[float]:
   row = conn.execute("SELECT w0,w1,w2,w3,w4,w5,w6 FROM model WHERE id=1").fetchone()
   if row:
     return list(row)
   w = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
-  conn.execute("INSERT INTO model(id,w0,w1,w2,w3,w4,w5,w6,updated_ms) VALUES (1,?,?,?,?,?,?,?,?)",
-               (w[0],w[1],w[2],w[3],w[4],w[5],w[6], int(time.time()*1000)))
+  conn.execute(
+    "INSERT INTO model(id,w0,w1,w2,w3,w4,w5,w6,updated_ms) VALUES (1,?,?,?,?,?,?,?,?)",
+    (w[0], w[1], w[2], w[3], w[4], w[5], w[6], int(time.time() * 1000))
+  )
   conn.commit()
   return w
 
+
 def set_model(conn, w: List[float]):
-  conn.execute("UPDATE model SET w0=?,w1=?,w2=?,w3=?,w4=?,w5=?,w6=?,updated_ms=? WHERE id=1",
-               (w[0],w[1],w[2],w[3],w[4],w[5],w[6], int(time.time()*1000)))
+  conn.execute(
+    "UPDATE model SET w0=?,w1=?,w2=?,w3=?,w4=?,w5=?,w6=?,updated_ms=? WHERE id=1",
+    (w[0], w[1], w[2], w[3], w[4], w[5], w[6], int(time.time() * 1000))
+  )
   conn.commit()
 
-def last_prices(conn, n: int) -> List[Tuple[int,float]]:
+
+def last_prices(conn, n: int) -> List[Tuple[int, float]]:
   rows = conn.execute("SELECT ts_ms, price FROM prices ORDER BY ts_ms DESC LIMIT ?", (n,)).fetchall()
   rows.reverse()
   return rows
 
+
 def compute_features(conn) -> Tuple[List[float], str]:
   rows = last_prices(conn, 400)
   if len(rows) < 80:
-    return [1.0, 0,0,0,0,0,0], "warming up (need more history)"
+    return [1.0, 0, 0, 0, 0, 0, 0], "warming up (need more history)"
 
   ts = [r[0] for r in rows]
   px = [r[1] for r in rows]
@@ -142,7 +158,8 @@ def compute_features(conn) -> Tuple[List[float], str]:
     i = 0
     while i < len(ts) and ts[i] < target:
       i += 1
-    if i >= len(px): i = len(px) - 1
+    if i >= len(px):
+      i = len(px) - 1
     p0 = px[i]
     p1 = px[-1]
     return (p1 / p0) - 1.0 if p0 > 0 else 0.0
@@ -151,7 +168,8 @@ def compute_features(conn) -> Tuple[List[float], str]:
   r5m = ret_over(300_000)
 
   def sma(window: int) -> float:
-    if len(px) < window: return sum(px)/len(px)
+    if len(px) < window:
+      return sum(px) / len(px)
     return sum(px[-window:]) / window
 
   sma20 = sma(20)
@@ -160,33 +178,37 @@ def compute_features(conn) -> Tuple[List[float], str]:
 
   # RSI(14)
   gains, losses = 0.0, 0.0
-  for i in range(max(1, len(px)-15), len(px)):
-    d = px[i] - px[i-1]
-    if d >= 0: gains += d
-    else: losses += -d
-  rs = (gains/14.0) / (losses/14.0 + 1e-9)
+  for i in range(max(1, len(px) - 15), len(px)):
+    d = px[i] - px[i - 1]
+    if d >= 0:
+      gains += d
+    else:
+      losses += -d
+  rs = (gains / 14.0) / (losses / 14.0 + 1e-9)
   rsi = 100.0 - (100.0 / (1.0 + rs))
   rsi_n = (rsi - 50.0) / 50.0  # -1..+1
 
   # volatility (last ~60 returns)
   rets = []
-  for i in range(max(1, len(px)-60), len(px)):
-    rets.append((px[i]/px[i-1]) - 1.0)
-  mu = sum(rets)/len(rets)
-  var = sum((x-mu)*(x-mu) for x in rets)/max(1, len(rets)-1)
+  for i in range(max(1, len(px) - 60), len(px)):
+    rets.append((px[i] / px[i - 1]) - 1.0)
+  mu = sum(rets) / len(rets)
+  var = sum((x - mu) * (x - mu) for x in rets) / max(1, len(rets) - 1)
   vol = math.sqrt(var)
 
   row = conn.execute("SELECT oracle FROM prices ORDER BY ts_ms DESC LIMIT 1").fetchone()
   oracle = row[0] if row else None
-  dev = ((px[-1] - oracle)/oracle) if (oracle and oracle > 0) else 0.0
+  dev = ((px[-1] - oracle) / oracle) if (oracle and oracle > 0) else 0.0
 
   feats = [1.0, r1m, r5m, trend, rsi_n, vol, dev]
   reason = f"r1m={r1m:.4f}, r5m={r5m:.4f}, trend={trend:.4f}, rsiN={rsi_n:.3f}, vol={vol:.5f}, dev={dev:.5f}"
   return feats, reason
 
+
 def predict(w: List[float], feats: List[float]) -> float:
-  x = sum(w[i]*feats[i] for i in range(len(w)))
+  x = sum(w[i] * feats[i] for i in range(len(w)))
   return sigmoid(x)
+
 
 def train_online(conn, w: List[float], lr: float = 0.5):
   rows = conn.execute("""
@@ -200,10 +222,16 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   if not rows:
     return w
 
-  for (did, ts_ms, horizon, f1,f2,f3,f4,f5,f6) in rows:
-    future_ts = ts_ms + int(horizon*1000)
-    fut = conn.execute("SELECT price FROM prices WHERE ts_ms >= ? ORDER BY ts_ms ASC LIMIT 1", (future_ts,)).fetchone()
-    nowp = conn.execute("SELECT price FROM prices WHERE ts_ms = ?", (ts_ms,)).fetchone()
+  for (did, ts_ms, horizon, f1, f2, f3, f4, f5, f6) in rows:
+    future_ts = ts_ms + int(horizon * 1000)
+    fut = conn.execute(
+      "SELECT price FROM prices WHERE ts_ms >= ? ORDER BY ts_ms ASC LIMIT 1",
+      (future_ts,)
+    ).fetchone()
+    nowp = conn.execute(
+      "SELECT price FROM prices WHERE ts_ms = ?",
+      (ts_ms,)
+    ).fetchone()
     if not fut or not nowp:
       continue
     y = 1 if fut[0] > nowp[0] else 0
@@ -218,8 +246,8 @@ def train_online(conn, w: List[float], lr: float = 0.5):
     LIMIT 200
   """).fetchall()
 
-  for (did, f1,f2,f3,f4,f5,f6, y) in labeled:
-    feats = [1.0, f1,f2,f3,f4,f5,f6]
+  for (did, f1, f2, f3, f4, f5, f6, y) in labeled:
+    feats = [1.0, f1, f2, f3, f4, f5, f6]
     p = predict(w, feats)
     err = (p - y)
     for i in range(len(w)):
@@ -228,9 +256,11 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   conn.commit()
   return w
 
+
 # ---- Telemetry server (in-memory latest status) ----
 LATEST_STATUS: Dict[str, Any] = {"bot": {"alive": False, "message": "starting"}}
 STATUS_LOCK = threading.Lock()
+
 
 class TelemetryHandler(BaseHTTPRequestHandler):
   def _send_json(self, code: int, obj: Any):
@@ -253,8 +283,8 @@ class TelemetryHandler(BaseHTTPRequestHandler):
     return self._send_json(404, {"error": "not found"})
 
   def log_message(self, format, *args):
-    # silence default request logs
     return
+
 
 def start_telemetry_server():
   srv = HTTPServer((TELEMETRY_HOST, TELEMETRY_PORT), TelemetryHandler)
@@ -262,8 +292,9 @@ def start_telemetry_server():
   t.start()
   return srv
 
+
 # ---- Trading helpers ----
-async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: AsyncRESTClient) -> Dict[str,Any]:
+async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any], client: AsyncRESTClient) -> Dict[str, Any]:
   eth_base = cfg["etherealApiBase"]
   payload = cmd["payload"]
 
@@ -275,17 +306,17 @@ async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: As
   typed = {
     "types": {
       "EIP712Domain": [
-        {"name":"name","type":"string"},
-        {"name":"version","type":"string"},
-        {"name":"chainId","type":"uint256"},
-        {"name":"verifyingContract","type":"address"},
+        {"name": "name", "type": "string"},
+        {"name": "version", "type": "string"},
+        {"name": "chainId", "type": "uint256"},
+        {"name": "verifyingContract", "type": "address"},
       ],
       "LinkSigner": [
-        {"name":"sender","type":"address"},
-        {"name":"signer","type":"address"},
-        {"name":"subaccount","type":"bytes32"},
-        {"name":"nonce","type":"uint64"},
-        {"name":"signedAt","type":"uint64"},
+        {"name": "sender", "type": "address"},
+        {"name": "signer", "type": "address"},
+        {"name": "subaccount", "type": "bytes32"},
+        {"name": "nonce", "type": "uint64"},
+        {"name": "signedAt", "type": "uint64"},
       ],
     },
     "primaryType": "LinkSigner",
@@ -332,6 +363,7 @@ async def process_link_signer(cfg: Dict[str,Any], cmd: Dict[str,Any], client: As
     raise RuntimeError(f"Link signer failed: {r.status_code} {r.text}")
   return r.json()
 
+
 async def place_close(client: AsyncRESTClient, ticker: str):
   await client.create_order(
     order_type="MARKET",
@@ -343,7 +375,10 @@ async def place_close(client: AsyncRESTClient, ticker: str):
     close=True,
   )
 
+
 async def main():
+  global LATEST_STATUS
+
   # Start telemetry server immediately
   start_telemetry_server()
 
@@ -357,7 +392,7 @@ async def main():
   last_order_ts: List[float] = []
   last_position_opened_ms: Optional[int] = None
 
-  # Cache config + commands so you don’t hammer Vercel (and Blob reads)
+  # Cache config + commands so you don’t hammer Vercel (and any backing storage)
   cfg_cache: Optional[Dict[str, Any]] = None
   cfg_last_fetch = 0.0
   cmds_last_fetch = 0.0
@@ -367,17 +402,31 @@ async def main():
     nonlocal cfg_cache, cfg_last_fetch
     now = time.time()
     if cfg_cache is None or (now - cfg_last_fetch) >= CFG_REFRESH_SECONDS:
-      cfg_cache = http_get("/api/uc5/config")
-      cfg_last_fetch = now
+      try:
+        cfg_cache = http_get("/api/uc5/config")
+        cfg_last_fetch = now
+      except Exception:
+        # if fetch fails, keep last good config if we have one
+        if cfg_cache is None:
+          raise
     return cfg_cache
 
   def get_cmds() -> List[Dict[str, Any]]:
     nonlocal cmds_cache, cmds_last_fetch
     now = time.time()
     if (now - cmds_last_fetch) >= CMDS_REFRESH_SECONDS:
-      cmds_file = requests.get(f"{DASH_BASE}/api/uc5/bot/commands", headers=bot_headers(), timeout=20).json()
-      cmds_cache = cmds_file.get("commands", [])
-      cmds_last_fetch = now
+      try:
+        cmds_file = requests.get(
+          f"{DASH_BASE}/api/uc5/bot/commands",
+          headers=bot_headers(),
+          timeout=20
+        ).json()
+        cmds_cache = cmds_file.get("commands", [])
+        cmds_last_fetch = now
+      except Exception:
+        # keep last list on transient failures
+        if cmds_cache is None:
+          cmds_cache = []
     return cmds_cache
 
   while True:
@@ -422,7 +471,11 @@ async def main():
       product_id = cfg.get("productId", "")
 
       if not product_id:
-        prod = requests.get(f"{cfg['etherealApiBase']}/v1/product", params={"ticker": ticker}, timeout=20).json()
+        prod = requests.get(
+          f"{cfg['etherealApiBase']}/v1/product",
+          params={"ticker": ticker},
+          timeout=20
+        ).json()
         if prod.get("data"):
           product_id = prod["data"][0]["id"]
 
@@ -453,7 +506,8 @@ async def main():
 
       conn.execute(
         "INSERT INTO decisions(ts_ms, horizon_sec, p_up, f1,f2,f3,f4,f5,f6) VALUES (?,?,?,?,?,?,?,?,?)",
-        (ts_ms, int(cfg.get("predictionHorizonSeconds", 60)), p_up, feats[1],feats[2],feats[3],feats[4],feats[5],feats[6])
+        (ts_ms, int(cfg.get("predictionHorizonSeconds", 60)),
+         p_up, feats[1], feats[2], feats[3], feats[4], feats[5], feats[6])
       )
       conn.commit()
 
@@ -495,8 +549,8 @@ async def main():
       min_hold_until = None
       max_hold_until = None
       if last_position_opened_ms:
-        min_hold_until = last_position_opened_ms + min_hold*1000
-        max_hold_until = last_position_opened_ms + max_hold*1000
+        min_hold_until = last_position_opened_ms + min_hold * 1000
+        max_hold_until = last_position_opened_ms + max_hold * 1000
 
       trading_enabled = bool(cfg.get("tradingEnabled", True))
       kill = bool(cfg.get("killSwitch", False))
@@ -552,7 +606,11 @@ async def main():
                 )
                 last_order_ts.append(now)
                 last_position_opened_ms = ts_ms
-                action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
+                action_taken = {
+                  "type": f"OPEN_{desired}",
+                  "ok": True,
+                  "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}
+                }
 
             if pos_open and desired in ("LONG", "SHORT") and pos_side and desired != pos_side:
               if (not min_hold_until) or (ts_ms >= min_hold_until):
@@ -563,10 +621,10 @@ async def main():
 
       # ---- Build status for dashboard ----
       status_payload = {
-        "updatedAt": int(time.time()*1000),
+        "updatedAt": int(time.time() * 1000),
         "bot": {
           "alive": True,
-          "lastLoopAt": int(time.time()*1000),
+          "lastLoopAt": int(time.time() * 1000),
           "message": "running",
           "version": "uc5-bot/0.2 (vps-telemetry)",
         },
@@ -586,13 +644,13 @@ async def main():
           "side": pos_side,
           "size": pos_size,
           "unrealizedPnl": pos_upnl,
-          "updatedAt": int(time.time()*1000),
+          "updatedAt": int(time.time() * 1000),
         },
         "agent": {
           "desired": desired,
           "confidence": float(p_up),
           "reason": reason,
-          "lastDecisionAt": int(time.time()*1000),
+          "lastDecisionAt": int(time.time() * 1000),
           "minHoldUntil": min_hold_until,
           "maxHoldUntil": max_hold_until,
         },
@@ -601,10 +659,10 @@ async def main():
 
     except Exception as e:
       status_payload = {
-        "updatedAt": int(time.time()*1000),
+        "updatedAt": int(time.time() * 1000),
         "bot": {
           "alive": True,
-          "lastLoopAt": int(time.time()*1000),
+          "lastLoopAt": int(time.time() * 1000),
           "message": f"error: {str(e)}",
           "version": "uc5-bot/0.2 (vps-telemetry)",
         },
@@ -621,8 +679,9 @@ async def main():
       interval = 3
 
     elapsed = time.time() - loop_started
-    to_sleep = max(0.2, interval - elapsed)
-    time.sleep(to_sleep)
+    to_sleep = max(0.2, float(interval) - float(elapsed))
+    await asyncio.sleep(to_sleep)
+
 
 if __name__ == "__main__":
   asyncio.run(main())
