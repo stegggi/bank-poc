@@ -384,7 +384,14 @@ async def ensure_client(cfg: Dict[str, Any]) -> AsyncRESTClient:
   })
 
 
-async def place_market(client: AsyncRESTClient, ticker: str, side_int: int, qty: float):
+async def place_market(
+  client: AsyncRESTClient,
+  ticker: str,
+  side_int: int,
+  qty: float,
+  sender: str,
+  subaccount: str,
+):
   """
   create_order expects:
     side=0 (buy) / 1 (sell), quantity=Decimal(...). :contentReference[oaicite:3]{index=3}
@@ -398,6 +405,8 @@ async def place_market(client: AsyncRESTClient, ticker: str, side_int: int, qty:
       side=side_int,
       price=None,
       ticker=ticker,
+      sender=sender,
+      subaccount=subaccount,
     )
   except TypeError:
     await client.create_order(
@@ -406,6 +415,8 @@ async def place_market(client: AsyncRESTClient, ticker: str, side_int: int, qty:
       side=side_int,
       price=Decimal("0"),
       ticker=ticker,
+      sender=sender,
+      subaccount=subaccount,
     )
 
 
@@ -414,13 +425,15 @@ async def close_position_if_any(
   ticker: str,
   pos_open: bool,
   pos_side: Optional[str],
-  pos_size: float
+  pos_size: float,
+  sender: str,
+  subaccount: str,
 ):
   if not pos_open or not pos_side or abs(pos_size) <= 0:
     return
   # If LONG -> SELL to close, if SHORT -> BUY to close
   side_int = 1 if pos_side == "LONG" else 0
-  await place_market(client, ticker, side_int, abs(pos_size))
+  await place_market(client, ticker, side_int, abs(pos_size), sender, subaccount)
 
 
 # ---- LINK_SIGNER helper (kept as-is for your current dashboard flow) ----
@@ -550,6 +563,14 @@ async def main():
       if not product_id:
         raise RuntimeError(f"No productId found for ticker={ticker}")
       sub_id = cfg.get("subaccountId", "")
+      owner_addr = str(cfg.get("ownerAddress") or "")
+      subaccount_name = str(cfg.get("subaccountName") or "")
+      missing_trade_ctx = []
+      if not owner_addr:
+        missing_trade_ctx.append("ownerAddress")
+      if not subaccount_name:
+        missing_trade_ctx.append("subaccountName")
+      has_trade_account_ctx = bool(owner_addr and subaccount_name)
 
       # Fetch active position once per loop (used for FLATTEN and status)
       pos = fetch_active_position(eth_base, sub_id, product_id)
@@ -564,8 +585,15 @@ async def main():
         cid = c.get("id")
         try:
           if c.get("type") == "FLATTEN":
-            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size)
-            updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
+            if not has_trade_account_ctx:
+              updates.append({
+                "id": cid,
+                "status": "ERROR",
+                "result": {"error": f"Missing {', '.join(missing_trade_ctx)} in config. Discover subaccount and save config first."},
+              })
+            else:
+              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
           elif c.get("type") == "LINK_SIGNER":
             out = await process_link_signer(cfg, c, client)
             updates.append({"id": cid, "status": "DONE", "result": out})
@@ -630,57 +658,64 @@ async def main():
 
       # ---- Trade gate ----
       if trading_enabled and (not kill) and client is not None:
-        max_oph = int(cfg.get("maxOrdersPerHour", 120))
-        now = time.time()
-        last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
-        can_order = len(last_order_ts) < max_oph
+        if not has_trade_account_ctx:
+          action_taken = {
+            "type": "SKIP_ACCOUNT_CONTEXT_MISSING",
+            "ok": False,
+            "info": {"missing": missing_trade_ctx},
+          }
+        else:
+          max_oph = int(cfg.get("maxOrdersPerHour", 120))
+          now = time.time()
+          last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
+          can_order = len(last_order_ts) < max_oph
 
-        if can_order:
-          # max hold: exit if exceeded
-          if pos_open and max_hold_until and ts_ms >= max_hold_until:
-            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size)
-            last_order_ts.append(now)
-            action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
-            last_position_opened_ms = None
+          if can_order:
+            # max hold: exit if exceeded
+            if pos_open and max_hold_until and ts_ms >= max_hold_until:
+              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              last_order_ts.append(now)
+              action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
+              last_position_opened_ms = None
 
-          else:
-            # enter if flat and desired long/short
-            if (not pos_open) and desired in ("LONG", "SHORT"):
-              conf = abs(p_up - 0.5) * 2.0
-              conf = clamp(conf, 0.0, 1.0)
+            else:
+              # enter if flat and desired long/short
+              if (not pos_open) and desired in ("LONG", "SHORT"):
+                conf = abs(p_up - 0.5) * 2.0
+                conf = clamp(conf, 0.0, 1.0)
 
-              avail = None
-              if sub_id:
-                bal = requests.get(
-                  f"{eth_base}/v1/subaccount/balance",
-                  params={"subaccountId": sub_id},
-                  timeout=20
-                ).json()
-                if bal.get("data"):
-                  row = bal["data"][0]
-                  avail = float(row.get("available") or 0)
+                avail = None
+                if sub_id:
+                  bal = requests.get(
+                    f"{eth_base}/v1/subaccount/balance",
+                    params={"subaccountId": sub_id},
+                    timeout=20
+                  ).json()
+                  if bal.get("data"):
+                    row = bal["data"][0]
+                    avail = float(row.get("available") or 0)
 
-              max_margin = float(cfg.get("maxMarginUsd", 100))
-              lev = float(cfg.get("maxLeverage", 2))
-              margin_use = min(max_margin, (avail or max_margin))
-              notional = margin_use * lev * conf
-              qty = notional / mid if mid > 0 else 0.0
-              qty = max(0.0, qty)
+                max_margin = float(cfg.get("maxMarginUsd", 100))
+                lev = float(cfg.get("maxLeverage", 2))
+                margin_use = min(max_margin, (avail or max_margin))
+                notional = margin_use * lev * conf
+                qty = notional / mid if mid > 0 else 0.0
+                qty = max(0.0, qty)
 
-              if qty > 0:
-                side_int = 0 if desired == "LONG" else 1
-                await place_market(client, ticker, side_int, qty)
-                last_order_ts.append(now)
-                last_position_opened_ms = ts_ms
-                action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
+                if qty > 0:
+                  side_int = 0 if desired == "LONG" else 1
+                  await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name)
+                  last_order_ts.append(now)
+                  last_position_opened_ms = ts_ms
+                  action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
 
-            # flip if opposite (only after min hold)
-            if pos_open and desired in ("LONG", "SHORT") and pos_side and desired != pos_side:
-              if (not min_hold_until) or (ts_ms >= min_hold_until):
-                await close_position_if_any(client, ticker, pos_open, pos_side, pos_size)
-                last_order_ts.append(now)
-                action_taken = {"type": "CLOSE_FOR_FLIP", "ok": True, "info": {"from": pos_side, "to": desired}}
-                last_position_opened_ms = None
+              # flip if opposite (only after min hold)
+              if pos_open and desired in ("LONG", "SHORT") and pos_side and desired != pos_side:
+                if (not min_hold_until) or (ts_ms >= min_hold_until):
+                  await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+                  last_order_ts.append(now)
+                  action_taken = {"type": "CLOSE_FOR_FLIP", "ok": True, "info": {"from": pos_side, "to": desired}}
+                  last_position_opened_ms = None
 
       # ---- Build status ----
       status_payload = {
