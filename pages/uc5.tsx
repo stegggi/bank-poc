@@ -466,6 +466,16 @@ export default function Uc5Page() {
   }, [edit?.maxMarginPct, portfolio?.portfolioValueUsd]);
 
   const modeLabel = isOwner ? "Owner mode (can control bot)" : "Read-only mode";
+  const signerLinked = Boolean(setup?.botSigner?.linked ?? cfg?.botSignerLinked);
+  const missingSetup = useMemo(() => {
+    const out = new Set<string>(setup?.missing || []);
+    if (!cfg?.subaccountId) out.add("subaccountId");
+    if (!cfg?.subaccountName) out.add("subaccountName");
+    if (!cfg?.productId) out.add("productId");
+    if (!signerLinked) out.add("botSignerLink");
+    return Array.from(out);
+  }, [cfg?.productId, cfg?.subaccountId, cfg?.subaccountName, setup?.missing, signerLinked]);
+  const shouldShowSetup = Boolean(setup?.needsSetup || missingSetup.length > 0);
   const yDomain = useMemo<[number, number] | undefined>(() => {
     if (!chartRows.length) return undefined;
     const prices = chartRows.map((r) => r.close);
@@ -828,12 +838,12 @@ export default function Uc5Page() {
           </div>
         </section>
 
-        {setup?.needsSetup ? (
+        {shouldShowSetup ? (
           <section style={{ marginTop: 16 }}>
             <h2 style={sectionTitle}>Setup Wizard (Advanced)</h2>
             <div style={card}>
               <div style={{ color: "#555", marginBottom: 10 }}>
-                Missing setup: {setup.missing.join(", ")}
+                Missing setup: {missingSetup.join(", ")}
               </div>
               <div style={{ display: "grid", gap: 10 }}>
                 <StepRow
