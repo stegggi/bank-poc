@@ -2,17 +2,17 @@
 """
 UC5 Ethereal Autopilot Bot (mainnet)
 
-- NO high-frequency writes to Vercel Blob anymore (prevents Advanced Ops burn).
-- Runs a small HTTP telemetry server on the VPS:
+- Runs a small HTTP control + telemetry server on the VPS:
     GET /status  -> latest status JSON for the dashboard
     GET /health  -> {"ok": true}
-- Throttles dashboard reads (config/commands) to reduce Vercel ops.
+- Runtime config + command queue live locally on the VM.
+- High-frequency data (prices/decisions/model) lives in SQLite.
 
 IMPORTANT:
 This is a demo trading bot. It can lose money. Start tiny (e.g. 100 USDe) and keep leverage low.
 """
 
-import os, time, json, math, sqlite3, requests, asyncio, threading
+import os, time, json, math, sqlite3, requests, asyncio, threading, uuid
 from decimal import Decimal
 from typing import Optional, Dict, Any, List, Tuple
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -25,41 +25,19 @@ except Exception:
 
 
 # ---- Env ----
-DASH_BASE = os.environ.get("UC5_DASHBOARD_BASE_URL", "").rstrip("/")
 BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
 BOT_PRIVKEY = os.environ.get("UC5_BOT_SIGNER_PRIVATE_KEY", "")  # linked signer EOA private key (0x...)
 
 DB_PATH = os.environ.get("UC5_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "uc5.sqlite"))
+RUNTIME_CONFIG_PATH = os.environ.get("UC5_RUNTIME_CONFIG_PATH", os.path.join(os.path.dirname(__file__), "uc5.runtime.config.json"))
 
 # Telemetry server (VPS)
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
+BOT_VERSION = "uc5-bot/0.4 (vm-control + low-blob)"
 
-# Reduce dashboard polling
-CFG_REFRESH_SECONDS = int(os.environ.get("UC5_CFG_REFRESH_SECONDS", "300"))     # config fetch at most every 5 min
-CMDS_REFRESH_SECONDS = int(os.environ.get("UC5_CMDS_REFRESH_SECONDS", "30"))    # commands fetch at most every 30s
-
-if not DASH_BASE or not BOT_TOKEN:
-  raise SystemExit("Missing env: UC5_DASHBOARD_BASE_URL and/or UC5_BOT_TOKEN")
-
-
-def bot_headers() -> Dict[str, str]:
-  return {"x-uc5-bot-token": BOT_TOKEN}
-
-
-def http_get(path: str) -> Any:
-  r = requests.get(f"{DASH_BASE}{path}", timeout=20)
-  r.raise_for_status()
-  return r.json()
-
-
-def http_post(path: str, payload: Any, headers: Optional[Dict[str, str]] = None) -> Any:
-  h = {"Content-Type": "application/json"}
-  if headers:
-    h.update(headers)
-  r = requests.post(f"{DASH_BASE}{path}", data=json.dumps(payload), headers=h, timeout=20)
-  r.raise_for_status()
-  return r.json()
+if not BOT_TOKEN:
+  raise SystemExit("Missing env: UC5_BOT_TOKEN")
 
 
 # ---- SQLite ----
@@ -264,20 +242,229 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   return w
 
 
+# ---- Runtime config + commands (local, no Blob dependency) ----
+def default_runtime_config() -> Dict[str, Any]:
+  owner = os.environ.get("UC5_OWNER_ADDRESS", "")
+  return {
+    "version": 1,
+    "ownerAddress": owner,
+    "etherealApiBase": os.environ.get("UC5_ETHEREAL_API_BASE", "https://api.ethereal.trade"),
+    "etherealArchiveBase": os.environ.get("UC5_ETHEREAL_ARCHIVE_BASE", "https://archive.ethereal.trade"),
+    "etherealRpcUrl": os.environ.get("UC5_ETHEREAL_RPC_URL", "https://rpc.ethereal.trade"),
+    "ticker": "BTCUSD",
+    "productId": "",
+    "subaccountId": "",
+    "subaccountName": "",
+    "tradingEnabled": True,
+    "killSwitch": False,
+    "pollIntervalSeconds": 2,
+    "predictionHorizonSeconds": 3600,  # force >= 60m trade horizon
+    "maxLeverage": 2,
+    "maxMarginUsd": 100,
+    "confidenceThreshold": 0.6,
+    "minHoldSeconds": 60,
+    "maxHoldSeconds": 900,
+    "maxOrdersPerHour": 120,
+  }
+
+
+def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
+  cfg = default_runtime_config()
+  if isinstance(raw, dict):
+    for k in cfg.keys():
+      if k in raw:
+        cfg[k] = raw.get(k)
+
+  cfg["ownerAddress"] = str(cfg.get("ownerAddress") or "")
+  cfg["etherealApiBase"] = str(cfg.get("etherealApiBase") or "https://api.ethereal.trade")
+  cfg["etherealArchiveBase"] = str(cfg.get("etherealArchiveBase") or "https://archive.ethereal.trade")
+  cfg["etherealRpcUrl"] = str(cfg.get("etherealRpcUrl") or "https://rpc.ethereal.trade")
+  cfg["ticker"] = str(cfg.get("ticker") or "BTCUSD")
+  cfg["productId"] = str(cfg.get("productId") or "")
+  cfg["subaccountId"] = str(cfg.get("subaccountId") or "")
+  cfg["subaccountName"] = str(cfg.get("subaccountName") or "")
+  cfg["tradingEnabled"] = bool(cfg.get("tradingEnabled", True))
+  cfg["killSwitch"] = bool(cfg.get("killSwitch", False))
+
+  try:
+    cfg["pollIntervalSeconds"] = int(cfg.get("pollIntervalSeconds", 2))
+  except Exception:
+    cfg["pollIntervalSeconds"] = 2
+  cfg["pollIntervalSeconds"] = max(2, min(60, cfg["pollIntervalSeconds"]))
+
+  try:
+    cfg["predictionHorizonSeconds"] = int(cfg.get("predictionHorizonSeconds", 3600))
+  except Exception:
+    cfg["predictionHorizonSeconds"] = 3600
+  cfg["predictionHorizonSeconds"] = max(3600, min(86400, cfg["predictionHorizonSeconds"]))
+
+  try:
+    cfg["maxLeverage"] = float(cfg.get("maxLeverage", 2))
+  except Exception:
+    cfg["maxLeverage"] = 2.0
+  cfg["maxLeverage"] = max(1.0, min(20.0, cfg["maxLeverage"]))
+
+  try:
+    cfg["maxMarginUsd"] = float(cfg.get("maxMarginUsd", 100))
+  except Exception:
+    cfg["maxMarginUsd"] = 100.0
+  cfg["maxMarginUsd"] = max(1.0, cfg["maxMarginUsd"])
+
+  try:
+    cfg["confidenceThreshold"] = float(cfg.get("confidenceThreshold", 0.6))
+  except Exception:
+    cfg["confidenceThreshold"] = 0.6
+  cfg["confidenceThreshold"] = max(0.5, min(0.95, cfg["confidenceThreshold"]))
+
+  try:
+    cfg["minHoldSeconds"] = int(cfg.get("minHoldSeconds", 60))
+  except Exception:
+    cfg["minHoldSeconds"] = 60
+  cfg["minHoldSeconds"] = max(0, min(86400, cfg["minHoldSeconds"]))
+
+  try:
+    cfg["maxHoldSeconds"] = int(cfg.get("maxHoldSeconds", 900))
+  except Exception:
+    cfg["maxHoldSeconds"] = 900
+  cfg["maxHoldSeconds"] = max(30, min(86400, cfg["maxHoldSeconds"]))
+
+  try:
+    cfg["maxOrdersPerHour"] = int(cfg.get("maxOrdersPerHour", 120))
+  except Exception:
+    cfg["maxOrdersPerHour"] = 120
+  cfg["maxOrdersPerHour"] = max(1, min(2000, cfg["maxOrdersPerHour"]))
+
+  return cfg
+
+
+def load_runtime_config_from_disk() -> Dict[str, Any]:
+  try:
+    if os.path.exists(RUNTIME_CONFIG_PATH):
+      with open(RUNTIME_CONFIG_PATH, "r", encoding="utf-8") as f:
+        return sanitize_runtime_config(json.load(f))
+  except Exception:
+    pass
+  return sanitize_runtime_config({})
+
+
+def save_runtime_config_to_disk(cfg: Dict[str, Any]):
+  parent = os.path.dirname(os.path.abspath(RUNTIME_CONFIG_PATH))
+  os.makedirs(parent, exist_ok=True)
+  tmp = f"{RUNTIME_CONFIG_PATH}.tmp"
+  with open(tmp, "w", encoding="utf-8") as f:
+    json.dump(cfg, f, indent=2)
+  os.replace(tmp, RUNTIME_CONFIG_PATH)
+
+
+def clone_jsonable(v: Any) -> Any:
+  try:
+    return json.loads(json.dumps(v))
+  except Exception:
+    return v
+
+
+RUNTIME_LOCK = threading.Lock()
+RUNTIME_CONFIG: Dict[str, Any] = load_runtime_config_from_disk()
+
+COMMANDS_LOCK = threading.Lock()
+COMMANDS: List[Dict[str, Any]] = []
+COMMAND_LIMIT = 300
+
+
+def get_runtime_config() -> Dict[str, Any]:
+  with RUNTIME_LOCK:
+    return clone_jsonable(RUNTIME_CONFIG)
+
+
+def set_runtime_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+  global RUNTIME_CONFIG
+  next_cfg = sanitize_runtime_config(cfg)
+  with RUNTIME_LOCK:
+    RUNTIME_CONFIG = next_cfg
+  save_runtime_config_to_disk(next_cfg)
+  return clone_jsonable(next_cfg)
+
+
+def list_commands() -> List[Dict[str, Any]]:
+  with COMMANDS_LOCK:
+    return clone_jsonable(COMMANDS)
+
+
+def enqueue_command(cmd_type: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+  cmd = {
+    "id": str(uuid.uuid4()),
+    "type": str(cmd_type),
+    "createdAt": int(time.time() * 1000),
+    "status": "NEW",
+  }
+  if payload is not None:
+    cmd["payload"] = clone_jsonable(payload)
+
+  with COMMANDS_LOCK:
+    COMMANDS.append(cmd)
+    if len(COMMANDS) > COMMAND_LIMIT:
+      del COMMANDS[: len(COMMANDS) - COMMAND_LIMIT]
+  return clone_jsonable(cmd)
+
+
+def get_new_commands() -> List[Dict[str, Any]]:
+  with COMMANDS_LOCK:
+    return [clone_jsonable(c) for c in COMMANDS if c.get("status") == "NEW"]
+
+
+def apply_command_updates(updates: List[Dict[str, Any]]):
+  if not updates:
+    return
+  by_id = {str(u.get("id")): u for u in updates if u.get("id")}
+  if not by_id:
+    return
+  with COMMANDS_LOCK:
+    for c in COMMANDS:
+      u = by_id.get(str(c.get("id")))
+      if not u:
+        continue
+      c["status"] = u.get("status", c.get("status"))
+      if "result" in u:
+        c["result"] = clone_jsonable(u.get("result"))
+
+
 # ---- Telemetry server (in-memory latest status) ----
 LATEST_STATUS: Dict[str, Any] = {"bot": {"alive": False, "message": "starting"}}
 STATUS_LOCK = threading.Lock()
 
 
 class TelemetryHandler(BaseHTTPRequestHandler):
+  def _authorized(self) -> bool:
+    expected = str(BOT_TOKEN or "")
+    got = str(self.headers.get("x-uc5-bot-token") or "")
+    return bool(expected and got and got == expected)
+
+  def _read_json(self) -> Dict[str, Any]:
+    try:
+      length = int(self.headers.get("Content-Length", "0") or "0")
+      if length <= 0:
+        return {}
+      raw = self.rfile.read(length).decode("utf-8")
+      if not raw.strip():
+        return {}
+      obj = json.loads(raw)
+      return obj if isinstance(obj, dict) else {}
+    except Exception:
+      return {}
+
   def _send_json(self, code: int, obj: Any):
     body = json.dumps(obj).encode("utf-8")
     self.send_response(code)
     self.send_header("Content-Type", "application/json")
     self.send_header("Access-Control-Allow-Origin", "*")
+    self.send_header("Access-Control-Allow-Headers", "content-type, x-uc5-bot-token")
+    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
     self.send_header("Cache-Control", "no-store")
     self.end_headers()
     self.wfile.write(body)
+
+  def do_OPTIONS(self):
+    return self._send_json(200, {"ok": True})
 
   def do_GET(self):
     if self.path.startswith("/health"):
@@ -286,6 +473,48 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       with STATUS_LOCK:
         data = LATEST_STATUS
       return self._send_json(200, data)
+    if self.path.startswith("/config"):
+      return self._send_json(200, get_runtime_config())
+    if self.path.startswith("/commands"):
+      if not self._authorized():
+        return self._send_json(403, {"error": "forbidden"})
+      return self._send_json(200, {"commands": list_commands()})
+    return self._send_json(404, {"error": "not found"})
+
+  def do_POST(self):
+    if self.path.startswith("/config"):
+      if not self._authorized():
+        return self._send_json(403, {"error": "forbidden"})
+      body = self._read_json()
+      raw_cfg = body.get("config")
+      if not isinstance(raw_cfg, dict):
+        return self._send_json(400, {"error": "Missing config object"})
+      cfg = set_runtime_config(raw_cfg)
+      return self._send_json(200, {"ok": True, "config": cfg})
+
+    if self.path.startswith("/command-updates"):
+      if not self._authorized():
+        return self._send_json(403, {"error": "forbidden"})
+      body = self._read_json()
+      updates = body.get("updates")
+      if not isinstance(updates, list):
+        return self._send_json(400, {"error": "Missing updates array"})
+      apply_command_updates([u for u in updates if isinstance(u, dict)])
+      return self._send_json(200, {"ok": True})
+
+    if self.path.startswith("/command"):
+      if not self._authorized():
+        return self._send_json(403, {"error": "forbidden"})
+      body = self._read_json()
+      cmd_type = str(body.get("type") or "").strip().upper()
+      payload = body.get("payload")
+      if cmd_type not in ("FLATTEN", "LINK_SIGNER"):
+        return self._send_json(400, {"error": f"Unsupported command type: {cmd_type or '(empty)'}"})
+      if cmd_type == "LINK_SIGNER" and not isinstance(payload, dict):
+        return self._send_json(400, {"error": "Missing payload for LINK_SIGNER"})
+      cmd = enqueue_command(cmd_type, payload if isinstance(payload, dict) else None)
+      return self._send_json(200, {"ok": True, "id": cmd["id"], "command": cmd})
+
     return self._send_json(404, {"error": "not found"})
 
   def log_message(self, format, *args):
@@ -578,35 +807,18 @@ async def main():
   client: Optional[AsyncRESTClient] = None
   last_order_ts: List[float] = []
   last_position_opened_ms: Optional[int] = None
-
-  cfg_cache: Optional[Dict[str, Any]] = None
-  cfg_last_fetch = 0.0
-  cmds_last_fetch = 0.0
-  cmds_cache: List[Dict[str, Any]] = []
-
-  def get_cfg() -> Dict[str, Any]:
-    nonlocal cfg_cache, cfg_last_fetch
-    now = time.time()
-    if cfg_cache is None or (now - cfg_last_fetch) >= CFG_REFRESH_SECONDS:
-      cfg_cache = http_get("/api/uc5/config")
-      cfg_last_fetch = now
-    return cfg_cache
-
-  def get_cmds() -> List[Dict[str, Any]]:
-    nonlocal cmds_cache, cmds_last_fetch
-    now = time.time()
-    if (now - cmds_last_fetch) >= CMDS_REFRESH_SECONDS:
-      cmds_file = requests.get(f"{DASH_BASE}/api/uc5/bot/commands", headers=bot_headers(), timeout=20).json()
-      cmds_cache = cmds_file.get("commands", [])
-      cmds_last_fetch = now
-    return cmds_cache
+  next_reassess_ms: Optional[int] = None
+  last_decision_at_ms: Optional[int] = None
+  last_reason = "warming up (need more history)"
+  last_conf = 0.5
+  last_desired = "FLAT"
 
   while True:
     loop_started = time.time()
     status_payload: Dict[str, Any] = {}
 
     try:
-      cfg = get_cfg()
+      cfg = get_runtime_config()
       eth_base = cfg.get("etherealApiBase", "https://api.ethereal.trade")
 
       # Ensure client (SDK)
@@ -639,7 +851,7 @@ async def main():
       pos_open, pos_side, pos_size, pos_upnl = parse_position(pos)
 
       # ---- Commands ----
-      cmds = get_cmds()
+      cmds = get_new_commands()
       updates = []
       for c in cmds:
         if c.get("status") != "NEW":
@@ -664,8 +876,7 @@ async def main():
         except Exception as ce:
           updates.append({"id": cid, "status": "ERROR", "result": {"error": str(ce)}})
 
-      if updates:
-        http_post("/api/uc5/bot/commands", {"updates": updates}, headers=bot_headers())
+      apply_command_updates(updates)
 
       # ---- Market price ----
       mp = fetch_market_price(eth_base, product_id)
@@ -683,40 +894,67 @@ async def main():
       )
       conn.commit()
 
-      # ---- Learning ----
+      # ---- Learning + decision cadence ----
       w = train_online(conn, w, lr=0.25)
       set_model(conn, w)
 
-      feats, reason = compute_features(conn)
-      p_up = predict(w, feats)
+      horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
+      horizon_ms = int(horizon_sec * 1000)
+      max_hold = max(int(cfg.get("maxHoldSeconds", 900)), horizon_sec)
 
-      conn.execute(
-        "INSERT INTO decisions(ts_ms, horizon_sec, p_up, f1,f2,f3,f4,f5,f6) VALUES (?,?,?,?,?,?,?,?,?)",
-        (ts_ms, int(cfg.get("predictionHorizonSeconds", 60)),
-         p_up, feats[1], feats[2], feats[3], feats[4], feats[5], feats[6])
-      )
-      conn.commit()
+      # Sync timers with current position state.
+      if pos_open:
+        if last_position_opened_ms is None:
+          last_position_opened_ms = ts_ms
+        if next_reassess_ms is None:
+          next_reassess_ms = last_position_opened_ms + horizon_ms
+      else:
+        last_position_opened_ms = None
+        next_reassess_ms = None
 
-      thr = float(cfg.get("confidenceThreshold", 0.6))
-      desired = "FLAT"
-      if p_up > thr:
-        desired = "LONG"
-      elif p_up < (1.0 - thr):
-        desired = "SHORT"
+      evaluate_now = False
+      if last_decision_at_ms is None:
+        evaluate_now = True
+      elif (not pos_open) and (ts_ms - last_decision_at_ms >= horizon_ms):
+        evaluate_now = True
+      elif pos_open and next_reassess_ms and ts_ms >= next_reassess_ms:
+        evaluate_now = True
 
-      # ---- Hold windows ----
-      min_hold = int(cfg.get("minHoldSeconds", 60))
-      max_hold = int(cfg.get("maxHoldSeconds", 900))
-      min_hold_until = None
-      max_hold_until = None
-      if last_position_opened_ms:
-        min_hold_until = last_position_opened_ms + min_hold * 1000
-        max_hold_until = last_position_opened_ms + max_hold * 1000
+      reason = last_reason
+      p_up = float(last_conf)
+      desired = str(last_desired)
+      if evaluate_now:
+        feats, reason = compute_features(conn)
+        p_up = predict(w, feats)
+
+        conn.execute(
+          "INSERT INTO decisions(ts_ms, horizon_sec, p_up, f1,f2,f3,f4,f5,f6) VALUES (?,?,?,?,?,?,?,?,?)",
+          (ts_ms, horizon_sec, p_up, feats[1], feats[2], feats[3], feats[4], feats[5], feats[6])
+        )
+        conn.commit()
+
+        thr = float(cfg.get("confidenceThreshold", 0.6))
+        desired = "FLAT"
+        if p_up > thr:
+          desired = "LONG"
+        elif p_up < (1.0 - thr):
+          desired = "SHORT"
+
+        last_decision_at_ms = ts_ms
+        last_reason = reason
+        last_conf = float(p_up)
+        last_desired = desired
+
+        if pos_open and next_reassess_ms and ts_ms >= next_reassess_ms:
+          next_reassess_ms = ts_ms + horizon_ms
+
+      min_hold_until = (last_position_opened_ms + horizon_ms) if last_position_opened_ms else None
+      max_hold_until = (last_position_opened_ms + max_hold * 1000) if last_position_opened_ms else None
 
       trading_enabled = bool(cfg.get("tradingEnabled", True))
       kill = bool(cfg.get("killSwitch", False))
 
-      action_taken = {"type": None, "ok": True, "info": None}
+      action_taken = {"type": "NO_ACTION", "ok": True, "info": None}
 
       # ---- Trade gate ----
       if trading_enabled and (not kill) and client is not None:
@@ -730,22 +968,29 @@ async def main():
           max_oph = int(cfg.get("maxOrdersPerHour", 120))
           now = time.time()
           last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
-          can_order = len(last_order_ts) < max_oph
+          can_open = len(last_order_ts) < max_oph
 
-          if can_order:
-            # max hold: exit if exceeded
-            if pos_open and max_hold_until and ts_ms >= max_hold_until:
-              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
-              last_order_ts.append(now)
-              action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
-              last_position_opened_ms = None
+          # Force close if max position age is reached.
+          if pos_open and max_hold_until and ts_ms >= max_hold_until:
+            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+            last_order_ts.append(now)
+            last_position_opened_ms = None
+            next_reassess_ms = None
+            action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
 
-            else:
-              # enter if flat and desired long/short
-              if (not pos_open) and desired in ("LONG", "SHORT"):
-                conf = abs(p_up - 0.5) * 2.0
-                conf = clamp(conf, 0.0, 1.0)
-
+          elif not pos_open:
+            # Only evaluate new entries at horizon cadence (>= 60m).
+            if not evaluate_now:
+              action_taken = {
+                "type": "WAIT_ENTRY_REASSESS",
+                "ok": True,
+                "info": {"nextAt": (last_decision_at_ms + horizon_ms) if last_decision_at_ms else ts_ms},
+              }
+            elif desired in ("LONG", "SHORT"):
+              if not can_open:
+                action_taken = {"type": "RATE_LIMITED", "ok": False, "info": {"maxOrdersPerHour": max_oph}}
+              else:
+                conf = clamp(abs(p_up - 0.5) * 2.0, 0.0, 1.0)
                 avail = None
                 if sub_id:
                   bal = requests.get(
@@ -761,23 +1006,36 @@ async def main():
                 lev = float(cfg.get("maxLeverage", 2))
                 margin_use = min(max_margin, (avail or max_margin))
                 notional = margin_use * lev * conf
-                qty = notional / mid if mid > 0 else 0.0
-                qty = max(0.0, qty)
+                qty = max(0.0, (notional / mid) if mid > 0 else 0.0)
 
                 if qty > 0:
                   side_int = 0 if desired == "LONG" else 1
                   await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name)
                   last_order_ts.append(now)
                   last_position_opened_ms = ts_ms
+                  next_reassess_ms = ts_ms + horizon_ms
                   action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
+                else:
+                  action_taken = {"type": "SKIP_ZERO_QTY", "ok": False, "info": None}
+            else:
+              action_taken = {"type": "SKIP_NO_SIGNAL", "ok": True, "info": {"desired": desired}}
 
-              # flip if opposite (only after min hold)
-              if pos_open and desired in ("LONG", "SHORT") and pos_side and desired != pos_side:
-                if (not min_hold_until) or (ts_ms >= min_hold_until):
-                  await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
-                  last_order_ts.append(now)
-                  action_taken = {"type": "CLOSE_FOR_FLIP", "ok": True, "info": {"from": pos_side, "to": desired}}
-                  last_position_opened_ms = None
+          else:
+            # In trade: hold for at least horizon, then reassess periodically.
+            if not evaluate_now:
+              action_taken = {"type": "HOLD_UNTIL_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
+            elif desired == pos_side:
+              action_taken = {"type": "HOLD_AFTER_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
+            else:
+              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              last_order_ts.append(now)
+              last_position_opened_ms = None
+              next_reassess_ms = None
+              action_taken = {
+                "type": "LIQUIDATE_REASSESS",
+                "ok": True,
+                "info": {"from": pos_side, "modelDesired": desired},
+              }
 
       # ---- Build status ----
       status_payload = {
@@ -786,7 +1044,7 @@ async def main():
           "alive": True,
           "lastLoopAt": int(time.time() * 1000),
           "message": "running",
-          "version": "uc5-bot/0.3 (sdk-fix + vps-telemetry)",
+          "version": BOT_VERSION,
         },
         "market": {
           "ticker": ticker,
@@ -798,6 +1056,7 @@ async def main():
         "account": {
           "owner": cfg.get("ownerAddress"),
           "subaccountId": sub_id,
+          "subaccountName": subaccount_name,
         },
         "position": {
           "open": bool(pos_open),
@@ -810,7 +1069,9 @@ async def main():
           "desired": desired,
           "confidence": float(p_up),
           "reason": reason,
-          "lastDecisionAt": int(time.time() * 1000),
+          "lastDecisionAt": last_decision_at_ms,
+          "decisionHorizonSeconds": horizon_sec,
+          "nextReassessAt": next_reassess_ms,
           "minHoldUntil": min_hold_until,
           "maxHoldUntil": max_hold_until,
         },
@@ -824,7 +1085,7 @@ async def main():
           "alive": True,
           "lastLoopAt": int(time.time() * 1000),
           "message": f"error: {str(e)}",
-          "version": "uc5-bot/0.3 (sdk-fix + vps-telemetry)",
+          "version": BOT_VERSION,
         },
       }
 
@@ -832,11 +1093,11 @@ async def main():
     with STATUS_LOCK:
       LATEST_STATUS = status_payload
 
-    # Sleep — use config if available, else 3s
+    # Sleep — use runtime config (2s default)
     try:
-      interval = int((cfg_cache or {}).get("pollIntervalSeconds", 3))
+      interval = int(get_runtime_config().get("pollIntervalSeconds", 2))
     except Exception:
-      interval = 3
+      interval = 2
 
     elapsed = time.time() - loop_started
     to_sleep = max(0.2, float(interval) - float(elapsed))

@@ -1,11 +1,13 @@
 import type { NextApiRequest, NextApiResponse } from "next";
+import { getVmConfigCached } from "../../../lib/uc5/vmRuntime";
 
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
   try {
-    const base = process.env.UC5_ETHEREAL_API_BASE || "https://api.ethereal.trade";
-    const ticker = process.env.NEXT_PUBLIC_UC5_TICKER || "BTCUSD";
-    const owner = process.env.UC5_OWNER_ADDRESS || process.env.NEXT_PUBLIC_UC5_OWNER_ADDRESS || "";
-    const subaccountId = process.env.NEXT_PUBLIC_UC5_SUBACCOUNT_ID || "";
+    const cfg = await getVmConfigCached(15_000);
+    const base = cfg.etherealApiBase || "https://api.ethereal.trade";
+    const ticker = cfg.ticker || "BTCUSD";
+    const owner = cfg.ownerAddress || process.env.UC5_OWNER_ADDRESS || process.env.NEXT_PUBLIC_UC5_OWNER_ADDRESS || "";
+    const subaccountId = cfg.subaccountId || "";
 
     // product by ticker
     const pr = await fetch(`${base}/v1/product?ticker=${encodeURIComponent(ticker)}`, { cache: "no-store" });
@@ -14,7 +16,7 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
     const productId = product?.id;
 
     // market price array endpoint
-    let market: any = null;
+    let market: unknown = null;
     if (productId) {
       const params = new URLSearchParams();
       params.append("productIds", productId);
@@ -24,7 +26,7 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
     }
 
     // points summary (public)
-    let points: any = null;
+    let points: unknown = null;
     if (owner) {
       const rr = await fetch(`${base}/v1/points/summary?address=${encodeURIComponent(owner)}`, { cache: "no-store" });
       const rj = await rr.json().catch(() => null);
@@ -36,7 +38,7 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
     }
 
     // (Optional) subaccount balances (may be restricted; fail silently)
-    let balances: any = null;
+    let balances: unknown = null;
     if (subaccountId) {
       try {
         const br = await fetch(`${base}/v1/subaccount/balance?subaccountId=${encodeURIComponent(subaccountId)}`, { cache: "no-store" });
@@ -47,7 +49,7 @@ export default async function handler(_req: NextApiRequest, res: NextApiResponse
 
     res.setHeader("cache-control", "no-store");
     return res.status(200).json({ product, market, points, balances });
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message || "Failed to load state" });
+  } catch (e: unknown) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Failed to load state" });
   }
 }

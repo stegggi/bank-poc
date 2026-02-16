@@ -24,8 +24,8 @@ export const Uc5ConfigSchema = z.object({
   tradingEnabled: z.boolean().default(true),
   killSwitch: z.boolean().default(false), // stops placing orders but keeps collecting data
 
-  pollIntervalSeconds: z.number().int().min(1).max(60).default(3),
-  predictionHorizonSeconds: z.number().int().min(10).max(3600).default(60),
+  pollIntervalSeconds: z.number().int().min(2).max(60).default(2),
+  predictionHorizonSeconds: z.number().int().min(3600).max(86400).default(3600),
 
   // Risk & behavior
   maxLeverage: z.number().min(1).max(20).default(2),

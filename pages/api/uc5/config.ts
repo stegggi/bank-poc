@@ -1,24 +1,13 @@
 // pages/api/uc5/config.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { Uc5ConfigSchema, type Uc5Config } from "../../../lib/uc5/types";
-import { readJsonBlob, writeJsonBlob } from "../../../lib/uc5/blobStore";
 import { verifyAdminSignature, normAddr } from "../../../lib/uc5/auth";
-
-const CONFIG_PATH = "uc5/config.json";
-
-function defaultConfig(): Uc5Config {
-  const owner = process.env.UC5_OWNER_ADDRESS || process.env.NEXT_PUBLIC_UC5_OWNER_ADDRESS || "";
-  return Uc5ConfigSchema.parse({
-    ownerAddress: owner,
-    etherealApiBase: "https://api.ethereal.trade",
-    etherealArchiveBase: "https://archive.ethereal.trade",
-    ticker: "BTCUSD",
-  });
-}
+import { getVmConfigCached, postVmConfig } from "../../../lib/uc5/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const cfg = await readJsonBlob<Uc5Config>(CONFIG_PATH, defaultConfig());
+    const cfg = await getVmConfigCached(15_000);
+    res.setHeader("cache-control", "no-store");
     return res.status(200).json(cfg);
   }
 
@@ -26,8 +15,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     try {
       const body = req.body || {};
       const cfg = Uc5ConfigSchema.parse(body.config);
+      const current = await getVmConfigCached(15_000);
 
-      const owner = cfg.ownerAddress || process.env.UC5_OWNER_ADDRESS || "";
+      const owner = current.ownerAddress || process.env.UC5_OWNER_ADDRESS || process.env.NEXT_PUBLIC_UC5_OWNER_ADDRESS || "";
       if (!owner) return res.status(400).json({ error: "Missing UC5_OWNER_ADDRESS" });
 
       const auth = body.auth || {};
@@ -43,13 +33,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
       if (!v.ok) return res.status(403).json({ error: v.error || "Forbidden" });
 
-      // normalize owner formatting
-      (cfg as any).ownerAddress = normAddr(owner);
+      // Keep owner stable; only owner wallet can update config.
+      const nextCfg: Uc5Config = { ...cfg, ownerAddress: normAddr(owner) };
 
-      await writeJsonBlob(CONFIG_PATH, cfg);
+      await postVmConfig(nextCfg);
       return res.status(200).json({ ok: true });
-    } catch (e: any) {
-      return res.status(400).json({ error: e?.message || "Bad request" });
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : "Bad request";
+      return res.status(400).json({ error: message });
     }
   }
 

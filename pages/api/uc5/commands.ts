@@ -1,54 +1,28 @@
 // pages/api/uc5/commands.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { randomUUID } from "crypto";
-import { readJsonBlob, writeJsonBlob } from "../../../lib/uc5/blobStore";
 import { verifyAdminSignature, verifyLinkSignerSenderSig } from "../../../lib/uc5/auth";
-import type { Uc5Command, Uc5Config } from "../../../lib/uc5/types";
+import { getVmCommands, getVmConfigCached, postVmCommand } from "../../../lib/uc5/vmRuntime";
 
-const COMMANDS_PATH = "uc5/commands.json";
-const CONFIG_PATH = "uc5/config.json";
-
-type CommandsFile = { commands: Uc5Command[] };
+function commandId(out: unknown): string {
+  if (!out || typeof out !== "object") return "";
+  if (!("id" in out)) return "";
+  return String((out as { id?: unknown }).id || "");
+}
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const cfg = await readJsonBlob<Uc5Config>(CONFIG_PATH, {
-    version: 1,
-    ownerAddress: process.env.UC5_OWNER_ADDRESS || "",
-    etherealApiBase: "https://api.ethereal.trade",
-    etherealArchiveBase: "https://archive.ethereal.trade",
-    ticker: "BTCUSD",
-    tradingEnabled: true,
-    killSwitch: false,
-    pollIntervalSeconds: 3,
-    predictionHorizonSeconds: 60,
-    maxLeverage: 2,
-    maxMarginUsd: 100,
-    confidenceThreshold: 0.6,
-    minHoldSeconds: 60,
-    maxHoldSeconds: 900,
-    maxOrdersPerHour: 120,
-    productId: "",
-    subaccountId: "",
-    subaccountName: "",
-  } as any);
+  const cfg = await getVmConfigCached(15_000);
 
   const owner = cfg.ownerAddress || process.env.UC5_OWNER_ADDRESS || "";
   if (!owner) return res.status(400).json({ error: "Missing UC5 owner address" });
 
   if (req.method === "GET") {
-    const file = await readJsonBlob<CommandsFile>(COMMANDS_PATH, { commands: [] });
+    const file = await getVmCommands();
     return res.status(200).json(file);
   }
 
   if (req.method === "POST") {
     const body = req.body || {};
     const type = body.type as string;
-
-    // Load current commands
-    const file = await readJsonBlob<CommandsFile>(COMMANDS_PATH, { commands: [] });
-
-    // Keep file bounded
-    const trimmed = file.commands.slice(-200);
 
     if (type === "FLATTEN") {
       const auth = body.auth || {};
@@ -63,14 +37,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       if (!v.ok) return res.status(403).json({ error: v.error || "Forbidden" });
 
-      const cmd: Uc5Command = {
-        id: randomUUID(),
-        type: "FLATTEN",
-        createdAt: Date.now(),
-        status: "NEW",
-      };
-      await writeJsonBlob(COMMANDS_PATH, { commands: [...trimmed, cmd] });
-      return res.status(200).json({ ok: true, id: cmd.id });
+      const out = await postVmCommand({ type: "FLATTEN" });
+      return res.status(200).json({ ok: true, id: commandId(out) });
     }
 
     if (type === "LINK_SIGNER") {
@@ -96,24 +64,18 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       });
       if (!v.ok) return res.status(403).json({ error: v.error || "Forbidden" });
 
-      const cmd: Uc5Command = {
-        id: randomUUID(),
-        type: "LINK_SIGNER",
-        createdAt: Date.now(),
-        status: "NEW",
-        payload: {
-          subaccountId,
-          sender,
-          subaccount,
-          signer,
-          nonce: String(nonce),
-          signedAt: Number(signedAt),
-          senderSignature,
-        },
+      const commandPayload = {
+        subaccountId,
+        sender,
+        subaccount,
+        signer,
+        nonce: String(nonce),
+        signedAt: Number(signedAt),
+        senderSignature,
       };
 
-      await writeJsonBlob(COMMANDS_PATH, { commands: [...trimmed, cmd] });
-      return res.status(200).json({ ok: true, id: cmd.id });
+      const out = await postVmCommand({ type: "LINK_SIGNER", payload: commandPayload });
+      return res.status(200).json({ ok: true, id: commandId(out) });
     }
 
     return res.status(400).json({ error: `Unknown command type: ${type}` });

@@ -1,0 +1,19 @@
+[Unit]
+Description=UC5 Ethereal Bot
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/bank-poc/bot
+EnvironmentFile=/home/ubuntu/bank-poc/bot/.env
+ExecStart=/home/ubuntu/bank-poc/bot/.venv/bin/python /home/ubuntu/bank-poc/bot/uc5-bot.py
+Restart=always
+RestartSec=5
+TimeoutStopSec=10
+StandardOutput=append:/home/ubuntu/uc5-bot.log
+StandardError=append:/home/ubuntu/uc5-bot.log
+
+[Install]
+WantedBy=multi-user.target

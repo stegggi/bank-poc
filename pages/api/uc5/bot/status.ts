@@ -1,19 +1,8 @@
 // pages/api/uc5/bot/status.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-
-function withTimeout(ms: number) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), ms);
-  return { controller, id };
-}
+import { getVmStatusCached } from "../../../../lib/uc5/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const base = (process.env.UC5_BOT_TELEMETRY_URL || "").replace(/\/+$/, "");
-  if (!base) {
-    res.status(500).json({ error: "Missing env UC5_BOT_TELEMETRY_URL on Vercel" });
-    return;
-  }
-
   // We only support GET for the UI. POST is accepted but ignored (compat during rollout).
   if (req.method === "POST") {
     res.status(200).json({ ok: true, ignored: true });
@@ -26,20 +15,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return;
   }
 
-  const { controller, id } = withTimeout(8000);
   try {
-    const r = await fetch(`${base}/status`, {
-      method: "GET",
-      signal: controller.signal,
-      headers: { "accept": "application/json" },
-    });
-
-    const text = await r.text();
+    const status = await getVmStatusCached(2_000);
     res.setHeader("Cache-Control", "no-store");
-    res.status(r.status).send(text);
-  } catch (e: any) {
-    res.status(502).json({ error: "Failed to reach bot telemetry", detail: String(e?.message || e) });
-  } finally {
-    clearTimeout(id);
+    res.status(200).json(status);
+  } catch (e: unknown) {
+    const detail = e instanceof Error ? e.message : String(e ?? "unknown error");
+    res.status(502).json({ error: "Failed to reach bot telemetry", detail });
   }
 }

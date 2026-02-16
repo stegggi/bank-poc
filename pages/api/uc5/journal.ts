@@ -1,24 +1,18 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { list, put } from "@vercel/blob";
 
-const KEY = "uc5/journal.json";
+type JournalState = { updatedAt: number; events: unknown[] };
+const g = globalThis as typeof globalThis & { __uc5JournalState?: JournalState };
 
-async function readJsonFromBlob(key: string) {
-  const res = await list({ prefix: key });
-  const match = res.blobs.find((b) => b.pathname === key);
-  if (!match?.url) return null;
-
-  const r = await fetch(match.url, { cache: "no-store" });
-  if (!r.ok) return null;
-  return await r.json();
+function getJournalState(): JournalState {
+  if (!g.__uc5JournalState) g.__uc5JournalState = { updatedAt: 0, events: [] };
+  return g.__uc5JournalState;
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     if (req.method === "GET") {
-      const stored = await readJsonFromBlob(KEY);
       res.setHeader("cache-control", "no-store");
-      return res.status(200).json(stored || { updatedAt: 0, events: [] });
+      return res.status(200).json(getJournalState());
     }
 
     if (req.method === "POST") {
@@ -28,16 +22,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (got !== token) return res.status(403).json({ error: "Bad bot token." });
 
       const body = req.body || {};
+      const nextEvents = Array.isArray(body.events) ? body.events.slice(-500) : [];
       const payload = {
         updatedAt: Date.now(),
-        events: Array.isArray(body.events) ? body.events : [],
+        events: nextEvents,
       };
 
-      await put(KEY, new Blob([JSON.stringify(payload)], { type: "application/json" }), {
-        access: "public",
-        addRandomSuffix: false,
-        allowOverwrite: true,
-      });
+      g.__uc5JournalState = payload;
 
       res.setHeader("cache-control", "no-store");
       return res.status(200).json({ ok: true });
@@ -45,7 +36,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     res.setHeader("allow", "GET, POST");
     return res.status(405).json({ error: "Method not allowed" });
-  } catch (e: any) {
-    return res.status(500).json({ error: e?.message || "Server error" });
+  } catch (e: unknown) {
+    return res.status(500).json({ error: e instanceof Error ? e.message : "Server error" });
   }
 }

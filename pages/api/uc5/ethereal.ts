@@ -1,14 +1,9 @@
 // pages/api/uc5/ethereal.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readJsonBlob } from "../../../lib/uc5/blobStore";
-import type { Uc5Config } from "../../../lib/uc5/types";
-
-const CONFIG_PATH = "uc5/config.json";
+import { getVmConfigCached } from "../../../lib/uc5/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  const cfg = await readJsonBlob<Uc5Config>(CONFIG_PATH, {
-    etherealApiBase: "https://api.ethereal.trade",
-  } as any);
+  const cfg = await getVmConfigCached(15_000);
 
   const path = (req.query.path as string) || "";
   if (!path.startsWith("/v1/")) return res.status(400).json({ error: "path must start with /v1/" });

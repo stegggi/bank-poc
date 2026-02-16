@@ -36,33 +36,49 @@ export default function Uc5Page() {
   useEffect(() => {
     let alive = true;
 
-    async function load() {
-      const [c, s] = await Promise.all([
-        fetch("/api/uc5/config", { cache: "no-store" }).then((r) => r.json()),
-        fetch("/api/uc5/status", { cache: "no-store" }).then((r) => r.json()),
-      ]);
-
-      if (!alive) return;
-
-      setCfg(c);
-      setStatus(s);
-      setEdit((prev: any) => prev ?? { ...c });
-
-      // owner detection
-      if (walletAddr && c?.ownerAddress) {
-        setIsOwner(walletAddr.toLowerCase() === String(c.ownerAddress).toLowerCase());
-      } else {
-        setIsOwner(false);
-      }
+    async function loadConfig() {
+      try {
+        const c = await fetch("/api/uc5/config", { cache: "no-store" }).then((r) => r.json());
+        if (!alive) return;
+        setCfg(c);
+        setEdit((prev: any) => prev ?? { ...c });
+      } catch {}
     }
 
-    load();
-    const t = setInterval(load, 3000);
+    loadConfig();
+    const t = setInterval(loadConfig, 60_000);
     return () => {
       alive = false;
       clearInterval(t);
     };
-  }, [walletAddr]);
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+
+    async function loadStatus() {
+      try {
+        const s = await fetch("/api/uc5/status", { cache: "no-store" }).then((r) => r.json());
+        if (!alive) return;
+        setStatus(s);
+      } catch {}
+    }
+
+    loadStatus();
+    const t = setInterval(loadStatus, 3000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (walletAddr && cfg?.ownerAddress) {
+      setIsOwner(walletAddr.toLowerCase() === String(cfg.ownerAddress).toLowerCase());
+    } else {
+      setIsOwner(false);
+    }
+  }, [walletAddr, cfg?.ownerAddress]);
 
   const heartbeat = useMemo(() => {
     const t = status?.updatedAt || 0;
@@ -162,6 +178,7 @@ export default function Uc5Page() {
 
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "Save failed");
+      setCfg(payload as any);
       setMsg("Saved ✅");
     } catch (e: any) {
       setMsg(e?.message || "Save failed");
@@ -471,14 +488,14 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="Polling interval (sec)" help="How often bot fetches price / updates model. (Start with 3s)">
+            <Field label="Polling interval (sec)" help="How often bot fetches price / updates model. (Start with 2s)">
               <input
                 style={input}
                 type="number"
-                min={1}
+                min={2}
                 max={60}
                 step={1}
-                value={edit?.pollIntervalSeconds ?? 3}
+                value={edit?.pollIntervalSeconds ?? 2}
                 onChange={(e) => setEdit((p: any) => ({ ...p, pollIntervalSeconds: Number(e.target.value) }))}
                 disabled={!isOwner}
               />
