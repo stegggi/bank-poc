@@ -332,6 +332,62 @@ def fetch_market_price(eth_base: str, product_id: str) -> Dict[str, Any]:
   return r2 if isinstance(r2, dict) else {}
 
 
+def fetch_subaccounts(eth_base: str, sender: str) -> List[Dict[str, Any]]:
+  if not sender:
+    return []
+  try:
+    raw = requests.get(
+      f"{eth_base}/v1/subaccount",
+      params={"sender": sender},
+      timeout=20,
+    ).json()
+    data = raw.get("data") if isinstance(raw, dict) else None
+    if isinstance(data, list):
+      return [x for x in data if isinstance(x, dict)]
+  except Exception:
+    return []
+  return []
+
+
+def resolve_subaccount_context(
+  eth_base: str,
+  sender: str,
+  subaccount_id: str,
+  subaccount_name: str,
+) -> Tuple[str, str]:
+  sid = str(subaccount_id or "").strip()
+  sname = str(subaccount_name or "").strip()
+  if not sender or (sid and sname):
+    return sid, sname
+
+  subs = fetch_subaccounts(eth_base, sender)
+  if not subs:
+    return sid, sname
+
+  if sid:
+    for sub in subs:
+      if str(sub.get("id") or "") == sid:
+        if not sname:
+          sname = str(sub.get("name") or "")
+        return sid, sname
+
+  if sname:
+    for sub in subs:
+      if str(sub.get("name") or "").lower() == sname.lower():
+        if not sid:
+          sid = str(sub.get("id") or "")
+        if not sname:
+          sname = str(sub.get("name") or "")
+        return sid, sname
+
+  if not sid and not sname:
+    first = subs[0]
+    sid = str(first.get("id") or "")
+    sname = str(first.get("name") or "")
+
+  return sid, sname
+
+
 def fetch_active_position(eth_base: str, sub_id: str, product_id: str) -> Optional[Dict[str, Any]]:
   if not sub_id or not product_id:
     return None
@@ -562,9 +618,15 @@ async def main():
       product_id = cfg.get("productId", "") or fetch_product_id(eth_base, ticker)
       if not product_id:
         raise RuntimeError(f"No productId found for ticker={ticker}")
-      sub_id = cfg.get("subaccountId", "")
+      sub_id = str(cfg.get("subaccountId", "") or "")
       owner_addr = str(cfg.get("ownerAddress") or "")
       subaccount_name = str(cfg.get("subaccountName") or "")
+      sub_id, subaccount_name = resolve_subaccount_context(
+        eth_base=eth_base,
+        sender=owner_addr,
+        subaccount_id=sub_id,
+        subaccount_name=subaccount_name,
+      )
       missing_trade_ctx = []
       if not owner_addr:
         missing_trade_ctx.append("ownerAddress")
