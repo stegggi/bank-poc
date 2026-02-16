@@ -4,6 +4,7 @@ type CacheEntry<T> = { value: T; expiresAt: number };
 type VmCache = {
   config?: CacheEntry<Uc5Config>;
   status?: CacheEntry<Uc5Status>;
+  data?: Record<string, CacheEntry<unknown>>;
 };
 
 const g = globalThis as typeof globalThis & { __uc5VmCache?: VmCache };
@@ -27,11 +28,15 @@ export function defaultUc5Config(): Uc5Config {
     productId: "",
     subaccountId: "",
     subaccountName: "",
+    ingestionEnabled: true,
     tradingEnabled: true,
     killSwitch: false,
     pollIntervalSeconds: 2,
+    ingestIntervalSec: 2,
+    reassessIntervalSec: 300,
     predictionHorizonSeconds: 3600,
     maxLeverage: 2,
+    maxMarginPct: 25,
     maxMarginUsd: 100,
     confidenceThreshold: 0.6,
     minHoldSeconds: 3600,
@@ -75,6 +80,24 @@ function botTokenHeader(): Record<string, string> {
   const t = String(process.env.UC5_BOT_TOKEN || "");
   if (!t) throw new Error("Missing UC5_BOT_TOKEN on Vercel");
   return { "x-uc5-bot-token": t };
+}
+
+async function getVmJsonCached<T>(key: string, path: string, ttlMs: number, fallback: T): Promise<T> {
+  const c = cache();
+  if (!c.data) c.data = {};
+  const now = Date.now();
+  const prev = c.data[key] as CacheEntry<T> | undefined;
+  if (prev && prev.expiresAt > now) return prev.value;
+  try {
+    const r = await fetchVm(path, { headers: { accept: "application/json" } }, 8000);
+    if (!r.ok) throw new Error(`VM ${path} ${r.status}`);
+    const j = (await r.json()) as T;
+    c.data[key] = { value: j, expiresAt: now + ttlMs };
+    return j;
+  } catch {
+    if (prev?.value !== undefined) return prev.value;
+    return fallback;
+  }
 }
 
 export async function getVmConfigCached(ttlMs = 15_000): Promise<Uc5Config> {
@@ -134,6 +157,125 @@ export async function getVmStatusCached(ttlMs = 2_000): Promise<Uc5Status> {
     if (c.status?.value) return c.status.value;
     return fallbackUc5Status();
   }
+}
+
+export type VmIngestionStatus = {
+  updatedAt: number;
+  enabled: boolean;
+  running: boolean;
+  ingestIntervalSec: number;
+  collectingSince?: number | null;
+  lastTickAt?: number | null;
+  ticksCollected?: number;
+  ticks24h?: number;
+  dbSizeBytes?: number | null;
+  ingestionRatePerMin5m?: number;
+  lastTickAgeSec?: number | null;
+};
+
+export type VmTradingStatus = {
+  updatedAt: number;
+  enabled: boolean;
+  running: boolean;
+  positionOpen: boolean;
+  side?: "LONG" | "SHORT" | null;
+  timeSinceEntrySec?: number | null;
+  entryAt?: number | null;
+  initialHoldEndsAt?: number | null;
+  nextReassessAt?: number | null;
+  maxHoldEndsAt?: number | null;
+  nextDecisionAt?: number | null;
+  countdowns?: {
+    initialHoldEndsInSec?: number | null;
+    nextReassessInSec?: number | null;
+    maxHoldEndsInSec?: number | null;
+    nextDecisionInSec?: number | null;
+  };
+  lastAction?: unknown;
+};
+
+export type VmChartResponse = {
+  candles: Array<{ t: number; open: number; high: number; low: number; close: number }>;
+  markers: Array<{ t: number; price: number | null; type: "ENTRY" | "EXIT"; side?: string | null; eventType?: string }>;
+};
+
+export type VmPortfolio = {
+  updatedAt: number;
+  portfolioValueUsd?: number | null;
+  availableMarginUsd?: number | null;
+  usedMarginUsd?: number | null;
+  usedMarginPct?: number | null;
+  unrealizedPnl?: number | null;
+  realizedPnlToday?: number | null;
+  realizedPnlTotal?: number | null;
+  error?: string | null;
+};
+
+export type VmTradesSummary = {
+  totalTrades: number;
+  winRate: number;
+  avgWin: number;
+  avgLoss: number;
+  realizedPnlTotal: number;
+  realizedPnlToday: number;
+};
+
+export type VmSetupStatus = {
+  updatedAt: number;
+  missing: string[];
+  needsSetup: boolean;
+  botSigner?: {
+    configuredAddress?: string;
+    linkedDetectable?: boolean;
+    status?: string;
+  };
+};
+
+export async function getVmIngestionCached(ttlMs = 2_000): Promise<VmIngestionStatus> {
+  return getVmJsonCached<VmIngestionStatus>("ingestion", "/ingestion", ttlMs, {
+    updatedAt: Date.now(),
+    enabled: false,
+    running: false,
+    ingestIntervalSec: 2,
+  });
+}
+
+export async function getVmTradingCached(ttlMs = 2_000): Promise<VmTradingStatus> {
+  return getVmJsonCached<VmTradingStatus>("trading", "/trading", ttlMs, {
+    updatedAt: Date.now(),
+    enabled: false,
+    running: false,
+    positionOpen: false,
+  });
+}
+
+export async function getVmChartCached(range = "24h", resolution = "1m", ttlMs = 4_000): Promise<VmChartResponse> {
+  const key = `chart:${range}:${resolution}`;
+  const path = `/uc5/chart?range=${encodeURIComponent(range)}&resolution=${encodeURIComponent(resolution)}`;
+  return getVmJsonCached<VmChartResponse>(key, path, ttlMs, { candles: [], markers: [] });
+}
+
+export async function getVmPortfolioCached(ttlMs = 3_000): Promise<VmPortfolio> {
+  return getVmJsonCached<VmPortfolio>("portfolio", "/uc5/portfolio", ttlMs, { updatedAt: Date.now() });
+}
+
+export async function getVmTradesSummaryCached(ttlMs = 5_000): Promise<VmTradesSummary> {
+  return getVmJsonCached<VmTradesSummary>("trades:summary", "/uc5/trades/summary", ttlMs, {
+    totalTrades: 0,
+    winRate: 0,
+    avgWin: 0,
+    avgLoss: 0,
+    realizedPnlTotal: 0,
+    realizedPnlToday: 0,
+  });
+}
+
+export async function getVmSetupCached(ttlMs = 10_000): Promise<VmSetupStatus> {
+  return getVmJsonCached<VmSetupStatus>("setup", "/uc5/setup", ttlMs, {
+    updatedAt: Date.now(),
+    missing: [],
+    needsSetup: false,
+  });
 }
 
 export async function postVmCommand(command: { type: string; payload?: unknown }): Promise<unknown> {

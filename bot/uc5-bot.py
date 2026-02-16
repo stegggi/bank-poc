@@ -13,6 +13,7 @@ This is a demo trading bot. It can lose money. Start tiny (e.g. 100 USDe) and ke
 """
 
 import os, time, json, math, sqlite3, requests, asyncio, threading, uuid
+from urllib.parse import urlparse, parse_qs
 from decimal import Decimal
 from typing import Optional, Dict, Any, List, Tuple
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -34,7 +35,7 @@ RUNTIME_CONFIG_PATH = os.environ.get("UC5_RUNTIME_CONFIG_PATH", os.path.join(os.
 # Telemetry server (VPS)
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
-BOT_VERSION = "uc5-bot/0.4 (vm-control + low-blob)"
+BOT_VERSION = "uc5-bot/0.5 (vm-runtime-sections + low-blob)"
 
 if not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_BOT_TOKEN")
@@ -80,6 +81,19 @@ def db_connect():
       trained INTEGER DEFAULT 0
     );
   """)
+  conn.execute("""
+    CREATE TABLE IF NOT EXISTS trades(
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts_ms INTEGER NOT NULL,
+      event_type TEXT NOT NULL,  -- ENTRY / EXIT / FLATTEN / HOLD
+      side TEXT,
+      qty REAL,
+      price REAL,
+      pnl REAL,
+      note TEXT
+    );
+  """)
+  conn.execute("CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts_ms);")
   conn.commit()
   return conn
 
@@ -242,6 +256,258 @@ def train_online(conn, w: List[float], lr: float = 0.5):
   return w
 
 
+def db_read_conn():
+  c = sqlite3.connect(DB_PATH)
+  c.row_factory = sqlite3.Row
+  return c
+
+
+def insert_trade_event(
+  conn,
+  ts_ms: int,
+  event_type: str,
+  side: Optional[str],
+  qty: Optional[float],
+  price: Optional[float],
+  pnl: Optional[float] = None,
+  note: Optional[str] = None,
+):
+  conn.execute(
+    "INSERT INTO trades(ts_ms, event_type, side, qty, price, pnl, note) VALUES (?,?,?,?,?,?,?)",
+    (int(ts_ms), str(event_type), side, qty, price, pnl, note),
+  )
+  conn.commit()
+
+
+def query_ingestion_stats() -> Dict[str, Any]:
+  now_ms = int(time.time() * 1000)
+  five_min_ago = now_ms - 5 * 60 * 1000
+  day_ago = now_ms - 24 * 60 * 60 * 1000
+  c = db_read_conn()
+  try:
+    row = c.execute(
+      """
+      SELECT
+        MIN(ts_ms) AS min_ts,
+        MAX(ts_ms) AS max_ts,
+        COUNT(*) AS total,
+        SUM(CASE WHEN ts_ms >= ? THEN 1 ELSE 0 END) AS cnt_24h,
+        SUM(CASE WHEN ts_ms >= ? THEN 1 ELSE 0 END) AS cnt_5m
+      FROM prices
+      """
+      ,
+      (day_ago, five_min_ago),
+    ).fetchone()
+    min_ts = int(row["min_ts"]) if row and row["min_ts"] is not None else None
+    max_ts = int(row["max_ts"]) if row and row["max_ts"] is not None else None
+    total = int(row["total"]) if row and row["total"] is not None else 0
+    cnt_24h = int(row["cnt_24h"]) if row and row["cnt_24h"] is not None else 0
+    cnt_5m = int(row["cnt_5m"]) if row and row["cnt_5m"] is not None else 0
+    db_size = None
+    try:
+      db_size = os.path.getsize(DB_PATH)
+    except Exception:
+      db_size = None
+    rate_per_min = float(cnt_5m) / 5.0
+    return {
+      "collectingSince": min_ts,
+      "lastTickAt": max_ts,
+      "ticksCollected": total,
+      "ticks24h": cnt_24h,
+      "dbSizeBytes": db_size,
+      "ingestionRatePerMin5m": rate_per_min,
+      "lastTickAgeSec": (max(0, int((now_ms - max_ts) / 1000)) if max_ts else None),
+    }
+  finally:
+    c.close()
+
+
+def query_chart_data(range_hours: int = 24, resolution_sec: int = 60) -> Dict[str, Any]:
+  now_ms = int(time.time() * 1000)
+  from_ms = now_ms - range_hours * 60 * 60 * 1000
+  bucket_ms = max(1000, int(resolution_sec * 1000))
+  c = db_read_conn()
+  try:
+    rows = c.execute(
+      "SELECT ts_ms, price FROM prices WHERE ts_ms >= ? ORDER BY ts_ms ASC",
+      (from_ms,),
+    ).fetchall()
+    candles: List[Dict[str, Any]] = []
+    if rows:
+      cur_bucket = None
+      bucket_rows: List[Tuple[int, float]] = []
+      for r in rows:
+        ts = int(r["ts_ms"])
+        px = float(r["price"])
+        b = (ts // bucket_ms) * bucket_ms
+        if cur_bucket is None:
+          cur_bucket = b
+        if b != cur_bucket:
+          if bucket_rows:
+            open_px = bucket_rows[0][1]
+            close_px = bucket_rows[-1][1]
+            highs = [x[1] for x in bucket_rows]
+            candles.append({
+              "t": int(cur_bucket),
+              "open": float(open_px),
+              "high": float(max(highs)),
+              "low": float(min(highs)),
+              "close": float(close_px),
+            })
+          bucket_rows = []
+          cur_bucket = b
+        bucket_rows.append((ts, px))
+      if bucket_rows and cur_bucket is not None:
+        open_px = bucket_rows[0][1]
+        close_px = bucket_rows[-1][1]
+        highs = [x[1] for x in bucket_rows]
+        candles.append({
+          "t": int(cur_bucket),
+          "open": float(open_px),
+          "high": float(max(highs)),
+          "low": float(min(highs)),
+          "close": float(close_px),
+        })
+
+    markers = []
+    trows = c.execute(
+      """
+      SELECT ts_ms, event_type, side, price
+      FROM trades
+      WHERE ts_ms >= ? AND event_type IN ('ENTRY','EXIT','FLATTEN')
+      ORDER BY ts_ms ASC
+      """,
+      (from_ms,),
+    ).fetchall()
+    for r in trows:
+      et = str(r["event_type"] or "")
+      markers.append(
+        {
+          "t": int(r["ts_ms"]),
+          "price": float(r["price"]) if r["price"] is not None else None,
+          "type": ("ENTRY" if et == "ENTRY" else "EXIT"),
+          "side": (r["side"] or None),
+          "eventType": et,
+        }
+      )
+    return {"candles": candles[-1440:], "markers": markers[-500:]}
+  finally:
+    c.close()
+
+
+def query_trades_summary() -> Dict[str, Any]:
+  c = db_read_conn()
+  try:
+    rows = c.execute(
+      """
+      SELECT event_type, pnl
+      FROM trades
+      WHERE event_type IN ('EXIT','FLATTEN')
+      ORDER BY ts_ms ASC
+      """
+    ).fetchall()
+    pnls = [float(r["pnl"]) for r in rows if r["pnl"] is not None]
+    wins = [x for x in pnls if x > 0]
+    losses = [x for x in pnls if x < 0]
+    total = len(pnls)
+    win_rate = (len(wins) / total) if total > 0 else 0.0
+    avg_win = (sum(wins) / len(wins)) if wins else 0.0
+    avg_loss = (sum(losses) / len(losses)) if losses else 0.0
+    total_realized = sum(pnls) if pnls else 0.0
+    day_ago = int(time.time() * 1000) - 24 * 60 * 60 * 1000
+    day_rows = c.execute(
+      "SELECT pnl FROM trades WHERE ts_ms >= ? AND event_type IN ('EXIT','FLATTEN')",
+      (day_ago,),
+    ).fetchall()
+    realized_today = sum(float(r["pnl"]) for r in day_rows if r["pnl"] is not None)
+    return {
+      "totalTrades": total,
+      "winRate": win_rate,
+      "avgWin": avg_win,
+      "avgLoss": avg_loss,
+      "realizedPnlTotal": total_realized,
+      "realizedPnlToday": realized_today,
+    }
+  finally:
+    c.close()
+
+
+def explain_agent_reason(raw_reason: str, desired: str, conf: float) -> Tuple[str, str]:
+  """
+  Convert compact metrics string into readable explanation.
+  """
+  vals: Dict[str, float] = {}
+  for part in str(raw_reason or "").split(","):
+    p = part.strip()
+    if "=" not in p:
+      continue
+    k, v = p.split("=", 1)
+    try:
+      vals[k.strip()] = float(v.strip())
+    except Exception:
+      continue
+  r1m = vals.get("r1m", 0.0)
+  r5m = vals.get("r5m", 0.0)
+  rsi = vals.get("rsiN", 0.0)
+  vol = vals.get("vol", 0.0)
+  trend = vals.get("trend", 0.0)
+  conf_pct = int(max(0.0, min(1.0, conf)) * 100)
+  band = "High" if conf >= 0.75 else ("Medium" if conf >= 0.6 else "Low")
+  direction = {"LONG": "bullish", "SHORT": "bearish", "FLAT": "neutral"}.get(desired, "neutral")
+  human = (
+    f"{band} confidence ({conf_pct}%). "
+    f"Signals are {direction}: 1m={r1m*100:.2f}%, 5m={r5m*100:.2f}%, trend={trend*100:.2f}%, "
+    f"RSI={50 + (rsi*50):.1f}, volatility={vol*100:.3f}%."
+  )
+  return human, raw_reason
+
+
+def confidence_band(conf: float) -> str:
+  if conf >= 0.75:
+    return "HIGH"
+  if conf >= 0.6:
+    return "MEDIUM"
+  return "LOW"
+
+
+def to_countdown_sec(target_ms: Optional[int], now_ms: Optional[int] = None) -> Optional[int]:
+  if not target_ms:
+    return None
+  if now_ms is None:
+    now_ms = int(time.time() * 1000)
+  return max(0, int((int(target_ms) - int(now_ms) + 999) / 1000))
+
+
+def parse_range_hours(raw: Optional[str]) -> int:
+  if not raw:
+    return 24
+  s = str(raw).strip().lower()
+  try:
+    if s.endswith("h"):
+      return max(1, min(168, int(s[:-1])))
+    if s.endswith("d"):
+      return max(1, min(168, int(s[:-1]) * 24))
+    return max(1, min(168, int(s)))
+  except Exception:
+    return 24
+
+
+def parse_resolution_seconds(raw: Optional[str]) -> int:
+  if not raw:
+    return 60
+  s = str(raw).strip().lower()
+  try:
+    if s.endswith("ms"):
+      return max(1, int(int(s[:-2]) / 1000))
+    if s.endswith("s"):
+      return max(1, min(3600, int(s[:-1])))
+    if s.endswith("m"):
+      return max(1, min(3600, int(s[:-1]) * 60))
+    return max(1, min(3600, int(s)))
+  except Exception:
+    return 60
+
+
 # ---- Runtime config + commands (local, no Blob dependency) ----
 def default_runtime_config() -> Dict[str, Any]:
   owner = os.environ.get("UC5_OWNER_ADDRESS", "")
@@ -255,11 +521,15 @@ def default_runtime_config() -> Dict[str, Any]:
     "productId": "",
     "subaccountId": "",
     "subaccountName": "",
+    "ingestionEnabled": True,
     "tradingEnabled": True,
-    "killSwitch": False,
-    "pollIntervalSeconds": 2,
+    "killSwitch": False,  # legacy compat; ignored in UI.
+    "pollIntervalSeconds": 2,  # legacy compat.
+    "ingestIntervalSec": 2,
+    "reassessIntervalSec": 300,
     "predictionHorizonSeconds": 3600,  # force >= 60m trade horizon
     "maxLeverage": 2,
+    "maxMarginPct": 25.0,
     "maxMarginUsd": 100,
     "confidenceThreshold": 0.6,
     "minHoldSeconds": 3600,
@@ -283,14 +553,33 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   cfg["productId"] = str(cfg.get("productId") or "")
   cfg["subaccountId"] = str(cfg.get("subaccountId") or "")
   cfg["subaccountName"] = str(cfg.get("subaccountName") or "")
+  cfg["ingestionEnabled"] = bool(cfg.get("ingestionEnabled", True))
   cfg["tradingEnabled"] = bool(cfg.get("tradingEnabled", True))
-  cfg["killSwitch"] = bool(cfg.get("killSwitch", False))
+  cfg["killSwitch"] = False
+
+  # Backward-compatible migration from pollIntervalSeconds.
+  if "ingestIntervalSec" not in (raw or {}) and "pollIntervalSeconds" in (raw or {}):
+    cfg["ingestIntervalSec"] = raw.get("pollIntervalSeconds")
+  if "pollIntervalSeconds" not in (raw or {}):
+    cfg["pollIntervalSeconds"] = cfg.get("ingestIntervalSec", 2)
 
   try:
     cfg["pollIntervalSeconds"] = int(cfg.get("pollIntervalSeconds", 2))
   except Exception:
     cfg["pollIntervalSeconds"] = 2
   cfg["pollIntervalSeconds"] = max(2, min(60, cfg["pollIntervalSeconds"]))
+
+  try:
+    cfg["ingestIntervalSec"] = int(cfg.get("ingestIntervalSec", 2))
+  except Exception:
+    cfg["ingestIntervalSec"] = 2
+  cfg["ingestIntervalSec"] = max(1, min(60, cfg["ingestIntervalSec"]))
+
+  try:
+    cfg["reassessIntervalSec"] = int(cfg.get("reassessIntervalSec", 300))
+  except Exception:
+    cfg["reassessIntervalSec"] = 300
+  cfg["reassessIntervalSec"] = max(60, min(86400, cfg["reassessIntervalSec"]))
 
   try:
     cfg["predictionHorizonSeconds"] = int(cfg.get("predictionHorizonSeconds", 3600))
@@ -303,6 +592,12 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   except Exception:
     cfg["maxLeverage"] = 2.0
   cfg["maxLeverage"] = max(1.0, min(20.0, cfg["maxLeverage"]))
+
+  try:
+    cfg["maxMarginPct"] = float(cfg.get("maxMarginPct", 25))
+  except Exception:
+    cfg["maxMarginPct"] = 25.0
+  cfg["maxMarginPct"] = max(0.0, min(100.0, cfg["maxMarginPct"]))
 
   try:
     cfg["maxMarginUsd"] = float(cfg.get("maxMarginUsd", 100))
@@ -467,18 +762,137 @@ class TelemetryHandler(BaseHTTPRequestHandler):
     return self._send_json(200, {"ok": True})
 
   def do_GET(self):
-    if self.path.startswith("/health"):
+    parsed = urlparse(self.path)
+    path = parsed.path
+    qs = parse_qs(parsed.query or "")
+
+    if path.startswith("/health"):
       return self._send_json(200, {"ok": True})
-    if self.path.startswith("/status"):
+    if path.startswith("/status"):
       with STATUS_LOCK:
         data = LATEST_STATUS
       return self._send_json(200, data)
-    if self.path.startswith("/config"):
+    if path.startswith("/config"):
       return self._send_json(200, get_runtime_config())
-    if self.path.startswith("/commands"):
+    if path.startswith("/commands"):
       if not self._authorized():
         return self._send_json(403, {"error": "forbidden"})
       return self._send_json(200, {"commands": list_commands()})
+    if path.startswith("/ingestion"):
+      cfg = get_runtime_config()
+      stats = query_ingestion_stats()
+      with STATUS_LOCK:
+        s = clone_jsonable(LATEST_STATUS)
+      return self._send_json(
+        200,
+        {
+          "updatedAt": int(time.time() * 1000),
+          "enabled": bool(cfg.get("ingestionEnabled", True)),
+          "running": bool(s.get("bot", {}).get("alive", False)),
+          "ingestIntervalSec": int(cfg.get("ingestIntervalSec", 2)),
+          **stats,
+        },
+      )
+    if path.startswith("/trading"):
+      cfg = get_runtime_config()
+      now_ms = int(time.time() * 1000)
+      with STATUS_LOCK:
+        s = clone_jsonable(LATEST_STATUS)
+      pos = s.get("position") if isinstance(s.get("position"), dict) else {}
+      agent = s.get("agent") if isinstance(s.get("agent"), dict) else {}
+      pos_open = bool(pos.get("open"))
+      entry_at = pos.get("entryAt")
+      min_hold_until = agent.get("minHoldUntil")
+      next_reassess_at = agent.get("nextReassessAt")
+      max_hold_until = agent.get("maxHoldUntil")
+      next_entry_eval = None
+      if not pos_open:
+        last_decision = agent.get("lastDecisionAt")
+        horizon = int(agent.get("decisionHorizonSeconds") or cfg.get("predictionHorizonSeconds") or 3600)
+        if last_decision:
+          next_entry_eval = int(last_decision) + horizon * 1000
+      return self._send_json(
+        200,
+        {
+          "updatedAt": now_ms,
+          "enabled": bool(cfg.get("tradingEnabled", True)),
+          "running": bool(s.get("bot", {}).get("alive", False)) and bool(cfg.get("tradingEnabled", True)),
+          "positionOpen": pos_open,
+          "side": pos.get("side"),
+          "timeSinceEntrySec": (max(0, int((now_ms - int(entry_at)) / 1000)) if entry_at else None),
+          "entryAt": entry_at,
+          "initialHoldEndsAt": min_hold_until,
+          "nextReassessAt": next_reassess_at,
+          "maxHoldEndsAt": max_hold_until,
+          "nextDecisionAt": next_entry_eval,
+          "countdowns": {
+            "initialHoldEndsInSec": to_countdown_sec(min_hold_until, now_ms),
+            "nextReassessInSec": to_countdown_sec(next_reassess_at, now_ms),
+            "maxHoldEndsInSec": to_countdown_sec(max_hold_until, now_ms),
+            "nextDecisionInSec": to_countdown_sec(next_entry_eval, now_ms),
+          },
+          "lastAction": s.get("lastAction"),
+        },
+      )
+    if path.startswith("/uc5/chart"):
+      range_raw = qs.get("range", ["24h"])[0]
+      res_raw = qs.get("resolution", ["1m"])[0]
+      out = query_chart_data(
+        range_hours=parse_range_hours(range_raw),
+        resolution_sec=parse_resolution_seconds(res_raw),
+      )
+      return self._send_json(200, out)
+    if path.startswith("/uc5/portfolio"):
+      cfg = get_runtime_config()
+      with STATUS_LOCK:
+        s = clone_jsonable(LATEST_STATUS)
+      sub_id = str(cfg.get("subaccountId") or s.get("account", {}).get("subaccountId") or "")
+      eth_base = str(cfg.get("etherealApiBase") or "https://api.ethereal.trade")
+      snap = fetch_portfolio_snapshot(eth_base, sub_id)
+      summary = query_trades_summary()
+      used = _f(snap.get("usedMarginUsd")) or 0.0
+      pv = _f(snap.get("portfolioValueUsd"))
+      used_pct = ((used / pv) * 100.0) if pv and pv > 0 else None
+      return self._send_json(
+        200,
+        {
+          "updatedAt": int(time.time() * 1000),
+          **snap,
+          "usedMarginPct": used_pct,
+          "unrealizedPnl": s.get("position", {}).get("unrealizedPnl"),
+          "realizedPnlToday": summary.get("realizedPnlToday"),
+          "realizedPnlTotal": summary.get("realizedPnlTotal"),
+        },
+      )
+    if path.startswith("/uc5/trades/summary"):
+      return self._send_json(200, query_trades_summary())
+    if path.startswith("/uc5/setup"):
+      cfg = get_runtime_config()
+      with STATUS_LOCK:
+        s = clone_jsonable(LATEST_STATUS)
+      signer_addr = os.environ.get("UC5_BOT_SIGNER_ADDRESS", "")
+      missing: List[str] = []
+      if not str(cfg.get("ownerAddress") or ""):
+        missing.append("ownerAddress")
+      if not str(cfg.get("subaccountId") or s.get("account", {}).get("subaccountId") or ""):
+        missing.append("subaccountId")
+      if not str(cfg.get("subaccountName") or s.get("account", {}).get("subaccountName") or ""):
+        missing.append("subaccountName")
+      if not str(cfg.get("productId") or ""):
+        missing.append("productId")
+      return self._send_json(
+        200,
+        {
+          "updatedAt": int(time.time() * 1000),
+          "missing": missing,
+          "needsSetup": len(missing) > 0,
+          "botSigner": {
+            "configuredAddress": signer_addr,
+            "linkedDetectable": False,
+            "status": "optional_recommended",
+          },
+        },
+      )
     return self._send_json(404, {"error": "not found"})
 
   def do_POST(self):
@@ -638,10 +1052,50 @@ def fetch_active_position(eth_base: str, sub_id: str, product_id: str) -> Option
     return None
 
 
-def parse_position(pos: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str], float, Optional[float]]:
-  # returns: (open, side, size, upnl-ish)
+def fetch_portfolio_snapshot(eth_base: str, sub_id: str) -> Dict[str, Any]:
+  out = {
+    "portfolioValueUsd": None,
+    "availableMarginUsd": None,
+    "usedMarginUsd": None,
+    "error": None,
+  }
+  if not sub_id:
+    return out
+  try:
+    bal = requests.get(
+      f"{eth_base}/v1/subaccount/balance",
+      params={"subaccountId": sub_id},
+      timeout=20,
+    ).json()
+    rows = bal.get("data") if isinstance(bal, dict) else None
+    if isinstance(rows, list) and rows:
+      row = rows[0]
+      avail = _f(row.get("available"))
+      used = _f(row.get("usedMargin")) or _f(row.get("marginUsed")) or 0.0
+      pv = _f(row.get("equity")) or _f(row.get("balance")) or (
+        (avail + used) if (avail is not None) else None
+      )
+      out["portfolioValueUsd"] = pv
+      out["availableMarginUsd"] = avail
+      out["usedMarginUsd"] = used
+  except Exception as e:
+    out["error"] = str(e)
+  return out
+
+
+def _f(x: Any) -> Optional[float]:
+  try:
+    if x is None:
+      return None
+    return float(x)
+  except Exception:
+    return None
+
+
+def parse_position(pos: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str], float, Optional[float], Optional[float], Optional[int]]:
+  # returns: (open, side, size, upnl-ish, entry_price, entry_at_ms)
   if not isinstance(pos, dict) or pos.get("size") is None:
-    return (False, None, 0.0, None)
+    return (False, None, 0.0, None, None, None)
 
   size = float(pos.get("size") or 0)
   open_ = abs(size) > 0
@@ -650,7 +1104,23 @@ def parse_position(pos: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str], 
   upnl = None
   if pos.get("realizedPnl") is not None:
     upnl = float(pos.get("realizedPnl") or 0)
-  return (open_, side, size, upnl)
+  entry_price = (
+    _f(pos.get("entryPrice"))
+    or _f(pos.get("avgEntryPrice"))
+    or _f(pos.get("averageEntryPrice"))
+  )
+  entry_at_ms = None
+  for k in ("openedAt", "openTs", "updatedAt", "createdAt"):
+    v = pos.get(k)
+    if v is None:
+      continue
+    try:
+      x = int(v)
+      entry_at_ms = x if x > 10_000_000_000 else x * 1000
+      break
+    except Exception:
+      continue
+  return (open_, side, size, upnl, entry_price, entry_at_ms)
 
 
 # ---- SDK trading helpers ----
@@ -812,6 +1282,11 @@ async def main():
   last_reason = "warming up (need more history)"
   last_conf = 0.5
   last_desired = "FLAT"
+  last_mid: Optional[float] = None
+  last_oracle: Optional[float] = None
+  last_bid: Optional[float] = None
+  last_ask: Optional[float] = None
+  last_ingested_ms: Optional[int] = None
 
   while True:
     loop_started = time.time()
@@ -820,6 +1295,8 @@ async def main():
     try:
       cfg = get_runtime_config()
       eth_base = cfg.get("etherealApiBase", "https://api.ethereal.trade")
+      ingest_enabled = bool(cfg.get("ingestionEnabled", True))
+      trading_enabled = bool(cfg.get("tradingEnabled", True))
 
       # Ensure client (SDK)
       if client is None:
@@ -848,7 +1325,26 @@ async def main():
 
       # Fetch active position once per loop (used for FLATTEN and status)
       pos = fetch_active_position(eth_base, sub_id, product_id)
-      pos_open, pos_side, pos_size, pos_upnl = parse_position(pos)
+      pos_open, pos_side, pos_size, pos_upnl, pos_entry_price, pos_entry_at_ms = parse_position(pos)
+
+      ts_ms = int(time.time() * 1000)
+      horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
+      min_hold_sec = max(3600, int(cfg.get("minHoldSeconds", 3600)))
+      reassess_sec = max(60, int(cfg.get("reassessIntervalSec", 300)))
+      max_hold = max(int(cfg.get("maxHoldSeconds", 7200)), min_hold_sec)
+      ingest_interval = max(1, int(cfg.get("ingestIntervalSec", cfg.get("pollIntervalSeconds", 2))))
+
+      # Keep local timers aligned with live exchange position.
+      if pos_open:
+        inferred_entry_ms = int(pos_entry_at_ms or last_position_opened_ms or ts_ms)
+        if last_position_opened_ms is None:
+          last_position_opened_ms = inferred_entry_ms
+        min_hold_anchor = int(last_position_opened_ms) + min_hold_sec * 1000
+        if next_reassess_ms is None or next_reassess_ms < min_hold_anchor:
+          next_reassess_ms = min_hold_anchor
+      else:
+        last_position_opened_ms = None
+        next_reassess_ms = None
 
       # ---- Commands ----
       cmds = get_new_commands()
@@ -867,6 +1363,20 @@ async def main():
               })
             else:
               await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              if pos_open:
+                insert_trade_event(
+                  conn,
+                  ts_ms,
+                  "FLATTEN",
+                  pos_side,
+                  abs(pos_size) if pos_size else None,
+                  last_mid if last_mid is not None else pos_entry_price,
+                  pos_upnl,
+                  "manual_flatten_command",
+                )
+              pos_open, pos_side, pos_size, pos_upnl, pos_entry_price = False, None, 0.0, None, None
+              last_position_opened_ms = None
+              next_reassess_ms = None
               updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
           elif c.get("type") == "LINK_SIGNER":
             out = await process_link_signer(cfg, c, client)
@@ -886,39 +1396,38 @@ async def main():
       mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else (oracle or best_bid or best_ask)
       if mid <= 0:
         raise RuntimeError(f"Market price unavailable for ticker={ticker}, productId={product_id}")
+      last_mid = mid
+      last_oracle = oracle
+      last_bid = best_bid
+      last_ask = best_ask
 
-      ts_ms = int(time.time() * 1000)
-      conn.execute(
-        "INSERT OR REPLACE INTO prices(ts_ms, price, oracle, bid, ask) VALUES (?,?,?,?,?)",
-        (ts_ms, mid, oracle, best_bid, best_ask)
-      )
-      conn.commit()
+      if ingest_enabled:
+        if last_ingested_ms is None or (ts_ms - last_ingested_ms) >= max(500, ingest_interval * 1000 - 100):
+          conn.execute(
+            "INSERT OR REPLACE INTO prices(ts_ms, price, oracle, bid, ask) VALUES (?,?,?,?,?)",
+            (ts_ms, mid, oracle, best_bid, best_ask),
+          )
+          conn.commit()
+          last_ingested_ms = ts_ms
 
       # ---- Learning + decision cadence ----
       w = train_online(conn, w, lr=0.25)
       set_model(conn, w)
 
-      horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
       horizon_ms = int(horizon_sec * 1000)
-      max_hold = max(int(cfg.get("maxHoldSeconds", 7200)), horizon_sec)
-
-      # Sync timers with current position state.
-      if pos_open:
-        if last_position_opened_ms is None:
-          last_position_opened_ms = ts_ms
-        if next_reassess_ms is None:
-          next_reassess_ms = last_position_opened_ms + horizon_ms
-      else:
-        last_position_opened_ms = None
-        next_reassess_ms = None
 
       evaluate_now = False
-      if last_decision_at_ms is None:
+      evaluate_for_entry = False
+      evaluate_for_reassess = False
+      if (not pos_open) and (last_decision_at_ms is None):
         evaluate_now = True
-      elif (not pos_open) and (ts_ms - last_decision_at_ms >= horizon_ms):
+        evaluate_for_entry = True
+      elif (not pos_open) and (last_decision_at_ms is not None) and (ts_ms - last_decision_at_ms >= horizon_ms):
         evaluate_now = True
+        evaluate_for_entry = True
       elif pos_open and next_reassess_ms and ts_ms >= next_reassess_ms:
         evaluate_now = True
+        evaluate_for_reassess = True
 
       reason = last_reason
       p_up = float(last_conf)
@@ -945,25 +1454,43 @@ async def main():
         last_conf = float(p_up)
         last_desired = desired
 
-        if pos_open and next_reassess_ms and ts_ms >= next_reassess_ms:
-          next_reassess_ms = ts_ms + horizon_ms
+        if pos_open and evaluate_for_reassess:
+          next_reassess_ms = ts_ms + int(reassess_sec * 1000)
 
-      min_hold_until = (last_position_opened_ms + horizon_ms) if last_position_opened_ms else None
+      min_hold_until = (last_position_opened_ms + min_hold_sec * 1000) if last_position_opened_ms else None
       max_hold_until = (last_position_opened_ms + max_hold * 1000) if last_position_opened_ms else None
-
-      trading_enabled = bool(cfg.get("tradingEnabled", True))
-      kill = bool(cfg.get("killSwitch", False))
+      human_reason, raw_reason = explain_agent_reason(reason, desired, float(p_up))
 
       action_taken = {"type": "NO_ACTION", "ok": True, "info": None}
 
       # ---- Trade gate ----
-      if trading_enabled and (not kill) and client is not None:
+      if client is not None:
         if not has_trade_account_ctx:
           action_taken = {
             "type": "SKIP_ACCOUNT_CONTEXT_MISSING",
             "ok": False,
             "info": {"missing": missing_trade_ctx},
           }
+        elif not trading_enabled:
+          if pos_open:
+            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+            insert_trade_event(
+              conn,
+              ts_ms,
+              "FLATTEN",
+              pos_side,
+              abs(pos_size) if pos_size else None,
+              mid,
+              pos_upnl,
+              "trading_disabled",
+            )
+            last_order_ts.append(time.time())
+            pos_open, pos_side, pos_size, pos_upnl, pos_entry_price = False, None, 0.0, None, None
+            last_position_opened_ms = None
+            next_reassess_ms = None
+            action_taken = {"type": "AUTO_FLATTEN_TRADING_OFF", "ok": True, "info": None}
+          else:
+            action_taken = {"type": "TRADING_DISABLED_IDLE", "ok": True, "info": None}
         else:
           max_oph = int(cfg.get("maxOrdersPerHour", 120))
           now = time.time()
@@ -973,14 +1500,24 @@ async def main():
           # Force close if max position age is reached.
           if pos_open and max_hold_until and ts_ms >= max_hold_until:
             await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+            insert_trade_event(
+              conn,
+              ts_ms,
+              "EXIT",
+              pos_side,
+              abs(pos_size) if pos_size else None,
+              mid,
+              pos_upnl,
+              "max_hold_reached",
+            )
             last_order_ts.append(now)
-            last_position_opened_ms = None
-            next_reassess_ms = None
+            pos_open, pos_side, pos_size, pos_upnl, pos_entry_price = False, None, 0.0, None, None
+            last_position_opened_ms, next_reassess_ms = None, None
             action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
 
           elif not pos_open:
             # Only evaluate new entries at horizon cadence (>= 60m).
-            if not evaluate_now:
+            if not evaluate_for_entry:
               action_taken = {
                 "type": "WAIT_ENTRY_REASSESS",
                 "ok": True,
@@ -991,29 +1528,27 @@ async def main():
                 action_taken = {"type": "RATE_LIMITED", "ok": False, "info": {"maxOrdersPerHour": max_oph}}
               else:
                 conf = clamp(abs(p_up - 0.5) * 2.0, 0.0, 1.0)
-                avail = None
-                if sub_id:
-                  bal = requests.get(
-                    f"{eth_base}/v1/subaccount/balance",
-                    params={"subaccountId": sub_id},
-                    timeout=20
-                  ).json()
-                  if bal.get("data"):
-                    row = bal["data"][0]
-                    avail = float(row.get("available") or 0)
-
+                snap = fetch_portfolio_snapshot(eth_base, sub_id)
+                avail = _f(snap.get("availableMarginUsd"))
+                portfolio_val = _f(snap.get("portfolioValueUsd"))
                 max_margin = float(cfg.get("maxMarginUsd", 100))
+                max_margin_pct = float(cfg.get("maxMarginPct", 25.0))
+                pct_cap = (portfolio_val * max_margin_pct / 100.0) if portfolio_val and portfolio_val > 0 else None
+                if pct_cap is not None:
+                  max_margin = min(max_margin, pct_cap)
                 lev = float(cfg.get("maxLeverage", 2))
-                margin_use = min(max_margin, (avail or max_margin))
+                margin_use = min(max_margin, (avail if avail is not None else max_margin))
                 notional = margin_use * lev * conf
                 qty = max(0.0, (notional / mid) if mid > 0 else 0.0)
 
                 if qty > 0:
                   side_int = 0 if desired == "LONG" else 1
                   await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name)
+                  insert_trade_event(conn, ts_ms, "ENTRY", desired, qty, mid, None, "model_entry")
                   last_order_ts.append(now)
                   last_position_opened_ms = ts_ms
-                  next_reassess_ms = ts_ms + horizon_ms
+                  pos_open, pos_side, pos_size, pos_entry_price = True, desired, qty, mid
+                  next_reassess_ms = ts_ms + min_hold_sec * 1000
                   action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
                 else:
                   action_taken = {"type": "SKIP_ZERO_QTY", "ok": False, "info": None}
@@ -1022,19 +1557,30 @@ async def main():
 
           else:
             # In trade: hold for at least horizon, then reassess periodically.
-            if not evaluate_now:
+            if not evaluate_for_reassess:
               action_taken = {"type": "HOLD_UNTIL_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
             elif desired == pos_side:
               action_taken = {"type": "HOLD_AFTER_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
             else:
+              prev_side = pos_side
               await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              insert_trade_event(
+                conn,
+                ts_ms,
+                "EXIT",
+                pos_side,
+                abs(pos_size) if pos_size else None,
+                mid,
+                pos_upnl,
+                "reassess_exit",
+              )
               last_order_ts.append(now)
-              last_position_opened_ms = None
-              next_reassess_ms = None
+              pos_open, pos_side, pos_size, pos_upnl, pos_entry_price = False, None, 0.0, None, None
+              last_position_opened_ms, next_reassess_ms = None, None
               action_taken = {
                 "type": "LIQUIDATE_REASSESS",
                 "ok": True,
-                "info": {"from": pos_side, "modelDesired": desired},
+                "info": {"from": prev_side, "modelDesired": desired},
               }
 
       # ---- Build status ----
@@ -1045,6 +1591,19 @@ async def main():
           "lastLoopAt": int(time.time() * 1000),
           "message": "running",
           "version": BOT_VERSION,
+        },
+        "runtime": {
+          "ingestionEnabled": ingest_enabled,
+          "tradingEnabled": trading_enabled,
+          "ingestIntervalSec": ingest_interval,
+          "reassessIntervalSec": reassess_sec,
+          "predictionHorizonSeconds": horizon_sec,
+          "minHoldSeconds": min_hold_sec,
+          "maxHoldSeconds": max_hold,
+          "maxLeverage": float(cfg.get("maxLeverage", 2)),
+          "maxMarginUsd": float(cfg.get("maxMarginUsd", 100)),
+          "maxMarginPct": float(cfg.get("maxMarginPct", 25.0)),
+          "confidenceThreshold": float(cfg.get("confidenceThreshold", 0.6)),
         },
         "market": {
           "ticker": ticker,
@@ -1062,18 +1621,40 @@ async def main():
           "open": bool(pos_open),
           "side": pos_side,
           "size": pos_size,
+          "entryPrice": pos_entry_price,
+          "entryAt": last_position_opened_ms,
+          "ageSec": (max(0, int((ts_ms - last_position_opened_ms) / 1000)) if last_position_opened_ms else None),
           "unrealizedPnl": pos_upnl,
           "updatedAt": int(time.time() * 1000),
         },
         "agent": {
           "desired": desired,
           "confidence": float(p_up),
-          "reason": reason,
+          "confidenceBand": confidence_band(float(p_up)),
+          "reason": raw_reason,
+          "reasonHuman": human_reason,
+          "reasonRaw": raw_reason,
           "lastDecisionAt": last_decision_at_ms,
           "decisionHorizonSeconds": horizon_sec,
           "nextReassessAt": next_reassess_ms,
           "minHoldUntil": min_hold_until,
           "maxHoldUntil": max_hold_until,
+        },
+        "trading": {
+          "enabled": trading_enabled,
+          "running": trading_enabled,
+          "positionOpen": bool(pos_open),
+          "entryAt": last_position_opened_ms,
+          "initialHoldEndsAt": min_hold_until,
+          "nextReassessAt": next_reassess_ms,
+          "maxHoldEndsAt": max_hold_until,
+          "nextDecisionAt": ((last_decision_at_ms + horizon_ms) if (last_decision_at_ms and not pos_open) else None),
+          "countdowns": {
+            "initialHoldEndsInSec": to_countdown_sec(min_hold_until, ts_ms),
+            "nextReassessInSec": to_countdown_sec(next_reassess_ms, ts_ms),
+            "maxHoldEndsInSec": to_countdown_sec(max_hold_until, ts_ms),
+            "nextDecisionInSec": to_countdown_sec((last_decision_at_ms + horizon_ms) if (last_decision_at_ms and not pos_open) else None, ts_ms),
+          },
         },
         "lastAction": action_taken,
       }
@@ -1087,6 +1668,13 @@ async def main():
           "message": f"error: {str(e)}",
           "version": BOT_VERSION,
         },
+        "market": {
+          "ticker": get_runtime_config().get("ticker", "BTCUSD"),
+          "price": last_mid,
+          "oraclePrice": last_oracle,
+          "bestBid": last_bid,
+          "bestAsk": last_ask,
+        },
       }
 
     # Update telemetry (served from VPS)
@@ -1095,7 +1683,8 @@ async def main():
 
     # Sleep — use runtime config (2s default)
     try:
-      interval = int(get_runtime_config().get("pollIntervalSeconds", 2))
+      cfg_now = get_runtime_config()
+      interval = int(cfg_now.get("ingestIntervalSec", cfg_now.get("pollIntervalSeconds", 2)))
     except Exception:
       interval = 2
 
