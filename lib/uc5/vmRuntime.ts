@@ -34,16 +34,16 @@ export function defaultUc5Config(): Uc5Config {
     maxLeverage: 2,
     maxMarginUsd: 100,
     confidenceThreshold: 0.6,
-    minHoldSeconds: 60,
-    maxHoldSeconds: 900,
+    minHoldSeconds: 3600,
+    maxHoldSeconds: 7200,
     maxOrdersPerHour: 120,
   });
 }
 
-export function fallbackUc5Status(): Uc5Status {
+export function fallbackUc5Status(message = "Bot status unavailable. Check VM URL/connectivity."): Uc5Status {
   return {
     updatedAt: Date.now(),
-    bot: { alive: false, message: "Bot status unavailable." },
+    bot: { alive: false, message },
   };
 }
 

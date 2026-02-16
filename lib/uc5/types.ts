@@ -25,15 +25,15 @@ export const Uc5ConfigSchema = z.object({
   killSwitch: z.boolean().default(false), // stops placing orders but keeps collecting data
 
   pollIntervalSeconds: z.number().int().min(2).max(60).default(2),
-  predictionHorizonSeconds: z.number().int().min(3600).max(86400).default(3600),
+  predictionHorizonSeconds: z.number().int().min(3600).max(259200).default(3600),
 
   // Risk & behavior
   maxLeverage: z.number().min(1).max(20).default(2),
   maxMarginUsd: z.number().min(1).max(100000).default(100), // max margin to use
   confidenceThreshold: z.number().min(0.5).max(0.95).default(0.6),
 
-  minHoldSeconds: z.number().int().min(0).max(86400).default(60),
-  maxHoldSeconds: z.number().int().min(30).max(86400).default(900),
+  minHoldSeconds: z.number().int().min(3600).max(259200).default(3600),
+  maxHoldSeconds: z.number().int().min(3600).max(259200).default(7200),
 
   // Execution guardrails (simple)
   maxOrdersPerHour: z.number().int().min(1).max(2000).default(120),

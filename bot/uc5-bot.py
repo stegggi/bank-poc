@@ -262,8 +262,8 @@ def default_runtime_config() -> Dict[str, Any]:
     "maxLeverage": 2,
     "maxMarginUsd": 100,
     "confidenceThreshold": 0.6,
-    "minHoldSeconds": 60,
-    "maxHoldSeconds": 900,
+    "minHoldSeconds": 3600,
+    "maxHoldSeconds": 7200,
     "maxOrdersPerHour": 120,
   }
 
@@ -296,7 +296,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     cfg["predictionHorizonSeconds"] = int(cfg.get("predictionHorizonSeconds", 3600))
   except Exception:
     cfg["predictionHorizonSeconds"] = 3600
-  cfg["predictionHorizonSeconds"] = max(3600, min(86400, cfg["predictionHorizonSeconds"]))
+  cfg["predictionHorizonSeconds"] = max(3600, min(259200, cfg["predictionHorizonSeconds"]))
 
   try:
     cfg["maxLeverage"] = float(cfg.get("maxLeverage", 2))
@@ -317,16 +317,16 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   cfg["confidenceThreshold"] = max(0.5, min(0.95, cfg["confidenceThreshold"]))
 
   try:
-    cfg["minHoldSeconds"] = int(cfg.get("minHoldSeconds", 60))
+    cfg["minHoldSeconds"] = int(cfg.get("minHoldSeconds", 3600))
   except Exception:
-    cfg["minHoldSeconds"] = 60
-  cfg["minHoldSeconds"] = max(0, min(86400, cfg["minHoldSeconds"]))
+    cfg["minHoldSeconds"] = 3600
+  cfg["minHoldSeconds"] = max(3600, min(259200, cfg["minHoldSeconds"]))
 
   try:
-    cfg["maxHoldSeconds"] = int(cfg.get("maxHoldSeconds", 900))
+    cfg["maxHoldSeconds"] = int(cfg.get("maxHoldSeconds", 7200))
   except Exception:
-    cfg["maxHoldSeconds"] = 900
-  cfg["maxHoldSeconds"] = max(30, min(86400, cfg["maxHoldSeconds"]))
+    cfg["maxHoldSeconds"] = 7200
+  cfg["maxHoldSeconds"] = max(3600, min(259200, cfg["maxHoldSeconds"]))
 
   try:
     cfg["maxOrdersPerHour"] = int(cfg.get("maxOrdersPerHour", 120))
@@ -900,7 +900,7 @@ async def main():
 
       horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
       horizon_ms = int(horizon_sec * 1000)
-      max_hold = max(int(cfg.get("maxHoldSeconds", 900)), horizon_sec)
+      max_hold = max(int(cfg.get("maxHoldSeconds", 7200)), horizon_sec)
 
       # Sync timers with current position state.
       if pos_open:

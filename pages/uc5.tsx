@@ -464,25 +464,30 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="Min time in market (sec)" help="Bot won't flip/exit before this unless you flatten manually.">
+            <Field
+              label="Decision / min-hold horizon (sec)"
+              help="Range: 3600s (60m) to 259200s (72h). New entries are evaluated on this cadence; open positions are held at least this long before reassessment."
+            >
               <input
                 style={input}
                 type="number"
-                min={0}
-                step={10}
-                value={edit?.minHoldSeconds ?? 60}
-                onChange={(e) => setEdit((p: any) => ({ ...p, minHoldSeconds: Number(e.target.value) }))}
+                min={3600}
+                max={259200}
+                step={60}
+                value={edit?.predictionHorizonSeconds ?? 3600}
+                onChange={(e) => setEdit((p: any) => ({ ...p, predictionHorizonSeconds: Number(e.target.value) }))}
                 disabled={!isOwner}
               />
             </Field>
 
-            <Field label="Max time in market (sec)" help="After this, bot exits (risk control).">
+            <Field label="Max time in market (sec)" help="Range: 3600s (60m) to 259200s (72h). Hard stop for open trades; should be >= horizon.">
               <input
                 style={input}
                 type="number"
-                min={30}
-                step={30}
-                value={edit?.maxHoldSeconds ?? 900}
+                min={3600}
+                max={259200}
+                step={60}
+                value={edit?.maxHoldSeconds ?? 7200}
                 onChange={(e) => setEdit((p: any) => ({ ...p, maxHoldSeconds: Number(e.target.value) }))}
                 disabled={!isOwner}
               />
