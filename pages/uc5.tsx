@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
+import { CartesianGrid, ComposedChart, Line, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import NavBar from "../components/NavBar";
 import { buildAdminMessage } from "../lib/uc5/auth";
 import type { Uc5Config, Uc5Status } from "../lib/uc5/types";
@@ -456,6 +457,7 @@ export default function Uc5Page() {
       })),
     [chart.candles]
   );
+  const markerRows = useMemo(() => chart.markers.filter((m) => m.price != null), [chart.markers]);
 
   const marginCapAmount = useMemo(() => {
     const pv = portfolio?.portfolioValueUsd || 0;
@@ -464,6 +466,39 @@ export default function Uc5Page() {
   }, [edit?.maxMarginPct, portfolio?.portfolioValueUsd]);
 
   const modeLabel = isOwner ? "Owner mode (can control bot)" : "Read-only mode";
+  const yDomain = useMemo<[number, number] | undefined>(() => {
+    if (!chartRows.length) return undefined;
+    const prices = chartRows.map((r) => r.close);
+    const min = Math.min(...prices);
+    const max = Math.max(...prices);
+    const pad = Math.max((max - min) * 0.02, 10);
+    return [min - pad, max + pad];
+  }, [chartRows]);
+  const renderChartTooltip = useCallback(
+    (ctx: unknown) => {
+      const raw = ctx as {
+        active?: boolean;
+        label?: number;
+        payload?: Array<{ value?: number }>;
+      };
+      if (!raw.active || !raw.payload?.length) return null;
+      const ts = Number(raw.label || 0);
+      const price = typeof raw.payload[0]?.value === "number" ? raw.payload[0].value : null;
+      const hits = markerRows.filter((m) => Math.abs(m.t - ts) <= 30_000);
+      return (
+        <div style={tooltipBox}>
+          <div style={{ fontWeight: 800 }}>{new Date(ts).toLocaleString()}</div>
+          <div>Close: {price != null ? fmtUsd(price, 2) : "—"}</div>
+          {hits.map((m, i) => (
+            <div key={`${m.t}-${i}`} style={{ color: m.type === "ENTRY" ? "#15803d" : "#b42318" }}>
+              {m.type} {m.side ? `(${m.side})` : ""} {m.price != null ? fmtUsd(Number(m.price), 2) : "—"}
+            </div>
+          ))}
+        </div>
+      );
+    },
+    [markerRows]
+  );
 
   return (
     <>
@@ -544,7 +579,8 @@ export default function Uc5Page() {
               <KV k="Status" v={trading?.running ? "RUNNING" : "STOPPED"} />
               <KV k="Position" v={trading?.positionOpen ? `${trading.side || "OPEN"}` : "No open trade"} />
               <KV k="Time since entry" v={fmtCountdown(trading?.timeSinceEntrySec)} />
-              <KV k="Initial 60m hold ends" v={fmtCountdown(trading?.countdowns?.initialHoldEndsInSec)} />
+              <KV k="Reassess interval" v={`${status?.runtime?.reassessIntervalSec ?? edit?.reassessIntervalSec ?? 300}s`} />
+              <KV k="Initial hold ends" v={fmtCountdown(trading?.countdowns?.initialHoldEndsInSec)} />
               <KV k="Next reassessment" v={fmtCountdown(trading?.countdowns?.nextReassessInSec)} />
               <KV k="Max hold ends" v={fmtCountdown(trading?.countdowns?.maxHoldEndsInSec)} />
               <KV k="Next entry evaluation" v={fmtCountdown(trading?.countdowns?.nextDecisionInSec)} />
@@ -705,7 +741,44 @@ export default function Uc5Page() {
             <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
               24h chart ({chart.candles.length} points). Trade markers: green=entry, red=exit/flatten.
             </div>
-            <SimplePriceChart candles={chartRows} markers={chart.markers} />
+            {chartRows.length === 0 ? (
+              <div style={{ height: 320, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
+            ) : (
+              <div style={{ width: "100%", height: 340 }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }}>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
+                    <XAxis
+                      dataKey="t"
+                      type="number"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                    />
+                    <YAxis
+                      type="number"
+                      domain={yDomain ?? ["auto", "auto"]}
+                      tickFormatter={(v) => Number(v).toFixed(0)}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                      width={58}
+                    />
+                    <Tooltip content={renderChartTooltip} />
+                    <Line dataKey="close" type="monotone" stroke="#111827" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    {markerRows.slice(-500).map((m, i) => (
+                      <ReferenceDot
+                        key={`${m.t}-${i}`}
+                        x={m.t}
+                        y={Number(m.price)}
+                        r={4}
+                        fill={m.type === "ENTRY" ? "#15803d" : "#b42318"}
+                        stroke="none"
+                        ifOverflow="visible"
+                      />
+                    ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
           </div>
         </section>
 
@@ -869,77 +942,19 @@ const btnWarn: CSSProperties = { borderRadius: 10, border: "1px solid #f79009", 
 const btnDanger: CSSProperties = { borderRadius: 10, border: "1px solid #b42318", background: "#b42318", color: "#fff", padding: "10px 12px", fontWeight: 800, cursor: "pointer" };
 const badgeOwner: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "6px 10px", border: "1px solid #a6f4c5", background: "#ecfdf3", color: "#067647", fontWeight: 800, fontSize: 12 };
 const badgeReadonly: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "6px 10px", border: "1px solid #d0d5dd", background: "#f8f9fb", color: "#344054", fontWeight: 800, fontSize: 12 };
+const tooltipBox: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #d0d5dd",
+  borderRadius: 10,
+  padding: "8px 10px",
+  boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
+  fontSize: 12,
+  color: "#101828",
+};
 const bannerClose: CSSProperties = { border: "1px solid #d0d5dd", borderRadius: 8, background: "#fff", fontSize: 12, padding: "4px 8px", cursor: "pointer" };
 
 function bannerStyle(kind: NoticeKind): CSSProperties {
   if (kind === "success") return { border: "1px solid #a6f4c5", background: "#ecfdf3", color: "#067647", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
   if (kind === "error") return { border: "1px solid #fecdca", background: "#fef3f2", color: "#b42318", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
   return { border: "1px solid #d0d5dd", background: "#f8f9fb", color: "#344054", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
-}
-
-function SimplePriceChart(props: {
-  candles: Array<{ t: number; close: number; time: string }>;
-  markers: Array<{ t: number; price: number | null; type: "ENTRY" | "EXIT"; side?: string | null; eventType?: string }>;
-}) {
-  const w = 1100;
-  const h = 320;
-  const pad = 26;
-
-  if (props.candles.length === 0) {
-    return <div style={{ height: 320, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>;
-  }
-
-  const minT = props.candles[0].t;
-  const maxT = props.candles[props.candles.length - 1].t;
-  const prices = props.candles.map((c) => c.close);
-  const markerPrices = props.markers.filter((m) => m.price != null).map((m) => Number(m.price));
-  const minP = Math.min(...prices, ...(markerPrices.length ? markerPrices : prices));
-  const maxP = Math.max(...prices, ...(markerPrices.length ? markerPrices : prices));
-  const pRange = Math.max(1e-9, maxP - minP);
-  const tRange = Math.max(1, maxT - minT);
-
-  const xOf = (t: number) => pad + ((t - minT) / tRange) * (w - pad * 2);
-  const yOf = (p: number) => h - pad - ((p - minP) / pRange) * (h - pad * 2);
-
-  const d = props.candles
-    .map((c, i) => `${i === 0 ? "M" : "L"} ${xOf(c.t).toFixed(2)} ${yOf(c.close).toFixed(2)}`)
-    .join(" ");
-
-  const ticks = 6;
-  return (
-    <div style={{ width: "100%", overflowX: "auto" }}>
-      <svg width="100%" viewBox={`0 0 ${w} ${h}`} role="img" aria-label="UC5 24h price chart">
-        {Array.from({ length: ticks + 1 }).map((_, i) => {
-          const y = pad + (i * (h - pad * 2)) / ticks;
-          return <line key={`gy-${i}`} x1={pad} y1={y} x2={w - pad} y2={y} stroke="#edf0f4" strokeWidth="1" />;
-        })}
-        {Array.from({ length: ticks + 1 }).map((_, i) => {
-          const x = pad + (i * (w - pad * 2)) / ticks;
-          return <line key={`gx-${i}`} x1={x} y1={pad} x2={x} y2={h - pad} stroke="#f5f6f7" strokeWidth="1" />;
-        })}
-        <path d={d} fill="none" stroke="#111827" strokeWidth="2" />
-        {props.markers
-          .filter((m) => m.price != null)
-          .slice(-500)
-          .map((m, i) => {
-            const x = xOf(m.t);
-            const y = yOf(Number(m.price));
-            const fill = m.type === "ENTRY" ? "#15803d" : "#b42318";
-            return (
-              <circle key={`${m.t}-${i}`} cx={x} cy={y} r={4} fill={fill}>
-                <title>
-                  {`${m.type}${m.side ? ` (${m.side})` : ""} ${fmtUsd(Number(m.price), 2)} @ ${new Date(m.t).toLocaleString()}`}
-                </title>
-              </circle>
-            );
-          })}
-        <text x={pad} y={14} fontSize="11" fill="#667085">
-          {new Date(minT).toLocaleString()}
-        </text>
-        <text x={w - pad} y={14} textAnchor="end" fontSize="11" fill="#667085">
-          {new Date(maxT).toLocaleString()}
-        </text>
-      </svg>
-    </div>
-  );
 }

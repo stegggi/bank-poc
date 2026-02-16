@@ -15,6 +15,8 @@ export const Uc5ConfigSchema = z.object({
   productId: z.string().optional().default(""), // optional UUID (discovered)
   subaccountId: z.string().optional().default(""), // UUID (discovered)
   subaccountName: z.union([z.literal(""), z.string().regex(/^0x[0-9a-fA-F]{64}$/)]).optional().default(""), // bytes32 hex (e.g. primary)
+  botSignerAddress: z.string().default(""),
+  botSignerLinked: z.boolean().default(false),
 
   // Bot runtime knobs
   ingestionEnabled: z.boolean().default(true),

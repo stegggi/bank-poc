@@ -28,6 +28,8 @@ export function defaultUc5Config(): Uc5Config {
     productId: "",
     subaccountId: "",
     subaccountName: "",
+    botSignerAddress: "",
+    botSignerLinked: false,
     ingestionEnabled: true,
     tradingEnabled: true,
     killSwitch: false,
@@ -227,6 +229,8 @@ export type VmSetupStatus = {
   botSigner?: {
     configuredAddress?: string;
     linkedDetectable?: boolean;
+    linked?: boolean;
+    required?: boolean;
     status?: string;
   };
 };

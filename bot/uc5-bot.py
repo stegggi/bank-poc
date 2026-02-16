@@ -521,6 +521,8 @@ def default_runtime_config() -> Dict[str, Any]:
     "productId": "",
     "subaccountId": "",
     "subaccountName": "",
+    "botSignerAddress": os.environ.get("UC5_BOT_SIGNER_ADDRESS", ""),
+    "botSignerLinked": False,
     "ingestionEnabled": True,
     "tradingEnabled": True,
     "killSwitch": False,  # legacy compat; ignored in UI.
@@ -553,6 +555,8 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   cfg["productId"] = str(cfg.get("productId") or "")
   cfg["subaccountId"] = str(cfg.get("subaccountId") or "")
   cfg["subaccountName"] = str(cfg.get("subaccountName") or "")
+  cfg["botSignerAddress"] = str(cfg.get("botSignerAddress") or "")
+  cfg["botSignerLinked"] = bool(cfg.get("botSignerLinked", False))
   cfg["ingestionEnabled"] = bool(cfg.get("ingestionEnabled", True))
   cfg["tradingEnabled"] = bool(cfg.get("tradingEnabled", True))
   cfg["killSwitch"] = False
@@ -808,9 +812,11 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       next_entry_eval = None
       if not pos_open:
         last_decision = agent.get("lastDecisionAt")
-        horizon = int(agent.get("decisionHorizonSeconds") or cfg.get("predictionHorizonSeconds") or 3600)
+        decision_interval = int(agent.get("decisionIntervalSeconds") or cfg.get("reassessIntervalSec") or 300)
         if last_decision:
-          next_entry_eval = int(last_decision) + horizon * 1000
+          next_entry_eval = int(last_decision) + decision_interval * 1000
+        else:
+          next_entry_eval = now_ms
       return self._send_json(
         200,
         {
@@ -870,7 +876,9 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       cfg = get_runtime_config()
       with STATUS_LOCK:
         s = clone_jsonable(LATEST_STATUS)
-      signer_addr = os.environ.get("UC5_BOT_SIGNER_ADDRESS", "")
+      signer_addr = str(cfg.get("botSignerAddress") or os.environ.get("UC5_BOT_SIGNER_ADDRESS", ""))
+      signer_linked = bool(cfg.get("botSignerLinked", False))
+      require_signer_link = str(os.environ.get("UC5_REQUIRE_SIGNER_LINK", "1")).strip().lower() not in ("0", "false", "no", "off")
       missing: List[str] = []
       if not str(cfg.get("ownerAddress") or ""):
         missing.append("ownerAddress")
@@ -880,6 +888,8 @@ class TelemetryHandler(BaseHTTPRequestHandler):
         missing.append("subaccountName")
       if not str(cfg.get("productId") or ""):
         missing.append("productId")
+      if require_signer_link and not signer_linked:
+        missing.append("botSignerLink")
       return self._send_json(
         200,
         {
@@ -888,8 +898,10 @@ class TelemetryHandler(BaseHTTPRequestHandler):
           "needsSetup": len(missing) > 0,
           "botSigner": {
             "configuredAddress": signer_addr,
-            "linkedDetectable": False,
-            "status": "optional_recommended",
+            "linkedDetectable": True,
+            "linked": signer_linked,
+            "required": require_signer_link,
+            "status": ("linked" if signer_linked else ("required" if require_signer_link else "optional_recommended")),
           },
         },
       )
@@ -1380,6 +1392,14 @@ async def main():
               updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
           elif c.get("type") == "LINK_SIGNER":
             out = await process_link_signer(cfg, c, client)
+            cur = get_runtime_config()
+            set_runtime_config(
+              {
+                **cur,
+                "botSignerLinked": True,
+                "botSignerAddress": str(c.get("payload", {}).get("signer") or cur.get("botSignerAddress") or ""),
+              }
+            )
             updates.append({"id": cid, "status": "DONE", "result": out})
           else:
             updates.append({"id": cid, "status": "ERROR", "result": {"error": "Unknown command"}})
@@ -1415,6 +1435,7 @@ async def main():
       set_model(conn, w)
 
       horizon_ms = int(horizon_sec * 1000)
+      decision_interval_ms = int(reassess_sec * 1000)
 
       evaluate_now = False
       evaluate_for_entry = False
@@ -1422,7 +1443,7 @@ async def main():
       if (not pos_open) and (last_decision_at_ms is None):
         evaluate_now = True
         evaluate_for_entry = True
-      elif (not pos_open) and (last_decision_at_ms is not None) and (ts_ms - last_decision_at_ms >= horizon_ms):
+      elif (not pos_open) and (last_decision_at_ms is not None) and (ts_ms - last_decision_at_ms >= decision_interval_ms):
         evaluate_now = True
         evaluate_for_entry = True
       elif pos_open and next_reassess_ms and ts_ms >= next_reassess_ms:
@@ -1521,7 +1542,7 @@ async def main():
               action_taken = {
                 "type": "WAIT_ENTRY_REASSESS",
                 "ok": True,
-                "info": {"nextAt": (last_decision_at_ms + horizon_ms) if last_decision_at_ms else ts_ms},
+                "info": {"nextAt": (last_decision_at_ms + decision_interval_ms) if last_decision_at_ms else ts_ms},
               }
             elif desired in ("LONG", "SHORT"):
               if not can_open:
@@ -1636,6 +1657,7 @@ async def main():
           "reasonRaw": raw_reason,
           "lastDecisionAt": last_decision_at_ms,
           "decisionHorizonSeconds": horizon_sec,
+          "decisionIntervalSeconds": reassess_sec,
           "nextReassessAt": next_reassess_ms,
           "minHoldUntil": min_hold_until,
           "maxHoldUntil": max_hold_until,
@@ -1648,12 +1670,19 @@ async def main():
           "initialHoldEndsAt": min_hold_until,
           "nextReassessAt": next_reassess_ms,
           "maxHoldEndsAt": max_hold_until,
-          "nextDecisionAt": ((last_decision_at_ms + horizon_ms) if (last_decision_at_ms and not pos_open) else None),
+          "nextDecisionAt": (
+            None
+            if pos_open
+            else ((last_decision_at_ms + decision_interval_ms) if last_decision_at_ms else ts_ms)
+          ),
           "countdowns": {
             "initialHoldEndsInSec": to_countdown_sec(min_hold_until, ts_ms),
             "nextReassessInSec": to_countdown_sec(next_reassess_ms, ts_ms),
             "maxHoldEndsInSec": to_countdown_sec(max_hold_until, ts_ms),
-            "nextDecisionInSec": to_countdown_sec((last_decision_at_ms + horizon_ms) if (last_decision_at_ms and not pos_open) else None, ts_ms),
+            "nextDecisionInSec": to_countdown_sec(
+              None if pos_open else ((last_decision_at_ms + decision_interval_ms) if last_decision_at_ms else ts_ms),
+              ts_ms,
+            ),
           },
         },
         "lastAction": action_taken,
