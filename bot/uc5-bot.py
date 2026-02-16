@@ -176,7 +176,7 @@ def compute_features(conn) -> Tuple[List[float], str]:
 
   sma20 = sma(20)
   sma60 = sma(60)
-  trend = (sma20 - sma60) / px[-1]
+  trend = ((sma20 - sma60) / px[-1]) if (px[-1] and px[-1] > 0) else 0.0
 
   # RSI(14)
   gains, losses = 0.0, 0.0
@@ -193,10 +193,15 @@ def compute_features(conn) -> Tuple[List[float], str]:
   # volatility (~60 returns)
   rets = []
   for i in range(max(1, len(px) - 60), len(px)):
-    rets.append((px[i] / px[i - 1]) - 1.0)
-  mu = sum(rets) / len(rets)
-  var = sum((x - mu) * (x - mu) for x in rets) / max(1, len(rets) - 1)
-  vol = math.sqrt(var)
+    prev = px[i - 1]
+    if prev and prev > 0:
+      rets.append((px[i] / prev) - 1.0)
+  if rets:
+    mu = sum(rets) / len(rets)
+    var = sum((x - mu) * (x - mu) for x in rets) / max(1, len(rets) - 1)
+    vol = math.sqrt(var)
+  else:
+    vol = 0.0
 
   row = conn.execute("SELECT oracle FROM prices ORDER BY ts_ms DESC LIMIT 1").fetchone()
   oracle = row[0] if row else None
@@ -542,6 +547,8 @@ async def main():
       # Resolve identifiers early (so commands can use them)
       ticker = cfg.get("ticker", "BTCUSD")
       product_id = cfg.get("productId", "") or fetch_product_id(eth_base, ticker)
+      if not product_id:
+        raise RuntimeError(f"No productId found for ticker={ticker}")
       sub_id = cfg.get("subaccountId", "")
 
       # Fetch active position once per loop (used for FLATTEN and status)
@@ -572,10 +579,12 @@ async def main():
 
       # ---- Market price ----
       mp = fetch_market_price(eth_base, product_id)
-      best_bid = float(mp.get("bestBidPrice") or 0)
-      best_ask = float(mp.get("bestAskPrice") or 0)
-      oracle = float(mp.get("oraclePrice") or 0)
+      best_bid = float(mp.get("bestBidPrice") or mp.get("bestBid") or 0)
+      best_ask = float(mp.get("bestAskPrice") or mp.get("bestAsk") or 0)
+      oracle = float(mp.get("oraclePrice") or mp.get("oracle") or mp.get("price") or 0)
       mid = (best_bid + best_ask) / 2.0 if best_bid and best_ask else (oracle or best_bid or best_ask)
+      if mid <= 0:
+        raise RuntimeError(f"Market price unavailable for ticker={ticker}, productId={product_id}")
 
       ts_ms = int(time.time() * 1000)
       conn.execute(
