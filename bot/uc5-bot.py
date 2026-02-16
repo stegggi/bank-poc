@@ -303,22 +303,47 @@ def fetch_product_id(eth_base: str, ticker: str) -> str:
 
 
 def fetch_market_price(eth_base: str, product_id: str) -> Dict[str, Any]:
-  return requests.get(
+  # Endpoint commonly expects `productIds` and returns payload in `data[0]`.
+  # Keep a fallback to `productId` for compatibility with older variants.
+  r = requests.get(
+    f"{eth_base}/v1/product/market-price",
+    params={"productIds": product_id},
+    timeout=20
+  ).json()
+  if isinstance(r, dict) and isinstance(r.get("data"), list) and r["data"]:
+    row = r["data"][0]
+    if isinstance(row, dict):
+      return row
+
+  r2 = requests.get(
     f"{eth_base}/v1/product/market-price",
     params={"productId": product_id},
     timeout=20
   ).json()
+  if isinstance(r2, dict) and isinstance(r2.get("data"), list) and r2["data"]:
+    row = r2["data"][0]
+    if isinstance(row, dict):
+      return row
+  return r2 if isinstance(r2, dict) else {}
 
 
 def fetch_active_position(eth_base: str, sub_id: str, product_id: str) -> Optional[Dict[str, Any]]:
   if not sub_id or not product_id:
     return None
   try:
-    return requests.get(
+    raw = requests.get(
       f"{eth_base}/v1/position/active",
       params={"subaccountId": sub_id, "productId": product_id},
       timeout=20
     ).json()
+    if isinstance(raw, dict):
+      data = raw.get("data")
+      if isinstance(data, list):
+        return data[0] if data else None
+      if isinstance(data, dict):
+        return data
+      return raw
+    return None
   except Exception:
     return None
 
