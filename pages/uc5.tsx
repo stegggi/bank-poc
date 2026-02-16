@@ -19,6 +19,7 @@ const CHART_REFRESH_SEC = 6;
 type NoticeKind = "success" | "error" | "info";
 type Notice = { id: number; kind: NoticeKind; text: string; pending: boolean };
 type AdminAuth = { address: string; signature: string; nonce: string; issuedAt: number };
+type RpcDomain = { chainId?: unknown; name?: string; version?: string; verifyingContract?: string };
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -63,6 +64,56 @@ function fmtPct(v?: number | null, digits = 1) {
 function shortAddr(addr: string) {
   if (!addr) return "";
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
+}
+
+function toHexChainId(v: unknown): string | null {
+  try {
+    if (typeof v === "number" && Number.isFinite(v)) return `0x${Math.trunc(v).toString(16)}`;
+    if (typeof v === "bigint") return `0x${v.toString(16)}`;
+    if (typeof v === "string") {
+      const s = v.trim();
+      if (!s) return null;
+      if (s.startsWith("0x") || s.startsWith("0X")) return `0x${BigInt(s).toString(16)}`;
+      return `0x${BigInt(s).toString(16)}`;
+    }
+  } catch {}
+  return null;
+}
+
+function asProviderWithRequest(p: Eip1193Provider): Eip1193Provider & { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> } {
+  return p as Eip1193Provider & { request: (args: { method: string; params?: unknown[] }) => Promise<unknown> };
+}
+
+async function ensureWalletChain(eth: Eip1193Provider, chainIdHex: string) {
+  const req = asProviderWithRequest(eth);
+  try {
+    await req.request({
+      method: "wallet_switchEthereumChain",
+      params: [{ chainId: chainIdHex }],
+    });
+    return;
+  } catch (err: unknown) {
+    const e = err as { code?: number; message?: string };
+    if (e?.code === 4902) {
+      await req.request({
+        method: "wallet_addEthereumChain",
+        params: [
+          {
+            chainId: chainIdHex,
+            chainName: "Ethereal",
+            nativeCurrency: { name: "Ether", symbol: "ETH", decimals: 18 },
+            rpcUrls: ["https://rpc.ethereal.trade"],
+          },
+        ],
+      });
+      await req.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chainIdHex }],
+      });
+      return;
+    }
+    throw new Error(e?.message || "Failed to switch wallet chain for signing.");
+  }
 }
 
 function normalizeEdit(c: Uc5Config): Uc5Config {
@@ -391,11 +442,14 @@ export default function Uc5Page() {
     const pendingId = addNotice("info", "Creating LINK_SIGNER request...", true);
     setBusy("link-signer");
     try {
-      const rpc = await readJson<{ domain?: unknown }>("/api/uc5/ethereal?path=/v1/rpc/config");
+      const rpc = await readJson<{ domain?: RpcDomain }>("/api/uc5/ethereal?path=/v1/rpc/config");
       if (!rpc?.domain) throw new Error("Could not load Ethereal EIP-712 domain.");
 
       const eth = (window as { ethereum?: Eip1193Provider }).ethereum;
       if (!eth) throw new Error("MetaMask not found.");
+      const chainIdHex = toHexChainId(rpc.domain.chainId);
+      if (!chainIdHex) throw new Error("Invalid chainId in Ethereal domain.");
+      await ensureWalletChain(eth, chainIdHex);
       const provider = new BrowserProvider(eth);
       const signer = await provider.getSigner();
 
