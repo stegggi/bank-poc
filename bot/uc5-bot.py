@@ -26,8 +26,12 @@ except Exception:
 
 
 # ---- Env ----
+def _clean_secret(v: Optional[str]) -> str:
+  return str(v or "").strip().strip('"').strip("'")
+
+
 BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
-BOT_PRIVKEY = os.environ.get("UC5_BOT_SIGNER_PRIVATE_KEY", "")  # linked signer EOA private key (0x...)
+BOT_PRIVKEY = _clean_secret(os.environ.get("UC5_BOT_SIGNER_PRIVATE_KEY", ""))  # linked signer EOA private key (0x...)
 
 DB_PATH = os.environ.get("UC5_SQLITE_PATH", os.path.join(os.path.dirname(__file__), "uc5.sqlite"))
 RUNTIME_CONFIG_PATH = os.environ.get("UC5_RUNTIME_CONFIG_PATH", os.path.join(os.path.dirname(__file__), "uc5.runtime.config.json"))
@@ -39,6 +43,19 @@ BOT_VERSION = "uc5-bot/0.5 (vm-runtime-sections + low-blob)"
 
 if not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_BOT_TOKEN")
+
+
+def signer_address_from_privkey() -> str:
+  if not BOT_PRIVKEY:
+    return ""
+  try:
+    from eth_account import Account
+    return str(Account.from_key(BOT_PRIVKEY).address or "")
+  except Exception:
+    return ""
+
+
+BOT_SIGNER_ADDRESS = signer_address_from_privkey()
 
 
 # ---- SQLite ----
@@ -1200,13 +1217,21 @@ async def ensure_client(cfg: Dict[str, Any]) -> AsyncRESTClient:
   """
   eth_base = cfg.get("etherealApiBase", "https://api.ethereal.trade")
   eth_rpc = cfg.get("etherealRpcUrl", "https://rpc.ethereal.trade")
-  return await AsyncRESTClient.create({
-    "base_url": eth_base,
-    "chain_config": {
-      "rpc_url": eth_rpc,
-      "private_key": BOT_PRIVKEY,  # required for trading
-    }
-  })
+  try:
+    return await AsyncRESTClient.create({
+      "base_url": eth_base,
+      "chain_config": {
+        "rpc_url": eth_rpc,
+        "private_key": BOT_PRIVKEY,  # required for trading
+      }
+    })
+  except TypeError:
+    # Backward-compatible path for SDK variants that expose kwargs.
+    return await AsyncRESTClient.create(
+      private_key=BOT_PRIVKEY,
+      api_url=eth_base,
+      chain_rpc_url=eth_rpc,
+    )
 
 
 async def place_market(
@@ -1223,26 +1248,41 @@ async def place_market(
   """
   q = Decimal(str(qty))
   # Some SDK builds accept price=None for MARKET; others are stricter.
+  async def _submit(order_sender: str):
+    try:
+      await client.create_order(
+        order_type="MARKET",
+        quantity=q,
+        side=side_int,
+        price=None,
+        ticker=ticker,
+        sender=order_sender,
+        subaccount=subaccount,
+      )
+    except TypeError:
+      await client.create_order(
+        order_type="MARKET",
+        quantity=q,
+        side=side_int,
+        price=Decimal("0"),
+        ticker=ticker,
+        sender=order_sender,
+        subaccount=subaccount,
+      )
+
   try:
-    await client.create_order(
-      order_type="MARKET",
-      quantity=q,
-      side=side_int,
-      price=None,
-      ticker=ticker,
-      sender=sender,
-      subaccount=subaccount,
-    )
-  except TypeError:
-    await client.create_order(
-      order_type="MARKET",
-      quantity=q,
-      side=side_int,
-      price=Decimal("0"),
-      ticker=ticker,
-      sender=sender,
-      subaccount=subaccount,
-    )
+    await _submit(sender)
+  except Exception as first_error:
+    err = str(first_error or "")
+    # Some deployments authorize linked signers only when sender == signer EOA.
+    if (
+      ("401" in err or "Unauthorized" in err)
+      and BOT_SIGNER_ADDRESS
+      and BOT_SIGNER_ADDRESS.lower() != str(sender or "").lower()
+    ):
+      await _submit(BOT_SIGNER_ADDRESS)
+      return
+    raise
 
 
 async def close_position_if_any(
@@ -1379,7 +1419,8 @@ async def main():
       if not product_id:
         raise RuntimeError(f"No productId found for ticker={ticker}")
       sub_id = str(cfg.get("subaccountId", "") or "")
-      owner_addr = str(cfg.get("ownerAddress") or "")
+      owner_addr_raw = str(cfg.get("ownerAddress") or "")
+      owner_addr = owner_addr_raw.lower()
       subaccount_name = str(cfg.get("subaccountName") or "")
       configured_signer_addr = str(cfg.get("botSignerAddress") or "")
       sub_id, subaccount_name = resolve_subaccount_context(
@@ -1395,11 +1436,11 @@ async def main():
         if signer_active != cfg_linked:
           cfg = set_runtime_config({**cfg, "botSignerLinked": signer_active})
       missing_trade_ctx = []
-      if not owner_addr:
+      if not owner_addr_raw:
         missing_trade_ctx.append("ownerAddress")
       if not subaccount_name:
         missing_trade_ctx.append("subaccountName")
-      has_trade_account_ctx = bool(owner_addr and subaccount_name)
+      has_trade_account_ctx = bool(owner_addr_raw and subaccount_name)
 
       # Fetch active position once per loop (used for FLATTEN and status)
       pos = fetch_active_position(eth_base, sub_id, product_id)
@@ -1708,7 +1749,7 @@ async def main():
           "bestAsk": best_ask,
         },
         "account": {
-          "owner": cfg.get("ownerAddress"),
+          "owner": owner_addr_raw,
           "subaccountId": sub_id,
           "subaccountName": subaccount_name,
         },
