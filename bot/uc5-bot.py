@@ -14,7 +14,7 @@ This is a demo trading bot. It can lose money. Start tiny (e.g. 100 USDe) and ke
 
 import os, time, json, math, sqlite3, requests, asyncio, threading, uuid
 from urllib.parse import urlparse, parse_qs
-from decimal import Decimal
+from decimal import Decimal, ROUND_DOWN
 from typing import Optional, Dict, Any, List, Tuple
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
@@ -126,6 +126,15 @@ def sigmoid(x: float) -> float:
 
 def clamp(x: float, a: float, b: float) -> float:
   return max(a, min(b, x))
+
+
+def quantize_qty_to_lot(qty: float, lot_size: Optional[float]) -> float:
+  q = Decimal(str(max(0.0, float(qty or 0.0))))
+  if lot_size is None or float(lot_size) <= 0:
+    return float(q)
+  step = Decimal(str(lot_size))
+  units = (q / step).to_integral_value(rounding=ROUND_DOWN)
+  return float(units * step)
 
 
 def ensure_model(conn) -> List[float]:
@@ -983,6 +992,37 @@ def fetch_product_id(eth_base: str, ticker: str) -> str:
   return ""
 
 
+def fetch_product_row(eth_base: str, ticker: str, product_id: str) -> Dict[str, Any]:
+  try:
+    prod = requests.get(f"{eth_base}/v1/product", params={"ticker": ticker}, timeout=20).json()
+    data = prod.get("data") if isinstance(prod, dict) else None
+    if isinstance(data, list):
+      for row in data:
+        if not isinstance(row, dict):
+          continue
+        if product_id and str(row.get("id") or "") == product_id:
+          return row
+      if data and isinstance(data[0], dict):
+        return data[0]
+  except Exception:
+    return {}
+  return {}
+
+
+def extract_lot_size(product_row: Dict[str, Any], fallback: float = 0.00001) -> float:
+  if not isinstance(product_row, dict):
+    return fallback
+  for k in ("lotSize", "baseLotSize", "qtyIncrement", "quantityIncrement", "stepSize", "sizeStep"):
+    v = product_row.get(k)
+    try:
+      x = float(v)
+      if x > 0:
+        return x
+    except Exception:
+      continue
+  return fallback
+
+
 def fetch_market_price(eth_base: str, product_id: str) -> Dict[str, Any]:
   # Endpoint commonly expects `productIds` and returns payload in `data[0]`.
   # Keep a fallback to `productId` for compatibility with older variants.
@@ -1241,12 +1281,16 @@ async def place_market(
   qty: float,
   sender: str,
   subaccount: str,
+  lot_size: Optional[float] = None,
 ):
   """
   create_order expects:
     side=0 (buy) / 1 (sell), quantity=Decimal(...). :contentReference[oaicite:3]{index=3}
   """
-  q = Decimal(str(qty))
+  q_adj = quantize_qty_to_lot(qty, lot_size)
+  if q_adj <= 0:
+    raise RuntimeError(f"Quantity {qty} rounds to 0 at lotSize={lot_size}")
+  q = Decimal(str(q_adj))
   # Some SDK builds accept price=None for MARKET; others are stricter.
   async def _submit(order_sender: str):
     try:
@@ -1293,12 +1337,13 @@ async def close_position_if_any(
   pos_size: float,
   sender: str,
   subaccount: str,
+  lot_size: Optional[float] = None,
 ):
   if not pos_open or not pos_side or abs(pos_size) <= 0:
     return
   # If LONG -> SELL to close, if SHORT -> BUY to close
   side_int = 1 if pos_side == "LONG" else 0
-  await place_market(client, ticker, side_int, abs(pos_size), sender, subaccount)
+  await place_market(client, ticker, side_int, abs(pos_size), sender, subaccount, lot_size)
 
 
 # ---- LINK_SIGNER helper (kept as-is for your current dashboard flow) ----
@@ -1398,6 +1443,8 @@ async def main():
   last_bid: Optional[float] = None
   last_ask: Optional[float] = None
   last_ingested_ms: Optional[int] = None
+  cached_product_id: str = ""
+  cached_lot_size: float = 0.00001
 
   while True:
     loop_started = time.time()
@@ -1418,6 +1465,10 @@ async def main():
       product_id = cfg.get("productId", "") or fetch_product_id(eth_base, ticker)
       if not product_id:
         raise RuntimeError(f"No productId found for ticker={ticker}")
+      if product_id != cached_product_id:
+        row = fetch_product_row(eth_base, ticker, product_id)
+        cached_lot_size = extract_lot_size(row, fallback=0.00001)
+        cached_product_id = product_id
       sub_id = str(cfg.get("subaccountId", "") or "")
       owner_addr_raw = str(cfg.get("ownerAddress") or "")
       owner_addr = owner_addr_raw.lower()
@@ -1481,7 +1532,7 @@ async def main():
                 "result": {"error": f"Missing {', '.join(missing_trade_ctx)} in config. Discover subaccount and save config first."},
               })
             else:
-              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
               if pos_open:
                 insert_trade_event(
                   conn,
@@ -1609,7 +1660,7 @@ async def main():
           }
         elif not trading_enabled:
           if pos_open:
-            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
             insert_trade_event(
               conn,
               ts_ms,
@@ -1635,7 +1686,7 @@ async def main():
 
           # Force close if max position age is reached.
           if pos_open and max_hold_until and ts_ms >= max_hold_until:
-            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+            await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
             insert_trade_event(
               conn,
               ts_ms,
@@ -1675,19 +1726,20 @@ async def main():
                 lev = float(cfg.get("maxLeverage", 2))
                 margin_use = min(max_margin, (avail if avail is not None else max_margin))
                 notional = margin_use * lev * conf
-                qty = max(0.0, (notional / mid) if mid > 0 else 0.0)
+                qty_raw = max(0.0, (notional / mid) if mid > 0 else 0.0)
+                qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
 
                 if qty > 0:
                   side_int = 0 if desired == "LONG" else 1
-                  await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name)
+                  await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name, cached_lot_size)
                   insert_trade_event(conn, ts_ms, "ENTRY", desired, qty, mid, None, "model_entry")
                   last_order_ts.append(now)
                   last_position_opened_ms = ts_ms
                   pos_open, pos_side, pos_size, pos_entry_price = True, desired, qty, mid
                   next_reassess_ms = ts_ms + min_hold_sec * 1000
-                  action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "conf": conf, "lev": lev, "margin": margin_use}}
+                  action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "qtyRaw": qty_raw, "lotSize": cached_lot_size, "conf": conf, "lev": lev, "margin": margin_use}}
                 else:
-                  action_taken = {"type": "SKIP_ZERO_QTY", "ok": False, "info": None}
+                  action_taken = {"type": "SKIP_QTY_BELOW_LOT", "ok": False, "info": {"qtyRaw": qty_raw, "lotSize": cached_lot_size}}
             else:
               action_taken = {"type": "SKIP_NO_SIGNAL", "ok": True, "info": {"desired": desired}}
 
@@ -1699,7 +1751,7 @@ async def main():
               action_taken = {"type": "HOLD_AFTER_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
             else:
               prev_side = pos_side
-              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name)
+              await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
               insert_trade_event(
                 conn,
                 ts_ms,
