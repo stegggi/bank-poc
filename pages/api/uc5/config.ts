@@ -34,7 +34,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       if (!v.ok) return res.status(403).json({ error: v.error || "Forbidden" });
 
       // Keep owner stable; only owner wallet can update config.
-      const nextCfg: Uc5Config = { ...cfg, ownerAddress: normAddr(owner) };
+      // Preserve signer-link state from current config so normal "Save settings"
+      // cannot accidentally reset one-time LINK_SIGNER setup.
+      const nextCfg: Uc5Config = {
+        ...cfg,
+        ownerAddress: normAddr(owner),
+        botSignerAddress: current.botSignerAddress || "",
+        botSignerLinked: Boolean(current.botSignerLinked),
+      };
 
       await postVmConfig(nextCfg);
       return res.status(200).json({ ok: true });
