@@ -1240,20 +1240,21 @@ async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any], client: 
     },
   }
 
-  signer_sig = None
-  try:
-    acct = getattr(client, "_account", None) or getattr(client, "account", None)
-    if acct is None:
-      raise Exception("no account on client")
-    from eth_account.messages import encode_typed_data
-    msg = encode_typed_data(full_message=typed)
-    signer_sig = acct.sign_message(msg).signature.hex()
-  except Exception:
-    from eth_account import Account
-    from eth_account.messages import encode_typed_data
-    acct = Account.from_key(BOT_PRIVKEY)
-    msg = encode_typed_data(full_message=typed)
-    signer_sig = acct.sign_message(msg).signature.hex()
+  # Always sign with the explicit bot private key for deterministic EOA signatures.
+  from eth_account import Account
+  from eth_account.messages import encode_typed_data
+  pk = str(BOT_PRIVKEY or "").strip().strip('"').strip("'")
+  acct = Account.from_key(pk)
+  expected_signer = str(payload.get("signer") or "").strip().lower()
+  actual_signer = str(acct.address or "").strip().lower()
+  if expected_signer and expected_signer != actual_signer:
+    raise RuntimeError(
+      f"BOT_PRIVKEY address mismatch: env key resolves to {acct.address}, payload signer is {payload.get('signer')}"
+    )
+  msg = encode_typed_data(full_message=typed)
+  signer_sig = acct.sign_message(msg).signature.hex()
+  if not str(signer_sig).startswith("0x"):
+    signer_sig = f"0x{signer_sig}"
 
   body = {
     "signature": payload["senderSignature"],
