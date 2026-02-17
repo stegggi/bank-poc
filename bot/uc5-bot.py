@@ -1015,7 +1015,15 @@ def fetch_linked_signers(eth_base: str, subaccount_id: str, active: Optional[boo
   if active is not None:
     params["active"] = str(bool(active)).lower()
   try:
-    raw = requests.get(f"{eth_base}/v1/linked-signer", params=params, timeout=20).json()
+    r = requests.get(f"{eth_base}/v1/linked-signer", params=params, timeout=20)
+    if r.status_code == 400 and active is not None:
+      # Some deployments do not accept the "active" query parameter.
+      r = requests.get(
+        f"{eth_base}/v1/linked-signer",
+        params={"subaccountId": subaccount_id},
+        timeout=20,
+      )
+    raw = r.json() if r.content else {}
     data = raw.get("data") if isinstance(raw, dict) else None
     if isinstance(data, list):
       return [x for x in data if isinstance(x, dict)]
@@ -1032,7 +1040,25 @@ def is_linked_signer_active(eth_base: str, subaccount_id: str, signer_addr: str)
   for r in rows:
     s = str(r.get("signer") or "").strip().lower()
     if s == signer:
-      return bool(r.get("isActive", True))
+      status = str(r.get("status") or "").strip().upper()
+      if status:
+        return status in ("ACTIVE", "LINKED", "DONE")
+      if "isActive" in r:
+        return bool(r.get("isActive"))
+      if "active" in r:
+        return bool(r.get("active"))
+      revoked = r.get("revokedAt")
+      if revoked:
+        return False
+      exp = r.get("expiresAt")
+      if exp is not None:
+        try:
+          now_ms = int(time.time() * 1000)
+          exp_ms = int(exp)
+          return exp_ms > now_ms
+        except Exception:
+          return True
+      return True
   return False
 
 
