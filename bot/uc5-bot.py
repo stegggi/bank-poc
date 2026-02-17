@@ -877,7 +877,11 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       with STATUS_LOCK:
         s = clone_jsonable(LATEST_STATUS)
       signer_addr = str(cfg.get("botSignerAddress") or os.environ.get("UC5_BOT_SIGNER_ADDRESS", ""))
+      sub_id = str(cfg.get("subaccountId") or s.get("account", {}).get("subaccountId") or "")
+      eth_base = str(cfg.get("etherealApiBase") or "https://api.ethereal.trade")
       signer_linked = bool(cfg.get("botSignerLinked", False))
+      if signer_addr and sub_id:
+        signer_linked = is_linked_signer_active(eth_base, sub_id, signer_addr)
       require_signer_link = str(os.environ.get("UC5_REQUIRE_SIGNER_LINK", "1")).strip().lower() not in ("0", "false", "no", "off")
       missing: List[str] = []
       if not str(cfg.get("ownerAddress") or ""):
@@ -1002,6 +1006,34 @@ def fetch_subaccounts(eth_base: str, sender: str) -> List[Dict[str, Any]]:
   except Exception:
     return []
   return []
+
+
+def fetch_linked_signers(eth_base: str, subaccount_id: str, active: Optional[bool] = None) -> List[Dict[str, Any]]:
+  if not subaccount_id:
+    return []
+  params: Dict[str, Any] = {"subaccountId": subaccount_id}
+  if active is not None:
+    params["active"] = str(bool(active)).lower()
+  try:
+    raw = requests.get(f"{eth_base}/v1/linked-signer", params=params, timeout=20).json()
+    data = raw.get("data") if isinstance(raw, dict) else None
+    if isinstance(data, list):
+      return [x for x in data if isinstance(x, dict)]
+  except Exception:
+    return []
+  return []
+
+
+def is_linked_signer_active(eth_base: str, subaccount_id: str, signer_addr: str) -> bool:
+  signer = str(signer_addr or "").strip().lower()
+  if not signer or not subaccount_id:
+    return False
+  rows = fetch_linked_signers(eth_base, subaccount_id, active=True)
+  for r in rows:
+    s = str(r.get("signer") or "").strip().lower()
+    if s == signer:
+      return bool(r.get("isActive", True))
+  return False
 
 
 def resolve_subaccount_context(
@@ -1323,12 +1355,19 @@ async def main():
       sub_id = str(cfg.get("subaccountId", "") or "")
       owner_addr = str(cfg.get("ownerAddress") or "")
       subaccount_name = str(cfg.get("subaccountName") or "")
+      configured_signer_addr = str(cfg.get("botSignerAddress") or "")
       sub_id, subaccount_name = resolve_subaccount_context(
         eth_base=eth_base,
         sender=owner_addr,
         subaccount_id=sub_id,
         subaccount_name=subaccount_name,
       )
+      signer_active = True
+      if configured_signer_addr and sub_id:
+        signer_active = is_linked_signer_active(eth_base, sub_id, configured_signer_addr)
+        cfg_linked = bool(cfg.get("botSignerLinked", False))
+        if signer_active != cfg_linked:
+          cfg = set_runtime_config({**cfg, "botSignerLinked": signer_active})
       missing_trade_ctx = []
       if not owner_addr:
         missing_trade_ctx.append("ownerAddress")
@@ -1393,11 +1432,13 @@ async def main():
               updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
           elif c.get("type") == "LINK_SIGNER":
             out = await process_link_signer(cfg, c, client)
+            link_status = str((out or {}).get("status") or "").strip().upper()
+            linked_now = link_status in ("ACTIVE", "LINKED", "DONE")
             cur = get_runtime_config()
             set_runtime_config(
               {
                 **cur,
-                "botSignerLinked": True,
+                "botSignerLinked": linked_now,
                 "botSignerAddress": str(c.get("payload", {}).get("signer") or cur.get("botSignerAddress") or ""),
               }
             )
@@ -1492,6 +1533,12 @@ async def main():
             "type": "SKIP_ACCOUNT_CONTEXT_MISSING",
             "ok": False,
             "info": {"missing": missing_trade_ctx},
+          }
+        elif not signer_active:
+          action_taken = {
+            "type": "SKIP_SIGNER_NOT_ACTIVE",
+            "ok": False,
+            "info": {"botSignerAddress": configured_signer_addr},
           }
         elif not trading_enabled:
           if pos_open:
