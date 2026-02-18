@@ -260,8 +260,8 @@ export default function Uc5Page() {
     if (edit.ingestIntervalSec < 1 || edit.ingestIntervalSec > 60) {
       errors.ingestIntervalSec = "Ingest interval must be 1 to 60 sec";
     }
-    if (edit.reassessIntervalSec < 60 || edit.reassessIntervalSec > 86400) {
-      errors.reassessIntervalSec = "Reassess interval must be 60 to 86400 sec";
+    if (edit.reassessIntervalSec < 5 || edit.reassessIntervalSec > 86400) {
+      errors.reassessIntervalSec = "Reassess interval must be 5 to 86400 sec";
     }
     return errors;
   }, [edit]);
@@ -779,13 +779,13 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="reassessIntervalSec" help="Reassessment cadence after initial hold." error={validation.reassessIntervalSec}>
+            <Field label="reassessIntervalSec" help="Reassessment cadence after initial hold (min 5s)." error={validation.reassessIntervalSec}>
               <input
                 style={input}
                 type="number"
-                min={60}
+                min={5}
                 max={86400}
-                step={10}
+                step={1}
                 value={edit?.reassessIntervalSec ?? 300}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, reassessIntervalSec: Number(e.target.value) } : p))}

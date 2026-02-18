@@ -39,7 +39,7 @@ RUNTIME_CONFIG_PATH = os.environ.get("UC5_RUNTIME_CONFIG_PATH", os.path.join(os.
 # Telemetry server (VPS)
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
-BOT_VERSION = "uc5-bot/0.5 (vm-runtime-sections + low-blob)"
+BOT_VERSION = "uc5-bot/0.6 (sdk-safe-status + lot+pnl-fixes)"
 
 if not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_BOT_TOKEN")
@@ -426,26 +426,53 @@ def query_trades_summary() -> Dict[str, Any]:
   try:
     rows = c.execute(
       """
-      SELECT event_type, pnl
+      SELECT ts_ms, event_type, side, qty, price, pnl
       FROM trades
-      WHERE event_type IN ('EXIT','FLATTEN')
+      WHERE event_type IN ('ENTRY','EXIT','FLATTEN')
       ORDER BY ts_ms ASC
       """
     ).fetchall()
-    pnls = [float(r["pnl"]) for r in rows if r["pnl"] is not None]
+
+    open_leg: Optional[Dict[str, Any]] = None
+    closed: List[Tuple[int, Optional[float]]] = []
+    for r in rows:
+      et = str(r["event_type"] or "")
+      if et == "ENTRY":
+        open_leg = {
+          "ts_ms": int(r["ts_ms"]),
+          "side": str(r["side"] or "").upper(),
+          "qty": _f(r["qty"]),
+          "price": _f(r["price"]),
+        }
+        continue
+      if et not in ("EXIT", "FLATTEN"):
+        continue
+
+      pnl = _f(r["pnl"])
+      if pnl is None and open_leg:
+        side = str(open_leg.get("side") or "").upper()
+        qty = _f(r["qty"]) or _f(open_leg.get("qty"))
+        entry_px = _f(open_leg.get("price"))
+        exit_px = _f(r["price"])
+        if qty and qty > 0 and entry_px and entry_px > 0 and exit_px and exit_px > 0:
+          if side == "LONG":
+            pnl = (exit_px - entry_px) * qty
+          elif side == "SHORT":
+            pnl = (entry_px - exit_px) * qty
+
+      closed.append((int(r["ts_ms"]), pnl))
+      open_leg = None
+
+    pnls = [float(x[1]) for x in closed if x[1] is not None]
     wins = [x for x in pnls if x > 0]
     losses = [x for x in pnls if x < 0]
-    total = len(pnls)
+    total = len(closed)
     win_rate = (len(wins) / total) if total > 0 else 0.0
     avg_win = (sum(wins) / len(wins)) if wins else 0.0
     avg_loss = (sum(losses) / len(losses)) if losses else 0.0
     total_realized = sum(pnls) if pnls else 0.0
     day_ago = int(time.time() * 1000) - 24 * 60 * 60 * 1000
-    day_rows = c.execute(
-      "SELECT pnl FROM trades WHERE ts_ms >= ? AND event_type IN ('EXIT','FLATTEN')",
-      (day_ago,),
-    ).fetchall()
-    realized_today = sum(float(r["pnl"]) for r in day_rows if r["pnl"] is not None)
+    realized_today = sum(float(p) for (ts, p) in closed if p is not None and ts >= day_ago)
     return {
       "totalTrades": total,
       "winRate": win_rate,
@@ -609,7 +636,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     cfg["reassessIntervalSec"] = int(cfg.get("reassessIntervalSec", 300))
   except Exception:
     cfg["reassessIntervalSec"] = 300
-  cfg["reassessIntervalSec"] = max(60, min(86400, cfg["reassessIntervalSec"]))
+  cfg["reassessIntervalSec"] = max(5, min(86400, cfg["reassessIntervalSec"]))
 
   try:
     cfg["predictionHorizonSeconds"] = int(cfg.get("predictionHorizonSeconds", 3600))
@@ -778,15 +805,18 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       return {}
 
   def _send_json(self, code: int, obj: Any):
-    body = json.dumps(obj).encode("utf-8")
-    self.send_response(code)
-    self.send_header("Content-Type", "application/json")
-    self.send_header("Access-Control-Allow-Origin", "*")
-    self.send_header("Access-Control-Allow-Headers", "content-type, x-uc5-bot-token")
-    self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-    self.send_header("Cache-Control", "no-store")
-    self.end_headers()
-    self.wfile.write(body)
+    try:
+      body = json.dumps(obj).encode("utf-8")
+      self.send_response(code)
+      self.send_header("Content-Type", "application/json")
+      self.send_header("Access-Control-Allow-Origin", "*")
+      self.send_header("Access-Control-Allow-Headers", "content-type, x-uc5-bot-token")
+      self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+      self.send_header("Cache-Control", "no-store")
+      self.end_headers()
+      self.wfile.write(body)
+    except (BrokenPipeError, ConnectionResetError):
+      return
 
   def do_OPTIONS(self):
     return self._send_json(200, {"ok": True})
@@ -1233,8 +1263,13 @@ def parse_position(pos: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str], 
   side_int = pos.get("side")
   side = "LONG" if side_int == 0 else "SHORT"
   upnl = None
-  if pos.get("realizedPnl") is not None:
-    upnl = float(pos.get("realizedPnl") or 0)
+  for k in ("unrealizedPnl", "uPnl", "unrealized", "markPnl", "pnl", "realizedPnl"):
+    if pos.get(k) is not None:
+      try:
+        upnl = float(pos.get(k) or 0)
+        break
+      except Exception:
+        continue
   entry_price = (
     _f(pos.get("entryPrice"))
     or _f(pos.get("avgEntryPrice"))
@@ -1351,7 +1386,7 @@ async def close_position_if_any(
 
 
 # ---- LINK_SIGNER helper (kept as-is for your current dashboard flow) ----
-async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any], client: AsyncRESTClient) -> Dict[str, Any]:
+async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[str, Any]:
   eth_base = cfg["etherealApiBase"]
   payload = cmd["payload"]
 
@@ -1460,13 +1495,6 @@ async def main():
       ingest_enabled = bool(cfg.get("ingestionEnabled", True))
       trading_enabled = bool(cfg.get("tradingEnabled", True))
 
-      # Ensure client (SDK), but don't let init block telemetry forever.
-      if client is None:
-        try:
-          client = await asyncio.wait_for(ensure_client(cfg), timeout=20)
-        except asyncio.TimeoutError:
-          raise RuntimeError("SDK client init timed out (check ethereal API/RPC reachability)")
-
       # Resolve identifiers early (so commands can use them)
       ticker = cfg.get("ticker", "BTCUSD")
       product_id = cfg.get("productId", "") or fetch_product_id(eth_base, ticker)
@@ -1507,7 +1535,7 @@ async def main():
       ts_ms = int(time.time() * 1000)
       horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
       min_hold_sec = max(3600, int(cfg.get("minHoldSeconds", 3600)))
-      reassess_sec = max(60, int(cfg.get("reassessIntervalSec", 300)))
+      reassess_sec = max(5, int(cfg.get("reassessIntervalSec", 300)))
       max_hold = max(int(cfg.get("maxHoldSeconds", 7200)), min_hold_sec)
       ingest_interval = max(1, int(cfg.get("ingestIntervalSec", cfg.get("pollIntervalSeconds", 2))))
 
@@ -1524,6 +1552,18 @@ async def main():
         next_reassess_ms = None
 
       # ---- Commands ----
+      async def ensure_client_ready(timeout_sec: float = 2.0) -> Optional[str]:
+        nonlocal client
+        if client is not None:
+          return None
+        try:
+          client = await asyncio.wait_for(ensure_client(cfg), timeout=timeout_sec)
+          return None
+        except asyncio.TimeoutError:
+          return "SDK client init timed out (check ethereal API/RPC reachability)"
+        except Exception as ce:
+          return f"SDK client init failed: {ce}"
+
       cmds = get_new_commands()
       updates = []
       for c in cmds:
@@ -1539,6 +1579,10 @@ async def main():
                 "result": {"error": f"Missing {', '.join(missing_trade_ctx)} in config. Discover subaccount and save config first."},
               })
             else:
+              cerr = await ensure_client_ready()
+              if cerr or client is None:
+                updates.append({"id": cid, "status": "ERROR", "result": {"error": cerr or "SDK client unavailable"}})
+                continue
               await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
               if pos_open:
                 insert_trade_event(
@@ -1556,7 +1600,7 @@ async def main():
               next_reassess_ms = None
               updates.append({"id": cid, "status": "DONE", "result": {"ok": True}})
           elif c.get("type") == "LINK_SIGNER":
-            out = await process_link_signer(cfg, c, client)
+            out = await process_link_signer(cfg, c)
             link_status = str((out or {}).get("status") or "").strip().upper()
             linked_now = link_status in ("ACTIVE", "LINKED", "DONE")
             cur = get_runtime_config()
@@ -1652,21 +1696,24 @@ async def main():
       action_taken = {"type": "NO_ACTION", "ok": True, "info": None}
 
       # ---- Trade gate ----
-      if client is not None:
-        if not has_trade_account_ctx:
-          action_taken = {
-            "type": "SKIP_ACCOUNT_CONTEXT_MISSING",
-            "ok": False,
-            "info": {"missing": missing_trade_ctx},
-          }
-        elif not signer_active:
-          action_taken = {
-            "type": "SKIP_SIGNER_NOT_ACTIVE",
-            "ok": False,
-            "info": {"botSignerAddress": configured_signer_addr},
-          }
-        elif not trading_enabled:
-          if pos_open:
+      if not has_trade_account_ctx:
+        action_taken = {
+          "type": "SKIP_ACCOUNT_CONTEXT_MISSING",
+          "ok": False,
+          "info": {"missing": missing_trade_ctx},
+        }
+      elif not signer_active:
+        action_taken = {
+          "type": "SKIP_SIGNER_NOT_ACTIVE",
+          "ok": False,
+          "info": {"botSignerAddress": configured_signer_addr},
+        }
+      elif not trading_enabled:
+        if pos_open:
+          cerr = await ensure_client_ready()
+          if cerr or client is None:
+            action_taken = {"type": "SKIP_CLIENT_UNAVAILABLE", "ok": False, "info": {"error": cerr or "SDK client unavailable"}}
+          else:
             await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
             insert_trade_event(
               conn,
@@ -1683,16 +1730,20 @@ async def main():
             last_position_opened_ms = None
             next_reassess_ms = None
             action_taken = {"type": "AUTO_FLATTEN_TRADING_OFF", "ok": True, "info": None}
-          else:
-            action_taken = {"type": "TRADING_DISABLED_IDLE", "ok": True, "info": None}
         else:
-          max_oph = int(cfg.get("maxOrdersPerHour", 120))
-          now = time.time()
-          last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
-          can_open = len(last_order_ts) < max_oph
+          action_taken = {"type": "TRADING_DISABLED_IDLE", "ok": True, "info": None}
+      else:
+        max_oph = int(cfg.get("maxOrdersPerHour", 120))
+        now = time.time()
+        last_order_ts[:] = [t for t in last_order_ts if now - t < 3600]
+        can_open = len(last_order_ts) < max_oph
 
-          # Force close if max position age is reached.
-          if pos_open and max_hold_until and ts_ms >= max_hold_until:
+        # Force close if max position age is reached.
+        if pos_open and max_hold_until and ts_ms >= max_hold_until:
+          cerr = await ensure_client_ready()
+          if cerr or client is None:
+            action_taken = {"type": "SKIP_CLIENT_UNAVAILABLE", "ok": False, "info": {"error": cerr or "SDK client unavailable"}}
+          else:
             await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)
             insert_trade_event(
               conn,
@@ -1709,34 +1760,38 @@ async def main():
             last_position_opened_ms, next_reassess_ms = None, None
             action_taken = {"type": "CLOSE_MAX_HOLD", "ok": True, "info": {"maxHoldSeconds": max_hold}}
 
-          elif not pos_open:
-            # Only evaluate new entries at horizon cadence (>= 60m).
-            if not evaluate_for_entry:
-              action_taken = {
-                "type": "WAIT_ENTRY_REASSESS",
-                "ok": True,
-                "info": {"nextAt": (last_decision_at_ms + decision_interval_ms) if last_decision_at_ms else ts_ms},
-              }
-            elif desired in ("LONG", "SHORT"):
-              if not can_open:
-                action_taken = {"type": "RATE_LIMITED", "ok": False, "info": {"maxOrdersPerHour": max_oph}}
-              else:
-                conf = clamp(abs(p_up - 0.5) * 2.0, 0.0, 1.0)
-                snap = fetch_portfolio_snapshot(eth_base, sub_id)
-                avail = _f(snap.get("availableMarginUsd"))
-                portfolio_val = _f(snap.get("portfolioValueUsd"))
-                max_margin = float(cfg.get("maxMarginUsd", 100))
-                max_margin_pct = float(cfg.get("maxMarginPct", 25.0))
-                pct_cap = (portfolio_val * max_margin_pct / 100.0) if portfolio_val and portfolio_val > 0 else None
-                if pct_cap is not None:
-                  max_margin = min(max_margin, pct_cap)
-                lev = float(cfg.get("maxLeverage", 2))
-                margin_use = min(max_margin, (avail if avail is not None else max_margin))
-                notional = margin_use * lev * conf
-                qty_raw = max(0.0, (notional / mid) if mid > 0 else 0.0)
-                qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
+        elif not pos_open:
+          # Only evaluate new entries at horizon cadence (>= 60m).
+          if not evaluate_for_entry:
+            action_taken = {
+              "type": "WAIT_ENTRY_REASSESS",
+              "ok": True,
+              "info": {"nextAt": (last_decision_at_ms + decision_interval_ms) if last_decision_at_ms else ts_ms},
+            }
+          elif desired in ("LONG", "SHORT"):
+            if not can_open:
+              action_taken = {"type": "RATE_LIMITED", "ok": False, "info": {"maxOrdersPerHour": max_oph}}
+            else:
+              conf = clamp(abs(p_up - 0.5) * 2.0, 0.0, 1.0)
+              snap = fetch_portfolio_snapshot(eth_base, sub_id)
+              avail = _f(snap.get("availableMarginUsd"))
+              portfolio_val = _f(snap.get("portfolioValueUsd"))
+              max_margin = float(cfg.get("maxMarginUsd", 100))
+              max_margin_pct = float(cfg.get("maxMarginPct", 25.0))
+              pct_cap = (portfolio_val * max_margin_pct / 100.0) if portfolio_val and portfolio_val > 0 else None
+              if pct_cap is not None:
+                max_margin = min(max_margin, pct_cap)
+              lev = float(cfg.get("maxLeverage", 2))
+              margin_use = min(max_margin, (avail if avail is not None else max_margin))
+              notional = margin_use * lev * conf
+              qty_raw = max(0.0, (notional / mid) if mid > 0 else 0.0)
+              qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
 
-                if qty > 0:
+              if qty > 0:
+                cerr = await ensure_client_ready()
+                if cerr or client is None:
+                  action_taken = {"type": "SKIP_CLIENT_UNAVAILABLE", "ok": False, "info": {"error": cerr or "SDK client unavailable"}}
+                else:
                   side_int = 0 if desired == "LONG" else 1
                   await place_market(client, ticker, side_int, qty, owner_addr, subaccount_name, cached_lot_size)
                   insert_trade_event(conn, ts_ms, "ENTRY", desired, qty, mid, None, "model_entry")
@@ -1745,17 +1800,21 @@ async def main():
                   pos_open, pos_side, pos_size, pos_entry_price = True, desired, qty, mid
                   next_reassess_ms = ts_ms + min_hold_sec * 1000
                   action_taken = {"type": f"OPEN_{desired}", "ok": True, "info": {"qty": qty, "qtyRaw": qty_raw, "lotSize": cached_lot_size, "conf": conf, "lev": lev, "margin": margin_use}}
-                else:
-                  action_taken = {"type": "SKIP_QTY_BELOW_LOT", "ok": False, "info": {"qtyRaw": qty_raw, "lotSize": cached_lot_size}}
-            else:
-              action_taken = {"type": "SKIP_NO_SIGNAL", "ok": True, "info": {"desired": desired}}
-
+              else:
+                action_taken = {"type": "SKIP_QTY_BELOW_LOT", "ok": False, "info": {"qtyRaw": qty_raw, "lotSize": cached_lot_size}}
           else:
-            # In trade: hold for at least horizon, then reassess periodically.
-            if not evaluate_for_reassess:
-              action_taken = {"type": "HOLD_UNTIL_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
-            elif desired == pos_side:
-              action_taken = {"type": "HOLD_AFTER_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
+            action_taken = {"type": "SKIP_NO_SIGNAL", "ok": True, "info": {"desired": desired}}
+
+        else:
+          # In trade: hold for at least horizon, then reassess periodically.
+          if not evaluate_for_reassess:
+            action_taken = {"type": "HOLD_UNTIL_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
+          elif desired == pos_side:
+            action_taken = {"type": "HOLD_AFTER_REASSESS", "ok": True, "info": {"nextAt": next_reassess_ms}}
+          else:
+            cerr = await ensure_client_ready()
+            if cerr or client is None:
+              action_taken = {"type": "SKIP_CLIENT_UNAVAILABLE", "ok": False, "info": {"error": cerr or "SDK client unavailable"}}
             else:
               prev_side = pos_side
               await close_position_if_any(client, ticker, pos_open, pos_side, pos_size, owner_addr, subaccount_name, cached_lot_size)

@@ -23,7 +23,7 @@ export const Uc5ConfigSchema = z.object({
   tradingEnabled: z.boolean().default(true),
   killSwitch: z.boolean().default(false), // legacy compat
   ingestIntervalSec: z.number().int().min(1).max(60).default(2),
-  reassessIntervalSec: z.number().int().min(60).max(86400).default(300),
+  reassessIntervalSec: z.number().int().min(5).max(86400).default(300),
 
   // legacy compat
   pollIntervalSeconds: z.number().int().min(2).max(60).default(2),
