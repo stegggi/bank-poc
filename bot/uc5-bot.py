@@ -16,7 +16,7 @@ import os, time, json, math, sqlite3, requests, asyncio, threading, uuid
 from urllib.parse import urlparse, parse_qs
 from decimal import Decimal, ROUND_DOWN
 from typing import Optional, Dict, Any, List, Tuple
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, HTTPServer, ThreadingHTTPServer
 
 # ethereal-sdk (async) — support both import styles
 try:
@@ -978,7 +978,11 @@ class TelemetryHandler(BaseHTTPRequestHandler):
 
 
 def start_telemetry_server():
-  srv = HTTPServer((TELEMETRY_HOST, TELEMETRY_PORT), TelemetryHandler)
+  class _UC5TelemetryServer(ThreadingHTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+  srv = _UC5TelemetryServer((TELEMETRY_HOST, TELEMETRY_PORT), TelemetryHandler)
   t = threading.Thread(target=srv.serve_forever, daemon=True)
   t.start()
   return srv
@@ -1456,9 +1460,12 @@ async def main():
       ingest_enabled = bool(cfg.get("ingestionEnabled", True))
       trading_enabled = bool(cfg.get("tradingEnabled", True))
 
-      # Ensure client (SDK)
+      # Ensure client (SDK), but don't let init block telemetry forever.
       if client is None:
-        client = await ensure_client(cfg)
+        try:
+          client = await asyncio.wait_for(ensure_client(cfg), timeout=20)
+        except asyncio.TimeoutError:
+          raise RuntimeError("SDK client init timed out (check ethereal API/RPC reachability)")
 
       # Resolve identifiers early (so commands can use them)
       ticker = cfg.get("ticker", "BTCUSD")
