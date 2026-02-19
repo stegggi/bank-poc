@@ -449,7 +449,7 @@ def query_trades_summary() -> Dict[str, Any]:
         continue
 
       pnl = _f(r["pnl"])
-      if pnl is None and open_leg:
+      if (pnl is None or abs(float(pnl)) < 1e-12) and open_leg:
         side = str(open_leg.get("side") or "").upper()
         qty = _f(r["qty"]) or _f(open_leg.get("qty"))
         entry_px = _f(open_leg.get("price"))
@@ -467,7 +467,7 @@ def query_trades_summary() -> Dict[str, Any]:
     wins = [x for x in pnls if x > 0]
     losses = [x for x in pnls if x < 0]
     total = len(closed)
-    win_rate = (len(wins) / total) if total > 0 else 0.0
+    win_rate = (len(wins) / len(pnls)) if pnls else 0.0
     avg_win = (sum(wins) / len(wins)) if wins else 0.0
     avg_loss = (sum(losses) / len(losses)) if losses else 0.0
     total_realized = sum(pnls) if pnls else 0.0
@@ -481,6 +481,34 @@ def query_trades_summary() -> Dict[str, Any]:
       "realizedPnlTotal": total_realized,
       "realizedPnlToday": realized_today,
     }
+  finally:
+    c.close()
+
+
+def query_open_leg_from_trades() -> Optional[Dict[str, Any]]:
+  c = db_read_conn()
+  try:
+    rows = c.execute(
+      """
+      SELECT ts_ms, event_type, side, qty, price
+      FROM trades
+      WHERE event_type IN ('ENTRY','EXIT','FLATTEN')
+      ORDER BY ts_ms ASC
+      """
+    ).fetchall()
+    open_leg: Optional[Dict[str, Any]] = None
+    for r in rows:
+      et = str(r["event_type"] or "")
+      if et == "ENTRY":
+        open_leg = {
+          "ts_ms": int(r["ts_ms"]),
+          "side": str(r["side"] or "").upper() or None,
+          "qty": _f(r["qty"]),
+          "price": _f(r["price"]),
+        }
+      elif et in ("EXIT", "FLATTEN"):
+        open_leg = None
+    return open_leg
   finally:
     c.close()
 
@@ -582,7 +610,7 @@ def default_runtime_config() -> Dict[str, Any]:
     "pollIntervalSeconds": 2,  # legacy compat.
     "ingestIntervalSec": 2,
     "reassessIntervalSec": 300,
-    "predictionHorizonSeconds": 3600,  # force >= 60m trade horizon
+    "predictionHorizonSeconds": 3600,
     "maxLeverage": 2,
     "maxMarginPct": 25.0,
     "maxMarginUsd": 100,
@@ -642,7 +670,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     cfg["predictionHorizonSeconds"] = int(cfg.get("predictionHorizonSeconds", 3600))
   except Exception:
     cfg["predictionHorizonSeconds"] = 3600
-  cfg["predictionHorizonSeconds"] = max(3600, min(259200, cfg["predictionHorizonSeconds"]))
+  cfg["predictionHorizonSeconds"] = max(5, min(259200, cfg["predictionHorizonSeconds"]))
 
   try:
     cfg["maxLeverage"] = float(cfg.get("maxLeverage", 2))
@@ -672,7 +700,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     cfg["minHoldSeconds"] = int(cfg.get("minHoldSeconds", 3600))
   except Exception:
     cfg["minHoldSeconds"] = 3600
-  cfg["minHoldSeconds"] = max(3600, min(259200, cfg["minHoldSeconds"]))
+  cfg["minHoldSeconds"] = max(5, min(259200, cfg["minHoldSeconds"]))
 
   try:
     cfg["maxHoldSeconds"] = int(cfg.get("maxHoldSeconds", 7200))
@@ -914,16 +942,17 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       summary = query_trades_summary()
       used = _f(snap.get("usedMarginUsd")) or 0.0
       pv = _f(snap.get("portfolioValueUsd"))
-      used_pct = ((used / pv) * 100.0) if pv and pv > 0 else None
+      used_pct = ((used / pv) * 100.0) if pv and pv > 0 else (0.0 if used == 0 else None)
+      unrealized = _f(s.get("position", {}).get("unrealizedPnl"))
       return self._send_json(
         200,
         {
           "updatedAt": int(time.time() * 1000),
           **snap,
           "usedMarginPct": used_pct,
-          "unrealizedPnl": s.get("position", {}).get("unrealizedPnl"),
-          "realizedPnlToday": summary.get("realizedPnlToday"),
-          "realizedPnlTotal": summary.get("realizedPnlTotal"),
+          "unrealizedPnl": 0.0 if unrealized is None else unrealized,
+          "realizedPnlToday": float(summary.get("realizedPnlToday") or 0.0),
+          "realizedPnlTotal": float(summary.get("realizedPnlTotal") or 0.0),
         },
       )
     if path.startswith("/uc5/trades/summary"):
@@ -1223,19 +1252,58 @@ def fetch_portfolio_snapshot(eth_base: str, sub_id: str) -> Dict[str, Any]:
   if not sub_id:
     return out
   try:
+    def first_num(src: Dict[str, Any], keys: List[str]) -> Optional[float]:
+      for k in keys:
+        if k in src:
+          v = _f(src.get(k))
+          if v is not None:
+            return v
+      return None
+
     bal = requests.get(
       f"{eth_base}/v1/subaccount/balance",
       params={"subaccountId": sub_id},
       timeout=20,
     ).json()
     rows = bal.get("data") if isinstance(bal, dict) else None
-    if isinstance(rows, list) and rows:
+    row: Dict[str, Any] = {}
+    if isinstance(rows, list) and rows and isinstance(rows[0], dict):
       row = rows[0]
-      avail = _f(row.get("available"))
-      used = _f(row.get("usedMargin")) or _f(row.get("marginUsed")) or 0.0
-      pv = _f(row.get("equity")) or _f(row.get("balance")) or (
-        (avail + used) if (avail is not None) else None
+    elif isinstance(rows, dict):
+      row = rows
+    elif isinstance(bal, dict):
+      row = bal
+
+    if row:
+      margin = row.get("margin")
+      margin_obj = margin if isinstance(margin, dict) else {}
+      avail = first_num(
+        row,
+        ["availableMarginUsd", "availableMargin", "available", "freeCollateral", "availableBalance", "availableUsd"],
       )
+      if avail is None:
+        avail = first_num(margin_obj, ["availableMarginUsd", "availableMargin", "freeCollateral", "available"])
+
+      used = first_num(
+        row,
+        ["usedMarginUsd", "usedMargin", "marginUsed", "used", "initialMargin", "lockedMargin"],
+      )
+      if used is None:
+        used = first_num(margin_obj, ["usedMarginUsd", "usedMargin", "marginUsed", "initialMargin"])
+      if used is None:
+        used = 0.0
+
+      pv = first_num(
+        row,
+        ["portfolioValueUsd", "portfolioValue", "equityUsd", "equity", "balanceUsd", "balance", "netAssetValue"],
+      )
+      if pv is None:
+        pv = first_num(margin_obj, ["portfolioValueUsd", "equityUsd", "equity"])
+      if pv is None and avail is not None:
+        pv = avail + used
+      if avail is None and pv is not None:
+        avail = max(0.0, pv - used)
+
       out["portfolioValueUsd"] = pv
       out["availableMarginUsd"] = avail
       out["usedMarginUsd"] = used
@@ -1260,8 +1328,18 @@ def parse_position(pos: Optional[Dict[str, Any]]) -> Tuple[bool, Optional[str], 
 
   size = float(pos.get("size") or 0)
   open_ = abs(size) > 0
-  side_int = pos.get("side")
-  side = "LONG" if side_int == 0 else "SHORT"
+  side: Optional[str] = None
+  side_raw = pos.get("side")
+  if isinstance(side_raw, str):
+    s = side_raw.strip().upper()
+    if s in ("LONG", "BUY", "BID", "0"):
+      side = "LONG"
+    elif s in ("SHORT", "SELL", "ASK", "1"):
+      side = "SHORT"
+  elif isinstance(side_raw, (int, float)):
+    side = "LONG" if int(side_raw) == 0 else "SHORT"
+  if side is None and open_:
+    side = "LONG" if size > 0 else "SHORT"
   upnl = None
   for k in ("unrealizedPnl", "uPnl", "unrealized", "markPnl", "pnl", "realizedPnl"):
     if pos.get(k) is not None:
@@ -1531,10 +1609,24 @@ async def main():
       # Fetch active position once per loop (used for FLATTEN and status)
       pos = fetch_active_position(eth_base, sub_id, product_id)
       pos_open, pos_side, pos_size, pos_upnl, pos_entry_price, pos_entry_at_ms = parse_position(pos)
+      if pos_open and (pos_entry_price is None or pos_entry_at_ms is None):
+        open_leg = query_open_leg_from_trades()
+        if open_leg:
+          if pos_entry_price is None:
+            pos_entry_price = _f(open_leg.get("price"))
+          if pos_entry_at_ms is None:
+            try:
+              pos_entry_at_ms = int(open_leg.get("ts_ms")) if open_leg.get("ts_ms") is not None else None
+            except Exception:
+              pos_entry_at_ms = pos_entry_at_ms
+          if not pos_side:
+            leg_side = str(open_leg.get("side") or "").upper()
+            if leg_side in ("LONG", "SHORT"):
+              pos_side = leg_side
 
       ts_ms = int(time.time() * 1000)
-      horizon_sec = max(3600, int(cfg.get("predictionHorizonSeconds", 3600)))
-      min_hold_sec = max(3600, int(cfg.get("minHoldSeconds", 3600)))
+      horizon_sec = max(5, int(cfg.get("predictionHorizonSeconds", 3600)))
+      min_hold_sec = max(5, int(cfg.get("minHoldSeconds", 3600)))
       reassess_sec = max(5, int(cfg.get("reassessIntervalSec", 300)))
       max_hold = max(int(cfg.get("maxHoldSeconds", 7200)), min_hold_sec)
       ingest_interval = max(1, int(cfg.get("ingestIntervalSec", cfg.get("pollIntervalSeconds", 2))))

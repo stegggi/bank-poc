@@ -245,8 +245,8 @@ export default function Uc5Page() {
     if (edit.confidenceThreshold < 0.5 || edit.confidenceThreshold > 0.95) {
       errors.confidenceThreshold = "Confidence threshold must be 0.50 to 0.95";
     }
-    if (edit.minHoldSeconds < 3600 || edit.minHoldSeconds > 259200) {
-      errors.minHoldSeconds = "Min hold must be 3600 to 259200 sec (60m to 72h)";
+    if (edit.minHoldSeconds < 5 || edit.minHoldSeconds > 259200) {
+      errors.minHoldSeconds = "Min hold must be 5 to 259200 sec";
     }
     if (edit.maxHoldSeconds < 3600 || edit.maxHoldSeconds > 259200) {
       errors.maxHoldSeconds = "Max hold must be 3600 to 259200 sec (60m to 72h)";
@@ -254,8 +254,8 @@ export default function Uc5Page() {
     if (edit.maxHoldSeconds < edit.minHoldSeconds) {
       errors.maxHoldSeconds = "Max hold must be >= min hold";
     }
-    if (edit.predictionHorizonSeconds < 3600 || edit.predictionHorizonSeconds > 259200) {
-      errors.predictionHorizonSeconds = "Entry horizon must be 3600 to 259200 sec";
+    if (edit.predictionHorizonSeconds < 5 || edit.predictionHorizonSeconds > 259200) {
+      errors.predictionHorizonSeconds = "Entry horizon must be 5 to 259200 sec";
     }
     if (edit.ingestIntervalSec < 1 || edit.ingestIntervalSec > 60) {
       errors.ingestIntervalSec = "Ingest interval must be 1 to 60 sec";
@@ -727,26 +727,26 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="Entry horizon (sec)" help="At least 60 minutes (3600 sec)." error={validation.predictionHorizonSeconds}>
+            <Field label="Entry horizon (sec)" help="Minimum 5 sec." error={validation.predictionHorizonSeconds}>
               <input
                 style={input}
                 type="number"
-                min={3600}
+                min={5}
                 max={259200}
-                step={60}
+                step={1}
                 value={edit?.predictionHorizonSeconds ?? 3600}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, predictionHorizonSeconds: Number(e.target.value) } : p))}
               />
             </Field>
 
-            <Field label="Min time in market (sec)" help="Minimum 3600 sec (60 min)." error={validation.minHoldSeconds}>
+            <Field label="Min time in market (sec)" help="Minimum 5 sec." error={validation.minHoldSeconds}>
               <input
                 style={input}
                 type="number"
-                min={3600}
+                min={5}
                 max={259200}
-                step={60}
+                step={1}
                 value={edit?.minHoldSeconds ?? 3600}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))}
@@ -865,7 +865,17 @@ export default function Uc5Page() {
               <KV k="Avg win" v={fmtUsd(tradeSummary?.avgWin)} />
               <KV k="Avg loss" v={fmtUsd(tradeSummary?.avgLoss)} />
               <KV k="Open position" v={status?.position?.open ? `${status.position.side || "OPEN"} (${status.position.size?.toFixed(6) || "0"})` : "No"} />
-              <KV k="Entry" v={status?.position?.entryAt ? `${fmtUsd(status.position.entryPrice)} @ ${new Date(status.position.entryAt).toLocaleTimeString()}` : "—"} />
+              <KV
+                k="Entry"
+                v={
+                  status?.position?.entryAt
+                    ? `${fmtUsd(
+                        status.position.entryPrice ??
+                          (status.position.open ? status?.market?.price : null)
+                      )} @ ${new Date(status.position.entryAt).toLocaleTimeString()}`
+                    : "—"
+                }
+              />
             </div>
           </div>
         </section>
