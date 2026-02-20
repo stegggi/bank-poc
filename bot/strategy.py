@@ -53,6 +53,7 @@ class SignalResult:
   features: List[float]
   spread_bps: float
   atr_pct: float
+  atr_pctile: float
   liquidity_score: float
 
 
@@ -212,6 +213,7 @@ def make_signal(
       features=[0.0] * 6,
       spread_bps=999.0,
       atr_pct=0.0,
+      atr_pctile=0.5,
       liquidity_score=0.0,
     )
 
@@ -316,6 +318,7 @@ def make_signal(
     features=feats,
     spread_bps=spread_bps,
     atr_pct=atr_pct,
+    atr_pctile=atr_pctile,
     liquidity_score=liquidity_score,
   )
 

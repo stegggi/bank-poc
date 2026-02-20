@@ -791,6 +791,27 @@ class DailyDbManager:
             pass
     return pnl
 
+  def query_last_close_ts(self) -> Optional[int]:
+    latest: Optional[int] = None
+    for _, conn in self._iter_all_connections():
+      try:
+        row = conn.execute(
+          """
+          SELECT ts_ms
+          FROM trades
+          WHERE event_type IN ('EXIT', 'FLATTEN')
+          ORDER BY ts_ms DESC
+          LIMIT 1
+          """
+        ).fetchone()
+      except Exception:
+        continue
+      if not row or row[0] is None:
+        continue
+      ts = int(row[0])
+      latest = ts if latest is None else max(latest, ts)
+    return latest
+
   def query_open_leg_from_trades(self) -> Optional[Dict[str, Any]]:
     rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float]]] = []
     for _, conn in self._iter_all_connections():

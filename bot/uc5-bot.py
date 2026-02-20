@@ -20,7 +20,7 @@ import math
 import uuid
 import asyncio
 import threading
-from decimal import Decimal, ROUND_DOWN
+from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Dict, List, Optional, Tuple
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -104,6 +104,22 @@ def quantize_qty_to_lot(qty: float, lot_size: Optional[float]) -> float:
   step = Decimal(str(lot_size))
   units = (q / step).to_integral_value(rounding=ROUND_DOWN)
   return float(units * step)
+
+
+def quantize_price_to_tick(price: float, tick_size: Optional[float], side_int: int, aggressive: bool = True) -> float:
+  p = Decimal(str(max(0.0, float(price or 0.0))))
+  if tick_size is None or float(tick_size) <= 0:
+    return float(p)
+  step = Decimal(str(tick_size))
+  if aggressive:
+    rounding = ROUND_DOWN if side_int == 1 else ROUND_UP
+  else:
+    rounding = ROUND_DOWN if side_int == 0 else ROUND_UP
+  units = (p / step).to_integral_value(rounding=rounding)
+  out = units * step
+  if out <= 0:
+    out = step
+  return float(out)
 
 
 BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
@@ -216,6 +232,18 @@ def default_runtime_config() -> Dict[str, Any]:
     "orderGuardMs": 900,
     "maxSpreadBpsForTrade": 12.0,
     "exitSpreadInsaneBps": 28.0,
+    "feeEstimateBps": 3.0,
+    "slippageBufferBps": 4.0,
+    "minExpectedMoveBps": 20.0,
+    "edgeCostMultiplier": 2.0,
+    "entryMakerPreferred": True,
+    "entryMarketFallbackEnabled": True,
+    "entryMarketFallbackMinProb": 0.90,
+    "cooldownAfterCloseSec": 30,
+    "emergencyBreakoutEnabled": True,
+    "emergencyBreakoutMinProb": 0.94,
+    "emergencyBreakoutMinMoveBps": 35.0,
+    "emergencyBreakoutMinAtrPercentile": 0.85,
     "stopLossPct": 0.003,
     "stopLossAtrMult": None,
     "takeProfitPct": 0.006,
@@ -323,6 +351,34 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["orderGuardMs"] = clamp(_to_int(base.get("orderGuardMs", 900), 900), 200, 5000)
   base["maxSpreadBpsForTrade"] = clamp(_to_float(base.get("maxSpreadBpsForTrade", 12.0), 12.0), 1.0, 100.0)
   base["exitSpreadInsaneBps"] = clamp(_to_float(base.get("exitSpreadInsaneBps", 28.0), 28.0), 5.0, 300.0)
+  base["feeEstimateBps"] = clamp(_to_float(base.get("feeEstimateBps", 3.0), 3.0), 0.0, 100.0)
+  base["slippageBufferBps"] = clamp(_to_float(base.get("slippageBufferBps", 4.0), 4.0), 0.0, 100.0)
+  base["minExpectedMoveBps"] = clamp(_to_float(base.get("minExpectedMoveBps", 20.0), 20.0), 1.0, 500.0)
+  base["edgeCostMultiplier"] = clamp(_to_float(base.get("edgeCostMultiplier", 2.0), 2.0), 1.0, 5.0)
+  base["entryMakerPreferred"] = bool(base.get("entryMakerPreferred", True))
+  base["entryMarketFallbackEnabled"] = bool(base.get("entryMarketFallbackEnabled", True))
+  base["entryMarketFallbackMinProb"] = clamp(
+    _to_float(base.get("entryMarketFallbackMinProb", 0.90), 0.90),
+    0.50,
+    0.99,
+  )
+  base["cooldownAfterCloseSec"] = clamp(_to_int(base.get("cooldownAfterCloseSec", 30), 30), 0, 600)
+  base["emergencyBreakoutEnabled"] = bool(base.get("emergencyBreakoutEnabled", True))
+  base["emergencyBreakoutMinProb"] = clamp(
+    _to_float(base.get("emergencyBreakoutMinProb", 0.94), 0.94),
+    0.50,
+    0.99,
+  )
+  base["emergencyBreakoutMinMoveBps"] = clamp(
+    _to_float(base.get("emergencyBreakoutMinMoveBps", 35.0), 35.0),
+    1.0,
+    1000.0,
+  )
+  base["emergencyBreakoutMinAtrPercentile"] = clamp(
+    _to_float(base.get("emergencyBreakoutMinAtrPercentile", 0.85), 0.85),
+    0.0,
+    1.0,
+  )
 
   base["stopLossPct"] = _to_opt_float(base.get("stopLossPct"))
   base["stopLossAtrMult"] = _to_opt_float(base.get("stopLossAtrMult"))
@@ -744,6 +800,26 @@ def extract_lot_size(product_row: Dict[str, Any], fallback: float = 0.00001) -> 
     "quantityIncrement",
     "stepSize",
     "sizeStep",
+  ):
+    v = product_row.get(k)
+    try:
+      x = float(v)
+      if x > 0:
+        return x
+    except Exception:
+      continue
+  return fallback
+
+
+def extract_tick_size(product_row: Dict[str, Any], fallback: float = 1.0) -> float:
+  if not isinstance(product_row, dict):
+    return fallback
+  for k in (
+    "tickSize",
+    "priceIncrement",
+    "quoteTickSize",
+    "minPriceIncrement",
+    "priceStep",
   ):
     v = product_row.get(k)
     try:
@@ -1340,6 +1416,86 @@ async def place_limit_ioc(
     raise
 
 
+async def place_limit_post_only(
+  client: AsyncRESTClient,
+  ticker: str,
+  side_int: int,
+  qty: float,
+  limit_price: float,
+  sender: str,
+  subaccount: str,
+  lot_size: Optional[float] = None,
+):
+  q_adj = quantize_qty_to_lot(qty, lot_size)
+  if q_adj <= 0:
+    raise RuntimeError(f"Quantity {qty} rounds to 0 at lotSize={lot_size}")
+
+  p = Decimal(str(limit_price))
+  q = Decimal(str(q_adj))
+
+  variants = [
+    {
+      "order_type": "LIMIT",
+      "quantity": q,
+      "side": side_int,
+      "price": p,
+      "ticker": ticker,
+      "sender": sender,
+      "subaccount": subaccount,
+      "time_in_force": "GTC",
+      "post_only": True,
+    },
+    {
+      "order_type": "LIMIT",
+      "quantity": q,
+      "side": side_int,
+      "price": p,
+      "ticker": ticker,
+      "sender": sender,
+      "subaccount": subaccount,
+      "tif": "GTC",
+      "post_only": True,
+    },
+    {
+      "order_type": "LIMIT",
+      "quantity": q,
+      "side": side_int,
+      "price": p,
+      "ticker": ticker,
+      "sender": sender,
+      "subaccount": subaccount,
+      "postOnly": True,
+    },
+    {
+      "order_type": "LIMIT",
+      "quantity": q,
+      "side": side_int,
+      "price": p,
+      "ticker": ticker,
+      "sender": sender,
+      "subaccount": subaccount,
+      "time_in_force": "POST_ONLY",
+    },
+  ]
+
+  try:
+    return await _try_create_order(client, variants)
+  except Exception as first_error:
+    err = str(first_error or "")
+    if (
+      ("401" in err or "Unauthorized" in err)
+      and BOT_SIGNER_ADDRESS
+      and BOT_SIGNER_ADDRESS.lower() != str(sender or "").lower()
+    ):
+      signer_variants = []
+      for v in variants:
+        cp = dict(v)
+        cp["sender"] = BOT_SIGNER_ADDRESS
+        signer_variants.append(cp)
+      return await _try_create_order(client, signer_variants)
+    raise
+
+
 async def cancel_open_orders(client: AsyncRESTClient, ticker: str, sender: str, subaccount: str):
   methods = ["cancel_all_orders", "cancel_orders", "cancel_all"]
   payloads = [
@@ -1386,23 +1542,52 @@ def _exit_side_int(position_side: str) -> int:
   raise ValueError(f"Unsupported position side={position_side}")
 
 
-def _calc_limit_price(side_int: int, mid: float, bid: Optional[float], ask: Optional[float]) -> float:
+def _calc_limit_price(
+  side_int: int,
+  mid: float,
+  bid: Optional[float],
+  ask: Optional[float],
+  tick_size: Optional[float] = None,
+  aggressive: bool = True,
+) -> float:
   if mid <= 0:
     raise RuntimeError("invalid mid")
   bid = bid if bid and bid > 0 else None
   ask = ask if ask and ask > 0 else None
 
   if bid is not None and ask is not None and ask >= bid:
-    spread = ask - bid
-    if side_int == 0:
-      # buy near the bid edge but still likely to cross quickly in IOC
-      px = min(ask, max(bid, bid + spread * 0.65))
+    if aggressive:
+      spread = ask - bid
+      if side_int == 0:
+        # buy near the bid edge but still likely to cross quickly in IOC
+        px = min(ask, max(bid, bid + spread * 0.65))
+      else:
+        # sell near the ask edge
+        px = max(bid, min(ask, ask - spread * 0.65))
     else:
-      # sell near the ask edge
-      px = max(bid, min(ask, ask - spread * 0.65))
-    return float(px)
+      # maker-favoring touch price
+      px = bid if side_int == 0 else ask
+    return quantize_price_to_tick(float(px), tick_size, side_int, aggressive=aggressive)
 
-  return float(mid)
+  return quantize_price_to_tick(float(mid), tick_size, side_int, aggressive=aggressive)
+
+
+def _estimate_expected_move_bps(signal: SignalResult, horizon_sec: int) -> float:
+  conf = clamp(abs(float(signal.p_up) - 0.5) * 2.0, 0.0, 1.0)
+  horizon = max(10.0, float(horizon_sec))
+
+  feats = signal.features if isinstance(signal.features, list) else []
+  abs_rets = [abs(float(feats[i])) for i in range(min(4, len(feats)))]
+  ret_move_bps = (max(abs_rets) * 10_000.0) if abs_rets else 0.0
+
+  atr_move_bps = max(0.0, float(signal.atr_pct)) * 10_000.0 * math.sqrt(horizon / 10.0)
+  regime_mult = 1.10 if signal.regime == "momentum" else (0.95 if signal.regime == "mean_reversion" else 0.80)
+
+  est = max(
+    ret_move_bps * (0.35 + 0.95 * conf),
+    atr_move_bps * (0.30 + 0.90 * conf) * regime_mult,
+  )
+  return max(0.0, float(est))
 
 
 def _realized_pnl(side: Optional[str], entry_price: Optional[float], exit_price: Optional[float], qty: float) -> Optional[float]:
@@ -1530,6 +1715,7 @@ async def main():
   client: Optional[AsyncRESTClient] = None
   cached_product_id = ""
   cached_lot_size = 0.00001
+  cached_tick_size = 1.0
 
   last_mid: Optional[float] = None
   last_bid: Optional[float] = None
@@ -1559,6 +1745,7 @@ async def main():
 
   current_trade_entry_price: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
+  last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
 
   while True:
     started = time.time()
@@ -1583,6 +1770,7 @@ async def main():
       if product_id != cached_product_id:
         product_row = fetch_product_row(eth_base, ticker, product_id)
         cached_lot_size = extract_lot_size(product_row, fallback=0.00001)
+        cached_tick_size = extract_tick_size(product_row, fallback=1.0)
         cached_product_id = product_id
 
       owner_addr_raw = str(cfg.get("ownerAddress") or "")
@@ -1652,6 +1840,7 @@ async def main():
         next_ingest_ms = now_ms + ingest_interval * 1000
 
       # Keep per-loop position snapshot fresh for risk + commands + status
+      was_open = bool(position_state.open)
       pos = fetch_active_position(eth_base, sub_id, product_id)
       pos_open, pos_side, pos_size, pos_upnl, pos_entry_price, pos_entry_at_ms = parse_position(pos)
       if pos_open and pos_side:
@@ -1673,6 +1862,8 @@ async def main():
         position_state = PositionState(open=False, side=None, qty=0.0, entry_price=None, entry_ts_ms=None)
         current_trade_entry_price = None
         current_trade_entry_ts = None
+      if was_open and not pos_open:
+        last_close_ts_ms = now_ms
 
       if position_state.open and last_mid:
         position_state = update_position_extremes(position_state, float(last_mid))
@@ -1806,6 +1997,7 @@ async def main():
                 entry_price=current_trade_entry_price,
                 exit_price=px,
               )
+              last_close_ts_ms = now_ms
 
             updates.append({"id": cid, "status": "DONE", "result": {"ok": True, "flattened": True}})
 
@@ -1860,6 +2052,7 @@ async def main():
               entry_price=current_trade_entry_price,
               exit_price=px,
             )
+            last_close_ts_ms = now_ms
             last_action = {"type": "AUTO_FLATTEN_TRADING_OFF", "ok": True, "info": None}
           else:
             last_action = {
@@ -1896,7 +2089,14 @@ async def main():
               exit_side_int = _exit_side_int(position_state.side)
               if spread_bps > float(cfg.get("exitSpreadInsaneBps", 28.0)) and last_bid and last_ask:
                 try:
-                  limit_px = _calc_limit_price(exit_side_int, float(last_mid), last_bid, last_ask)
+                  limit_px = _calc_limit_price(
+                    exit_side_int,
+                    float(last_mid),
+                    last_bid,
+                    last_ask,
+                    tick_size=cached_tick_size,
+                    aggressive=True,
+                  )
                   await place_limit_ioc(
                     client,
                     ticker,
@@ -1938,6 +2138,7 @@ async def main():
                 entry_price=current_trade_entry_price,
                 exit_price=px,
               )
+              last_close_ts_ms = now_ms
               last_action = {
                 "type": "RISK_EXIT",
                 "ok": True,
@@ -2003,124 +2204,268 @@ async def main():
             "info": {"realizedToday": realized_today, "maxDailyLossUsd": max_daily_loss},
           }
         elif signal.desired in ("LONG", "SHORT") and can_open:
-          snap = fetch_portfolio_snapshot(eth_base, sub_id)
-          avail = _f(snap.get("availableMarginUsd"))
-          pv = _f(snap.get("portfolioValueUsd"))
+          directional_prob = float(signal.p_up) if signal.desired == "LONG" else (1.0 - float(signal.p_up))
+          expected_move_bps = _estimate_expected_move_bps(signal, int(cfg.get("predictionHorizonSeconds", 30)))
+          fee_bps = float(cfg.get("feeEstimateBps", 3.0))
+          slippage_bps = float(cfg.get("slippageBufferBps", 4.0))
+          edge_mult = float(cfg.get("edgeCostMultiplier", 2.0))
+          min_expected_move_bps = float(cfg.get("minExpectedMoveBps", 20.0))
+          cost_bps = max(0.0, fee_bps) + max(0.0, float(signal.spread_bps)) + max(0.0, slippage_bps)
+          required_move_bps = max(min_expected_move_bps, edge_mult * cost_bps)
+          cooldown_after_close_sec = int(cfg.get("cooldownAfterCloseSec", 30))
+          cooldown_until_ms = (
+            (int(last_close_ts_ms) + cooldown_after_close_sec * 1000)
+            if (last_close_ts_ms and cooldown_after_close_sec > 0)
+            else None
+          )
+          in_cooldown = bool(cooldown_until_ms is not None and now_ms < int(cooldown_until_ms))
 
-          max_margin = float(cfg.get("maxMarginUsd", 100.0))
-          if pv and pv > 0:
-            max_margin = min(max_margin, pv * float(cfg.get("maxMarginPct", 25.0)) / 100.0)
-          if avail is not None:
-            max_margin = min(max_margin, avail)
+          emergency_breakout = False
+          if in_cooldown:
+            emergency_breakout = (
+              bool(cfg.get("emergencyBreakoutEnabled", True))
+              and signal.regime == "momentum"
+              and directional_prob >= float(cfg.get("emergencyBreakoutMinProb", 0.94))
+              and signal.atr_pctile >= float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85))
+              and expected_move_bps >= max(required_move_bps, float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)))
+              and signal.spread_bps <= float(cfg.get("maxSpreadBpsForTrade", 12.0))
+            )
 
-          confidence = clamp(abs(signal.p_up - 0.5) * 2.0, 0.0, 1.0)
-          size_mult = size_liquidity_multiplier(signal.spread_bps, signal.liquidity_score)
-          if signal.spread_bps > float(cfg.get("maxSpreadBpsForTrade", 12.0)):
-            size_mult = 0.0
-
-          notional = max_margin * float(cfg.get("maxLeverage", 2.0)) * confidence * size_mult
-          qty_raw = (notional / float(last_mid)) if last_mid and last_mid > 0 else 0.0
-          qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
-
-          if qty > 0:
-            cerr = await ensure_client_ready()
-            if not cerr and client is not None:
-              guard_ms = int(cfg.get("orderGuardMs", 900))
-              if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
-                await asyncio.sleep(0.2)
-
-              side_int = _side_to_int(signal.desired)
-              timeout_ms = int(cfg.get("smartEntryTimeoutMs", 900))
-              filled = 0.0
-
-              try:
-                limit_px = _calc_limit_price(side_int, float(last_mid), last_bid, last_ask)
-                await place_limit_ioc(
-                  client,
-                  ticker,
-                  side_int,
-                  qty,
-                  limit_px,
-                  owner_addr,
-                  subaccount_name,
-                  cached_lot_size,
-                )
-                await asyncio.sleep(timeout_ms / 1000.0)
-                await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-
-                pos_after = fetch_active_position(eth_base, sub_id, product_id)
-                o_after, s_after, sz_after, _, _, _ = parse_position(pos_after)
-                if o_after and s_after == signal.desired:
-                  filled = abs(float(sz_after))
-              except Exception:
-                filled = 0.0
-
-              remain = max(0.0, qty - filled)
-              remain = quantize_qty_to_lot(remain, cached_lot_size)
-              if remain > 0:
-                await place_market(client, ticker, side_int, remain, owner_addr, subaccount_name, cached_lot_size)
-                await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-
-              pos_final = fetch_active_position(eth_base, sub_id, product_id)
-              of, sf, szf, _, epf, etsf = parse_position(pos_final)
-              opened_qty = abs(float(szf)) if of and sf == signal.desired else qty
-              entry_px = float(last_mid)
-              if epf and epf > 0:
-                entry_px = epf
-
-              DB_MANAGER.insert_trade_event(
-                trade_id=str(uuid.uuid4()),
-                ts_ms=now_ms,
-                event_type="ENTRY",
-                side=signal.desired,
-                qty=opened_qty,
-                price=entry_px,
-                pnl=None,
-                tag="model_entry",
-                reason_json=json.dumps(
-                  {
-                    "reason": signal.reason,
-                    "regime": signal.regime,
-                    "p_up": signal.p_up,
-                    "openThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
-                  }
-                ),
-                entry_ts=etsf or now_ms,
-                entry_price=entry_px,
-              )
-
-              current_trade_entry_price = entry_px
-              current_trade_entry_ts = etsf or now_ms
-              last_order_submit_ms = int(time.time() * 1000)
-              last_order_ts.append(time.time())
-
-              last_action = {
-                "type": f"OPEN_{signal.desired}",
-                "ok": True,
-                "info": {
-                  "qty": opened_qty,
-                  "qtyRaw": qty_raw,
-                  "lotSize": cached_lot_size,
-                  "confidence": confidence,
-                  "sizeMultiplier": size_mult,
-                },
-              }
-            else:
-              last_action = {
-                "type": "SKIP_CLIENT_UNAVAILABLE",
-                "ok": False,
-                "info": {"error": cerr or "SDK client unavailable"},
-              }
-          else:
+          if in_cooldown and not emergency_breakout:
             last_action = {
-              "type": "SKIP_QTY_BELOW_LOT",
-              "ok": False,
+              "type": "COOLDOWN_ACTIVE",
+              "ok": True,
               "info": {
-                "qtyRaw": qty_raw,
-                "lotSize": cached_lot_size,
-                "spreadBps": signal.spread_bps,
+                "cooldownAfterCloseSec": cooldown_after_close_sec,
+                "cooldownUntil": cooldown_until_ms,
+                "cooldownRemainingSec": to_countdown_sec(cooldown_until_ms, now_ms),
+                "directionalProb": directional_prob,
               },
             }
+          elif expected_move_bps < required_move_bps:
+            last_action = {
+              "type": "EDGE_FILTER_BLOCKED",
+              "ok": True,
+              "info": {
+                "expectedMoveBps": expected_move_bps,
+                "requiredMoveBps": required_move_bps,
+                "costBps": cost_bps,
+                "spreadBps": signal.spread_bps,
+                "feeEstimateBps": fee_bps,
+                "slippageBufferBps": slippage_bps,
+                "edgeMultiplier": edge_mult,
+                "cooldownBypassed": emergency_breakout,
+              },
+            }
+          else:
+            snap = fetch_portfolio_snapshot(eth_base, sub_id)
+            avail = _f(snap.get("availableMarginUsd"))
+            pv = _f(snap.get("portfolioValueUsd"))
+
+            max_margin = float(cfg.get("maxMarginUsd", 100.0))
+            if pv and pv > 0:
+              max_margin = min(max_margin, pv * float(cfg.get("maxMarginPct", 25.0)) / 100.0)
+            if avail is not None:
+              max_margin = min(max_margin, avail)
+
+            confidence = clamp(abs(signal.p_up - 0.5) * 2.0, 0.0, 1.0)
+            size_mult = size_liquidity_multiplier(signal.spread_bps, signal.liquidity_score)
+            if signal.spread_bps > float(cfg.get("maxSpreadBpsForTrade", 12.0)):
+              size_mult = 0.0
+
+            notional = max_margin * float(cfg.get("maxLeverage", 2.0)) * confidence * size_mult
+            qty_raw = (notional / float(last_mid)) if last_mid and last_mid > 0 else 0.0
+            qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
+
+            if qty > 0:
+              cerr = await ensure_client_ready()
+              if not cerr and client is not None:
+                guard_ms = int(cfg.get("orderGuardMs", 900))
+                if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
+                  await asyncio.sleep(0.2)
+
+                side_int = _side_to_int(signal.desired)
+                timeout_ms = int(cfg.get("smartEntryTimeoutMs", 900))
+                prefer_maker = bool(cfg.get("entryMakerPreferred", True))
+                allow_market_fallback = bool(cfg.get("entryMarketFallbackEnabled", True))
+                fallback_min_prob = clamp(float(cfg.get("entryMarketFallbackMinProb", 0.90)), 0.50, 0.99)
+
+                filled = 0.0
+                maker_err = ""
+                used_market_fallback = False
+                submitted_any = False
+
+                try:
+                  if prefer_maker:
+                    limit_px = _calc_limit_price(
+                      side_int,
+                      float(last_mid),
+                      last_bid,
+                      last_ask,
+                      tick_size=cached_tick_size,
+                      aggressive=False,
+                    )
+                    await place_limit_post_only(
+                      client,
+                      ticker,
+                      side_int,
+                      qty,
+                      limit_px,
+                      owner_addr,
+                      subaccount_name,
+                      cached_lot_size,
+                    )
+                  else:
+                    limit_px = _calc_limit_price(
+                      side_int,
+                      float(last_mid),
+                      last_bid,
+                      last_ask,
+                      tick_size=cached_tick_size,
+                      aggressive=True,
+                    )
+                    await place_limit_ioc(
+                      client,
+                      ticker,
+                      side_int,
+                      qty,
+                      limit_px,
+                      owner_addr,
+                      subaccount_name,
+                      cached_lot_size,
+                    )
+                  submitted_any = True
+                  last_order_submit_ms = int(time.time() * 1000)
+                  await asyncio.sleep(timeout_ms / 1000.0)
+                  await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
+
+                  pos_after = fetch_active_position(eth_base, sub_id, product_id)
+                  o_after, s_after, sz_after, _, _, _ = parse_position(pos_after)
+                  if o_after and s_after == signal.desired:
+                    filled = abs(float(sz_after))
+                except Exception as e:
+                  maker_err = str(e)
+                  try:
+                    await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
+                  except Exception:
+                    pass
+
+                remain = max(0.0, qty - filled)
+                remain = quantize_qty_to_lot(remain, cached_lot_size)
+                if remain > 0 and allow_market_fallback and directional_prob >= fallback_min_prob:
+                  await place_market(client, ticker, side_int, remain, owner_addr, subaccount_name, cached_lot_size)
+                  await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
+                  submitted_any = True
+                  used_market_fallback = True
+                  last_order_submit_ms = int(time.time() * 1000)
+
+                pos_final = fetch_active_position(eth_base, sub_id, product_id)
+                of, sf, szf, _, epf, etsf = parse_position(pos_final)
+                opened_qty = abs(float(szf)) if of and sf == signal.desired else 0.0
+
+                if opened_qty <= 0:
+                  if submitted_any:
+                    last_order_ts.append(time.time())
+                  last_action = {
+                    "type": "SKIP_ENTRY_UNFILLED",
+                    "ok": True,
+                    "info": {
+                      "desired": signal.desired,
+                      "qty": qty,
+                      "filled": filled,
+                      "remain": remain,
+                      "preferMaker": prefer_maker,
+                      "marketFallbackAllowed": allow_market_fallback,
+                      "marketFallbackUsed": used_market_fallback,
+                      "directionalProb": directional_prob,
+                      "fallbackMinProb": fallback_min_prob,
+                      "makerError": maker_err or None,
+                      "expectedMoveBps": expected_move_bps,
+                      "requiredMoveBps": required_move_bps,
+                    },
+                  }
+                else:
+                  entry_px = float(last_mid)
+                  if epf and epf > 0:
+                    entry_px = epf
+
+                  entry_mode = "maker"
+                  if used_market_fallback:
+                    entry_mode = "maker_plus_market"
+                  elif filled <= 0 and not prefer_maker:
+                    entry_mode = "ioc"
+                  elif opened_qty > filled > 0:
+                    entry_mode = "maker_partial"
+
+                  DB_MANAGER.insert_trade_event(
+                    trade_id=str(uuid.uuid4()),
+                    ts_ms=now_ms,
+                    event_type="ENTRY",
+                    side=signal.desired,
+                    qty=opened_qty,
+                    price=entry_px,
+                    pnl=None,
+                    tag="model_entry",
+                    reason_json=json.dumps(
+                      {
+                        "reason": signal.reason,
+                        "regime": signal.regime,
+                        "p_up": signal.p_up,
+                        "openThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
+                        "expectedMoveBps": expected_move_bps,
+                        "requiredMoveBps": required_move_bps,
+                        "costBps": cost_bps,
+                        "entryMode": entry_mode,
+                        "makerFilledQty": filled,
+                        "marketFallbackUsed": used_market_fallback,
+                        "cooldownBypassed": emergency_breakout,
+                      }
+                    ),
+                    entry_ts=etsf or now_ms,
+                    entry_price=entry_px,
+                  )
+
+                  current_trade_entry_price = entry_px
+                  current_trade_entry_ts = etsf or now_ms
+                  if submitted_any:
+                    last_order_ts.append(time.time())
+
+                  last_action = {
+                    "type": f"OPEN_{signal.desired}",
+                    "ok": True,
+                    "info": {
+                      "qty": opened_qty,
+                      "qtyRaw": qty_raw,
+                      "lotSize": cached_lot_size,
+                      "tickSize": cached_tick_size,
+                      "confidence": confidence,
+                      "sizeMultiplier": size_mult,
+                      "expectedMoveBps": expected_move_bps,
+                      "requiredMoveBps": required_move_bps,
+                      "costBps": cost_bps,
+                      "makerFilledQty": filled,
+                      "marketFallbackUsed": used_market_fallback,
+                      "cooldownBypassed": emergency_breakout,
+                    },
+                  }
+              else:
+                last_action = {
+                  "type": "SKIP_CLIENT_UNAVAILABLE",
+                  "ok": False,
+                  "info": {"error": cerr or "SDK client unavailable"},
+                }
+            else:
+              last_action = {
+                "type": "SKIP_QTY_BELOW_LOT",
+                "ok": False,
+                "info": {
+                  "qtyRaw": qty_raw,
+                  "lotSize": cached_lot_size,
+                  "spreadBps": signal.spread_bps,
+                  "expectedMoveBps": expected_move_bps,
+                  "requiredMoveBps": required_move_bps,
+                },
+              }
         elif signal.desired in ("LONG", "SHORT") and not can_open:
           last_action = {
             "type": "RATE_LIMITED",
@@ -2209,6 +2554,7 @@ async def main():
                 entry_price=current_trade_entry_price,
                 exit_price=px,
               )
+              last_close_ts_ms = now_ms
               last_action = {
                 "type": "CLOSE_CONFIDENCE",
                 "ok": True,
@@ -2256,6 +2602,11 @@ async def main():
         if position_state.entry_ts_ms
         else None
       )
+      cooldown_until = (
+        int(last_close_ts_ms) + int(cfg.get("cooldownAfterCloseSec", 30)) * 1000
+        if (last_close_ts_ms and int(cfg.get("cooldownAfterCloseSec", 30)) > 0)
+        else None
+      )
 
       human_reason, raw_reason = explain_agent_reason(last_reason, last_desired, float(last_conf))
 
@@ -2285,6 +2636,18 @@ async def main():
           "confidenceThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
           "openConfidenceThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
           "closeConfidenceThreshold": float(cfg.get("closeConfidenceThreshold", 0.55)),
+          "feeEstimateBps": float(cfg.get("feeEstimateBps", 3.0)),
+          "slippageBufferBps": float(cfg.get("slippageBufferBps", 4.0)),
+          "minExpectedMoveBps": float(cfg.get("minExpectedMoveBps", 20.0)),
+          "edgeCostMultiplier": float(cfg.get("edgeCostMultiplier", 2.0)),
+          "entryMakerPreferred": bool(cfg.get("entryMakerPreferred", True)),
+          "entryMarketFallbackEnabled": bool(cfg.get("entryMarketFallbackEnabled", True)),
+          "entryMarketFallbackMinProb": float(cfg.get("entryMarketFallbackMinProb", 0.90)),
+          "cooldownAfterCloseSec": int(cfg.get("cooldownAfterCloseSec", 30)),
+          "emergencyBreakoutEnabled": bool(cfg.get("emergencyBreakoutEnabled", True)),
+          "emergencyBreakoutMinProb": float(cfg.get("emergencyBreakoutMinProb", 0.94)),
+          "emergencyBreakoutMinMoveBps": float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)),
+          "emergencyBreakoutMinAtrPercentile": float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85)),
           "stopLossPct": _to_opt_float(cfg.get("stopLossPct")),
           "stopLossAtrMult": _to_opt_float(cfg.get("stopLossAtrMult")),
           "takeProfitPct": _to_opt_float(cfg.get("takeProfitPct")),
@@ -2342,11 +2705,13 @@ async def main():
           "initialHoldEndsAt": min_hold_until,
           "nextReassessAt": next_reassess_ms if position_state.open else None,
           "maxHoldEndsAt": max_hold_until,
+          "cooldownUntil": cooldown_until,
           "nextDecisionAt": None if position_state.open else next_decision_ms,
           "countdowns": {
             "initialHoldEndsInSec": to_countdown_sec(min_hold_until, now_ms),
             "nextReassessInSec": to_countdown_sec(next_reassess_ms if position_state.open else None, now_ms),
             "maxHoldEndsInSec": to_countdown_sec(max_hold_until, now_ms),
+            "cooldownEndsInSec": to_countdown_sec(cooldown_until if not position_state.open else None, now_ms),
             "nextDecisionInSec": to_countdown_sec(None if position_state.open else next_decision_ms, now_ms),
           },
         },

@@ -50,6 +50,18 @@ export const Uc5ConfigSchema = z.object({
   orderGuardMs: z.number().int().min(200).max(5000).default(900),
   maxSpreadBpsForTrade: z.number().min(1).max(100).default(12),
   exitSpreadInsaneBps: z.number().min(5).max(300).default(28),
+  feeEstimateBps: z.number().min(0).max(100).default(3),
+  slippageBufferBps: z.number().min(0).max(100).default(4),
+  minExpectedMoveBps: z.number().min(1).max(500).default(20),
+  edgeCostMultiplier: z.number().min(1).max(5).default(2),
+  entryMakerPreferred: z.boolean().default(true),
+  entryMarketFallbackEnabled: z.boolean().default(true),
+  entryMarketFallbackMinProb: z.number().min(0.5).max(0.99).default(0.9),
+  cooldownAfterCloseSec: z.number().int().min(0).max(600).default(30),
+  emergencyBreakoutEnabled: z.boolean().default(true),
+  emergencyBreakoutMinProb: z.number().min(0.5).max(0.99).default(0.94),
+  emergencyBreakoutMinMoveBps: z.number().min(1).max(1000).default(35),
+  emergencyBreakoutMinAtrPercentile: z.number().min(0).max(1).default(0.85),
 
   stopLossPct: z.number().positive().max(1).nullable().optional().default(0.003),
   stopLossAtrMult: z.number().positive().max(20).nullable().optional().default(null),
@@ -123,6 +135,18 @@ export type Uc5Status = {
     confidenceThreshold?: number;
     openConfidenceThreshold?: number;
     closeConfidenceThreshold?: number;
+    feeEstimateBps?: number;
+    slippageBufferBps?: number;
+    minExpectedMoveBps?: number;
+    edgeCostMultiplier?: number;
+    entryMakerPreferred?: boolean;
+    entryMarketFallbackEnabled?: boolean;
+    entryMarketFallbackMinProb?: number;
+    cooldownAfterCloseSec?: number;
+    emergencyBreakoutEnabled?: boolean;
+    emergencyBreakoutMinProb?: number;
+    emergencyBreakoutMinMoveBps?: number;
+    emergencyBreakoutMinAtrPercentile?: number;
     stopLossPct?: number | null;
     stopLossAtrMult?: number | null;
     takeProfitPct?: number | null;
@@ -164,11 +188,13 @@ export type Uc5Status = {
     initialHoldEndsAt?: number | null;
     nextReassessAt?: number | null;
     maxHoldEndsAt?: number | null;
+    cooldownUntil?: number | null;
     nextDecisionAt?: number | null;
     countdowns?: {
       initialHoldEndsInSec?: number | null;
       nextReassessInSec?: number | null;
       maxHoldEndsInSec?: number | null;
+      cooldownEndsInSec?: number | null;
       nextDecisionInSec?: number | null;
     };
   };

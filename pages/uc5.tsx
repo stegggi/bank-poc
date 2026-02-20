@@ -150,6 +150,18 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     closeConfidenceThreshold: closeThreshold,
     minHoldSeconds: c.minHoldSeconds ?? 5,
     maxMarginPct: c.maxMarginPct ?? 25,
+    feeEstimateBps: c.feeEstimateBps ?? 3,
+    slippageBufferBps: c.slippageBufferBps ?? 4,
+    minExpectedMoveBps: c.minExpectedMoveBps ?? 20,
+    edgeCostMultiplier: c.edgeCostMultiplier ?? 2,
+    entryMakerPreferred: c.entryMakerPreferred ?? true,
+    entryMarketFallbackEnabled: c.entryMarketFallbackEnabled ?? true,
+    entryMarketFallbackMinProb: c.entryMarketFallbackMinProb ?? 0.9,
+    cooldownAfterCloseSec: c.cooldownAfterCloseSec ?? 30,
+    emergencyBreakoutEnabled: c.emergencyBreakoutEnabled ?? true,
+    emergencyBreakoutMinProb: c.emergencyBreakoutMinProb ?? 0.94,
+    emergencyBreakoutMinMoveBps: c.emergencyBreakoutMinMoveBps ?? 35,
+    emergencyBreakoutMinAtrPercentile: c.emergencyBreakoutMinAtrPercentile ?? 0.85,
   };
 }
 
@@ -304,6 +316,33 @@ export default function Uc5Page() {
     }
     if (edit.metricsLoopIntervalSec < 30 || edit.metricsLoopIntervalSec > 300) {
       errors.metricsLoopIntervalSec = "Slow metrics interval must be 30 to 300 sec";
+    }
+    if (edit.feeEstimateBps < 0 || edit.feeEstimateBps > 100) {
+      errors.feeEstimateBps = "Fee estimate must be 0 to 100 bps";
+    }
+    if (edit.slippageBufferBps < 0 || edit.slippageBufferBps > 100) {
+      errors.slippageBufferBps = "Slippage buffer must be 0 to 100 bps";
+    }
+    if (edit.minExpectedMoveBps < 1 || edit.minExpectedMoveBps > 500) {
+      errors.minExpectedMoveBps = "Min expected move must be 1 to 500 bps";
+    }
+    if (edit.edgeCostMultiplier < 1 || edit.edgeCostMultiplier > 5) {
+      errors.edgeCostMultiplier = "Edge multiplier must be 1.0 to 5.0";
+    }
+    if (edit.entryMarketFallbackMinProb < 0.5 || edit.entryMarketFallbackMinProb > 0.99) {
+      errors.entryMarketFallbackMinProb = "Fallback min probability must be 0.50 to 0.99";
+    }
+    if (edit.cooldownAfterCloseSec < 0 || edit.cooldownAfterCloseSec > 600) {
+      errors.cooldownAfterCloseSec = "Cooldown after close must be 0 to 600 sec";
+    }
+    if (edit.emergencyBreakoutMinProb < 0.5 || edit.emergencyBreakoutMinProb > 0.99) {
+      errors.emergencyBreakoutMinProb = "Emergency breakout min probability must be 0.50 to 0.99";
+    }
+    if (edit.emergencyBreakoutMinMoveBps < 1 || edit.emergencyBreakoutMinMoveBps > 1000) {
+      errors.emergencyBreakoutMinMoveBps = "Emergency breakout min move must be 1 to 1000 bps";
+    }
+    if (edit.emergencyBreakoutMinAtrPercentile < 0 || edit.emergencyBreakoutMinAtrPercentile > 1) {
+      errors.emergencyBreakoutMinAtrPercentile = "Emergency breakout ATR percentile must be 0.00 to 1.00";
     }
     return errors;
   }, [edit]);
@@ -779,6 +818,7 @@ export default function Uc5Page() {
               <KV k="Initial hold ends" v={fmtCountdown(trading?.countdowns?.initialHoldEndsInSec)} />
               <KV k="Next reassessment" v={fmtCountdown(trading?.countdowns?.nextReassessInSec)} />
               <KV k="Max hold ends" v={fmtCountdown(trading?.countdowns?.maxHoldEndsInSec)} />
+              <KV k="Cooldown ends" v={fmtCountdown(trading?.countdowns?.cooldownEndsInSec)} />
               <KV k="Next entry evaluation" v={fmtCountdown(trading?.countdowns?.nextDecisionInSec)} />
               <KV k="Last action" v={String(trading?.lastAction && typeof trading.lastAction === "object" && "type" in (trading.lastAction as { type?: unknown }) ? (trading.lastAction as { type?: unknown }).type : "—")} />
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
@@ -1013,6 +1053,199 @@ export default function Uc5Page() {
                 value={edit?.metricsLoopIntervalSec ?? 45}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, metricsLoopIntervalSec: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="feeEstimateBps" help="Estimated taker fee in bps for edge filter." error={validation.feeEstimateBps}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                value={edit?.feeEstimateBps ?? 3}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, feeEstimateBps: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="slippageBufferBps" help="Extra cost cushion for expected-edge filter." error={validation.slippageBufferBps}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={100}
+                step={0.1}
+                value={edit?.slippageBufferBps ?? 4}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, slippageBufferBps: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="minExpectedMoveBps"
+              help="Absolute minimum expected move to allow entries."
+              error={validation.minExpectedMoveBps}
+            >
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={500}
+                step={1}
+                value={edit?.minExpectedMoveBps ?? 20}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="edgeCostMultiplier"
+              help="Require expected move >= multiplier × (fees+spread+slippage)."
+              error={validation.edgeCostMultiplier}
+            >
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={5}
+                step={0.1}
+                value={edit?.edgeCostMultiplier ?? 2}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, edgeCostMultiplier: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="entryMakerPreferred"
+              help="Try post-only maker limit first for entries."
+              error={undefined}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(edit?.entryMakerPreferred ?? true)}
+                  disabled={!isOwner}
+                  onChange={(e) => setEdit((p) => (p ? { ...p, entryMakerPreferred: e.target.checked } : p))}
+                />
+                Enable maker-first entries
+              </label>
+            </Field>
+
+            <Field
+              label="entryMarketFallbackEnabled"
+              help="Allow market fallback for strong signals after maker timeout."
+              error={undefined}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(edit?.entryMarketFallbackEnabled ?? true)}
+                  disabled={!isOwner}
+                  onChange={(e) => setEdit((p) => (p ? { ...p, entryMarketFallbackEnabled: e.target.checked } : p))}
+                />
+                Enable market fallback
+              </label>
+            </Field>
+
+            <Field
+              label="entryMarketFallbackMinProb"
+              help="Directional probability required to allow market fallback."
+              error={validation.entryMarketFallbackMinProb}
+            >
+              <input
+                style={input}
+                type="number"
+                min={0.5}
+                max={0.99}
+                step={0.01}
+                value={edit?.entryMarketFallbackMinProb ?? 0.9}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, entryMarketFallbackMinProb: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="cooldownAfterCloseSec"
+              help="Block re-entry for this many seconds after a close."
+              error={validation.cooldownAfterCloseSec}
+            >
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={600}
+                step={1}
+                value={edit?.cooldownAfterCloseSec ?? 30}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, cooldownAfterCloseSec: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="emergencyBreakoutEnabled"
+              help="Allow bypassing cooldown on strong momentum breakouts."
+              error={undefined}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(edit?.emergencyBreakoutEnabled ?? true)}
+                  disabled={!isOwner}
+                  onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutEnabled: e.target.checked } : p))}
+                />
+                Enable emergency breakout bypass
+              </label>
+            </Field>
+
+            <Field
+              label="emergencyBreakoutMinProb"
+              help="Min directional probability to bypass cooldown."
+              error={validation.emergencyBreakoutMinProb}
+            >
+              <input
+                style={input}
+                type="number"
+                min={0.5}
+                max={0.99}
+                step={0.01}
+                value={edit?.emergencyBreakoutMinProb ?? 0.94}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinProb: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="emergencyBreakoutMinMoveBps"
+              help="Min expected move (bps) to bypass cooldown."
+              error={validation.emergencyBreakoutMinMoveBps}
+            >
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={1000}
+                step={1}
+                value={edit?.emergencyBreakoutMinMoveBps ?? 35}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinMoveBps: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="emergencyBreakoutMinAtrPercentile"
+              help="Min ATR percentile (0-1) for cooldown bypass."
+              error={validation.emergencyBreakoutMinAtrPercentile}
+            >
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.01}
+                value={edit?.emergencyBreakoutMinAtrPercentile ?? 0.85}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinAtrPercentile: Number(e.target.value) } : p))}
               />
             </Field>
           </div>

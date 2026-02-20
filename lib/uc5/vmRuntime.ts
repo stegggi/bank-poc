@@ -54,6 +54,18 @@ export function defaultUc5Config(): Uc5Config {
     orderGuardMs: 900,
     maxSpreadBpsForTrade: 12,
     exitSpreadInsaneBps: 28,
+    feeEstimateBps: 3,
+    slippageBufferBps: 4,
+    minExpectedMoveBps: 20,
+    edgeCostMultiplier: 2,
+    entryMakerPreferred: true,
+    entryMarketFallbackEnabled: true,
+    entryMarketFallbackMinProb: 0.9,
+    cooldownAfterCloseSec: 30,
+    emergencyBreakoutEnabled: true,
+    emergencyBreakoutMinProb: 0.94,
+    emergencyBreakoutMinMoveBps: 35,
+    emergencyBreakoutMinAtrPercentile: 0.85,
     stopLossPct: 0.003,
     stopLossAtrMult: null,
     takeProfitPct: 0.006,
@@ -203,11 +215,13 @@ export type VmTradingStatus = {
   initialHoldEndsAt?: number | null;
   nextReassessAt?: number | null;
   maxHoldEndsAt?: number | null;
+  cooldownUntil?: number | null;
   nextDecisionAt?: number | null;
   countdowns?: {
     initialHoldEndsInSec?: number | null;
     nextReassessInSec?: number | null;
     maxHoldEndsInSec?: number | null;
+    cooldownEndsInSec?: number | null;
     nextDecisionInSec?: number | null;
   };
   lastAction?: unknown;
