@@ -117,11 +117,22 @@ async function ensureWalletChain(eth: Eip1193Provider, chainIdHex: string) {
 }
 
 function normalizeEdit(c: Uc5Config): Uc5Config {
+  const openThreshold = c.openConfidenceThreshold ?? c.confidenceThreshold ?? 0.65;
+  const closeThreshold = c.closeConfidenceThreshold ?? Math.max(0.5, openThreshold - 0.1);
+  const inPos = c.inPositionReassessIntervalSec ?? c.reassessIntervalSec ?? 8;
   return {
     ...c,
     ingestionEnabled: c.ingestionEnabled ?? true,
     ingestIntervalSec: c.ingestIntervalSec ?? c.pollIntervalSeconds ?? 2,
-    reassessIntervalSec: c.reassessIntervalSec ?? 300,
+    reassessIntervalSec: inPos,
+    decisionLoopIntervalSec: c.decisionLoopIntervalSec ?? 4,
+    inPositionReassessIntervalSec: inPos,
+    riskLoopIntervalSec: c.riskLoopIntervalSec ?? 1,
+    metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
+    confidenceThreshold: openThreshold,
+    openConfidenceThreshold: openThreshold,
+    closeConfidenceThreshold: closeThreshold,
+    minHoldSeconds: c.minHoldSeconds ?? 5,
     maxMarginPct: c.maxMarginPct ?? 25,
   };
 }
@@ -242,26 +253,41 @@ export default function Uc5Page() {
     if (!edit) return errors;
     if (edit.maxLeverage < 1 || edit.maxLeverage > 20) errors.maxLeverage = "Max leverage must be 1.0 to 20.0";
     if (edit.maxMarginPct < 0 || edit.maxMarginPct > 100) errors.maxMarginPct = "Max margin % must be 0 to 100";
-    if (edit.confidenceThreshold < 0.5 || edit.confidenceThreshold > 0.95) {
-      errors.confidenceThreshold = "Confidence threshold must be 0.50 to 0.95";
+    if (edit.openConfidenceThreshold < 0.5 || edit.openConfidenceThreshold > 0.95) {
+      errors.openConfidenceThreshold = "Open threshold must be 0.50 to 0.95";
+    }
+    if (edit.closeConfidenceThreshold < 0.45 || edit.closeConfidenceThreshold > 0.9) {
+      errors.closeConfidenceThreshold = "Close threshold must be 0.45 to 0.90";
+    }
+    if (edit.closeConfidenceThreshold > edit.openConfidenceThreshold) {
+      errors.closeConfidenceThreshold = "Close threshold should be <= open threshold";
     }
     if (edit.minHoldSeconds < 5 || edit.minHoldSeconds > 259200) {
       errors.minHoldSeconds = "Min hold must be 5 to 259200 sec";
     }
-    if (edit.maxHoldSeconds < 3600 || edit.maxHoldSeconds > 259200) {
-      errors.maxHoldSeconds = "Max hold must be 3600 to 259200 sec (60m to 72h)";
+    if (edit.maxHoldSeconds < 5 || edit.maxHoldSeconds > 259200) {
+      errors.maxHoldSeconds = "Max hold must be 5 to 259200 sec";
     }
     if (edit.maxHoldSeconds < edit.minHoldSeconds) {
       errors.maxHoldSeconds = "Max hold must be >= min hold";
     }
-    if (edit.predictionHorizonSeconds < 5 || edit.predictionHorizonSeconds > 259200) {
-      errors.predictionHorizonSeconds = "Entry horizon must be 5 to 259200 sec";
+    if (edit.predictionHorizonSeconds < 10 || edit.predictionHorizonSeconds > 259200) {
+      errors.predictionHorizonSeconds = "Entry horizon must be 10 to 259200 sec";
     }
     if (edit.ingestIntervalSec < 1 || edit.ingestIntervalSec > 60) {
       errors.ingestIntervalSec = "Ingest interval must be 1 to 60 sec";
     }
-    if (edit.reassessIntervalSec < 5 || edit.reassessIntervalSec > 86400) {
-      errors.reassessIntervalSec = "Reassess interval must be 5 to 86400 sec";
+    if (edit.riskLoopIntervalSec < 1 || edit.riskLoopIntervalSec > 5) {
+      errors.riskLoopIntervalSec = "Risk loop interval must be 1 to 5 sec";
+    }
+    if (edit.decisionLoopIntervalSec < 3 || edit.decisionLoopIntervalSec > 60) {
+      errors.decisionLoopIntervalSec = "Flat decision interval must be 3 to 60 sec";
+    }
+    if (edit.inPositionReassessIntervalSec < 5 || edit.inPositionReassessIntervalSec > 300) {
+      errors.inPositionReassessIntervalSec = "In-position reassess interval must be 5 to 300 sec";
+    }
+    if (edit.metricsLoopIntervalSec < 30 || edit.metricsLoopIntervalSec > 300) {
+      errors.metricsLoopIntervalSec = "Slow metrics interval must be 30 to 300 sec";
     }
     return errors;
   }, [edit]);
@@ -307,10 +333,13 @@ export default function Uc5Page() {
     const pendingId = addNotice("info", "Saving settings...", true);
     setBusy("save");
     try {
+      const normalized = normalizeEdit(edit);
       const payload: Uc5Config = {
-        ...normalizeEdit(edit),
+        ...normalized,
         ownerAddress: cfg.ownerAddress,
-        pollIntervalSeconds: normalizeEdit(edit).ingestIntervalSec,
+        pollIntervalSeconds: normalized.ingestIntervalSec,
+        confidenceThreshold: normalized.openConfidenceThreshold,
+        reassessIntervalSec: normalized.inPositionReassessIntervalSec,
       };
       const auth = await signOwnerAction("SET_CONFIG", payload);
       await readJson<{ ok: true }>("/api/uc5/config", {
@@ -643,7 +672,12 @@ export default function Uc5Page() {
               <KV k="Status" v={trading?.running ? "RUNNING" : "STOPPED"} />
               <KV k="Position" v={trading?.positionOpen ? `${trading.side || "OPEN"}` : "No open trade"} />
               <KV k="Time since entry" v={fmtCountdown(trading?.timeSinceEntrySec)} />
-              <KV k="Reassess interval" v={`${status?.runtime?.reassessIntervalSec ?? edit?.reassessIntervalSec ?? 300}s`} />
+              <KV k="Risk loop" v={`${status?.runtime?.riskLoopIntervalSec ?? edit?.riskLoopIntervalSec ?? 1}s`} />
+              <KV k="Flat decision loop" v={`${status?.runtime?.decisionLoopIntervalSec ?? edit?.decisionLoopIntervalSec ?? 4}s`} />
+              <KV
+                k="In-position loop"
+                v={`${status?.runtime?.inPositionReassessIntervalSec ?? edit?.inPositionReassessIntervalSec ?? 8}s`}
+              />
               <KV k="Initial hold ends" v={fmtCountdown(trading?.countdowns?.initialHoldEndsInSec)} />
               <KV k="Next reassessment" v={fmtCountdown(trading?.countdowns?.nextReassessInSec)} />
               <KV k="Max hold ends" v={fmtCountdown(trading?.countdowns?.maxHoldEndsInSec)} />
@@ -714,27 +748,58 @@ export default function Uc5Page() {
               </div>
             </Field>
 
-            <Field label="Confidence threshold" help="Long if p>threshold, short if p<(1-threshold)." error={validation.confidenceThreshold}>
+            <Field
+              label="Open confidence threshold"
+              help="Flat -> long if p_up >= open, short if p_up <= 1-open."
+              error={validation.openConfidenceThreshold}
+            >
               <input
                 style={input}
                 type="number"
                 min={0.5}
                 max={0.95}
                 step={0.01}
-                value={edit?.confidenceThreshold ?? 0.6}
+                value={edit?.openConfidenceThreshold ?? 0.65}
                 disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, confidenceThreshold: Number(e.target.value) } : p))}
+                onChange={(e) =>
+                  setEdit((p) =>
+                    p
+                      ? {
+                          ...p,
+                          confidenceThreshold: Number(e.target.value),
+                          openConfidenceThreshold: Number(e.target.value),
+                        }
+                      : p
+                  )
+                }
               />
             </Field>
 
-            <Field label="Entry horizon (sec)" help="Minimum 5 sec." error={validation.predictionHorizonSeconds}>
+            <Field
+              label="Close confidence threshold"
+              help="Long holds while p_up >= close; short holds while p_up <= 1-close."
+              error={validation.closeConfidenceThreshold}
+            >
               <input
                 style={input}
                 type="number"
-                min={5}
+                min={0.45}
+                max={0.9}
+                step={0.01}
+                value={edit?.closeConfidenceThreshold ?? 0.55}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, closeConfidenceThreshold: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Entry horizon (sec)" help="Minimum 10 sec." error={validation.predictionHorizonSeconds}>
+              <input
+                style={input}
+                type="number"
+                min={10}
                 max={259200}
                 step={1}
-                value={edit?.predictionHorizonSeconds ?? 3600}
+                value={edit?.predictionHorizonSeconds ?? 30}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, predictionHorizonSeconds: Number(e.target.value) } : p))}
               />
@@ -747,7 +812,7 @@ export default function Uc5Page() {
                 min={5}
                 max={259200}
                 step={1}
-                value={edit?.minHoldSeconds ?? 3600}
+                value={edit?.minHoldSeconds ?? 5}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))}
               />
@@ -757,9 +822,9 @@ export default function Uc5Page() {
               <input
                 style={input}
                 type="number"
-                min={3600}
+                min={5}
                 max={259200}
-                step={60}
+                step={1}
                 value={edit?.maxHoldSeconds ?? 7200}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, maxHoldSeconds: Number(e.target.value) } : p))}
@@ -779,16 +844,77 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="reassessIntervalSec" help="Reassessment cadence after initial hold (min 5s)." error={validation.reassessIntervalSec}>
+            <Field label="riskLoopIntervalSec" help="Fast risk/execution loop (1-5s)." error={validation.riskLoopIntervalSec}>
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={5}
+                step={1}
+                value={edit?.riskLoopIntervalSec ?? 1}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, riskLoopIntervalSec: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="decisionLoopIntervalSec"
+              help="Flat decision cadence (3-60s)."
+              error={validation.decisionLoopIntervalSec}
+            >
+              <input
+                style={input}
+                type="number"
+                min={3}
+                max={60}
+                step={1}
+                value={edit?.decisionLoopIntervalSec ?? 4}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, decisionLoopIntervalSec: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field
+              label="inPositionReassessIntervalSec"
+              help="In-position reassessment cadence (5-300s)."
+              error={validation.inPositionReassessIntervalSec}
+            >
               <input
                 style={input}
                 type="number"
                 min={5}
-                max={86400}
+                max={300}
                 step={1}
-                value={edit?.reassessIntervalSec ?? 300}
+                value={edit?.inPositionReassessIntervalSec ?? 8}
                 disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, reassessIntervalSec: Number(e.target.value) } : p))}
+                onChange={(e) =>
+                  setEdit((p) =>
+                    p
+                      ? {
+                          ...p,
+                          reassessIntervalSec: Number(e.target.value),
+                          inPositionReassessIntervalSec: Number(e.target.value),
+                        }
+                      : p
+                  )
+                }
+              />
+            </Field>
+
+            <Field
+              label="metricsLoopIntervalSec"
+              help="Slow funding/OI polling interval (30-300s)."
+              error={validation.metricsLoopIntervalSec}
+            >
+              <input
+                style={input}
+                type="number"
+                min={30}
+                max={300}
+                step={1}
+                value={edit?.metricsLoopIntervalSec ?? 45}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, metricsLoopIntervalSec: Number(e.target.value) } : p))}
               />
             </Field>
           </div>
