@@ -1415,8 +1415,24 @@ async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[
 
   r = requests.post(f"{eth_base}/v1/linked-signer/link", json=body, timeout=20)
   if r.status_code >= 300:
-    raise RuntimeError(f"Link signer failed: {r.status_code} {r.text}")
-  return r.json()
+    txt = str(r.text or "")
+    # Some deployments return 400 when signer is already linked.
+    # Treat this as idempotent success to keep setup flow stable.
+    if r.status_code == 400 and "Signer previously linked" in txt:
+      try:
+        parsed = r.json() if r.content else {}
+      except Exception:
+        parsed = {}
+      return {
+        "status": "LINKED_ALREADY",
+        "linked": True,
+        "message": parsed.get("message") if isinstance(parsed, dict) else txt,
+      }
+    raise RuntimeError(f"Link signer failed: {r.status_code} {txt}")
+  try:
+    return r.json()
+  except Exception:
+    return {"status": "DONE"}
 
 
 def _build_strategy_cfg(cfg: Dict[str, Any]) -> StrategyConfig:
@@ -1728,7 +1744,7 @@ async def main():
           elif ctype == "LINK_SIGNER":
             out = await process_link_signer(cfg, c)
             link_status = str((out or {}).get("status") or "").strip().upper()
-            linked_now = link_status in ("ACTIVE", "LINKED", "DONE")
+            linked_now = link_status in ("ACTIVE", "LINKED", "DONE", "LINKED_ALREADY")
             cur = get_runtime_config()
             set_runtime_config(
               {
