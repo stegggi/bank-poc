@@ -20,6 +20,7 @@ type NoticeKind = "success" | "error" | "info";
 type Notice = { id: number; kind: NoticeKind; text: string; pending: boolean };
 type AdminAuth = { address: string; signature: string; nonce: string; issuedAt: number };
 type RpcDomain = { chainId?: unknown; name?: string; version?: string; verifyingContract?: string };
+type ChartMarker = VmChartResponse["markers"][number];
 
 function nowSec() {
   return Math.floor(Date.now() / 1000);
@@ -59,6 +60,19 @@ function fmtUsd(v?: number | null, digits = 2) {
 function fmtPct(v?: number | null, digits = 1) {
   if (v == null || Number.isNaN(v)) return "—";
   return `${Number(v).toFixed(digits)}%`;
+}
+
+function closeReasonLabel(reason?: ChartMarker["closeReason"]) {
+  if (reason === "confidence_change") return "confidence change";
+  if (reason === "risk_loop") return "risk loop";
+  return "other/manual";
+}
+
+function markerColor(marker: ChartMarker) {
+  if (marker.type === "ENTRY") return "#15803d";
+  if (marker.closeReason === "confidence_change") return "#b54708";
+  if (marker.closeReason === "risk_loop") return "#b42318";
+  return "#475467";
 }
 
 function shortAddr(addr: string) {
@@ -583,8 +597,9 @@ export default function Uc5Page() {
           <div style={{ fontWeight: 800 }}>{new Date(ts).toLocaleString()}</div>
           <div>Close: {price != null ? fmtUsd(price, 2) : "—"}</div>
           {hits.map((m, i) => (
-            <div key={`${m.t}-${i}`} style={{ color: m.type === "ENTRY" ? "#15803d" : "#b42318" }}>
+            <div key={`${m.t}-${i}`} style={{ color: markerColor(m) }}>
               {m.type} {m.side ? `(${m.side})` : ""} {m.price != null ? fmtUsd(Number(m.price), 2) : "—"}
+              {m.type === "EXIT" ? ` • ${closeReasonLabel(m.closeReason)}` : ""}
             </div>
           ))}
         </div>
@@ -929,7 +944,7 @@ export default function Uc5Page() {
           <h2 style={sectionTitle}>Market</h2>
           <div style={card}>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
-              24h chart ({chart.candles.length} points). Trade markers: green=entry, red=exit/flatten.
+              24h chart ({chart.candles.length} points). Markers: green=entry, amber=close by confidence, red=close by risk loop, gray=other close.
             </div>
             {chartRows.length === 0 ? (
               <div style={{ height: 320, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
@@ -960,7 +975,7 @@ export default function Uc5Page() {
                         x={m.t}
                         y={Number(m.price)}
                         r={4}
-                        fill={m.type === "ENTRY" ? "#15803d" : "#b42318"}
+                        fill={markerColor(m)}
                         stroke="none"
                         ifOverflow="visible"
                       />
@@ -987,6 +1002,9 @@ export default function Uc5Page() {
             <div style={card}>
               <div style={cardTitle}>Trade Stats</div>
               <KV k="Total trades" v={String(tradeSummary?.totalTrades ?? 0)} />
+              <KV k="Closed by confidence change" v={String(tradeSummary?.closedByConfidence ?? 0)} />
+              <KV k="Closed by risk loop" v={String(tradeSummary?.closedByRiskLoop ?? 0)} />
+              <KV k="Closed by other/manual" v={String(tradeSummary?.closedByOther ?? 0)} />
               <KV k="Win rate" v={fmtPct((tradeSummary?.winRate ?? 0) * 100)} />
               <KV k="Avg win" v={fmtUsd(tradeSummary?.avgWin)} />
               <KV k="Avg loss" v={fmtUsd(tradeSummary?.avgLoss)} />

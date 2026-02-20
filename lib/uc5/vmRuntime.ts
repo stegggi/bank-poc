@@ -215,7 +215,14 @@ export type VmTradingStatus = {
 
 export type VmChartResponse = {
   candles: Array<{ t: number; open: number; high: number; low: number; close: number }>;
-  markers: Array<{ t: number; price: number | null; type: "ENTRY" | "EXIT"; side?: string | null; eventType?: string }>;
+  markers: Array<{
+    t: number;
+    price: number | null;
+    type: "ENTRY" | "EXIT";
+    side?: string | null;
+    eventType?: string;
+    closeReason?: "confidence_change" | "risk_loop" | "other";
+  }>;
 };
 
 export type VmPortfolio = {
@@ -237,6 +244,9 @@ export type VmTradesSummary = {
   avgLoss: number;
   realizedPnlTotal: number;
   realizedPnlToday: number;
+  closedByConfidence: number;
+  closedByRiskLoop: number;
+  closedByOther: number;
 };
 
 export type VmSetupStatus = {
@@ -288,6 +298,9 @@ export async function getVmTradesSummaryCached(ttlMs = 5_000): Promise<VmTradesS
     avgLoss: 0,
     realizedPnlTotal: 0,
     realizedPnlToday: 0,
+    closedByConfidence: 0,
+    closedByRiskLoop: 0,
+    closedByOther: 0,
   });
 }
 

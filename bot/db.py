@@ -2,6 +2,7 @@ import os
 import re
 import glob
 import time
+import json
 import sqlite3
 import threading
 from datetime import datetime, timedelta, timezone
@@ -127,6 +128,33 @@ def _file_size(path: str) -> int:
     return os.path.getsize(path)
   except Exception:
     return 0
+
+
+def _classify_close_reason(tag: Optional[str], reason_json: Optional[str]) -> str:
+  tag_text = str(tag or "").strip().lower()
+  reason_text = ""
+  if reason_json:
+    try:
+      parsed = json.loads(reason_json)
+      if isinstance(parsed, dict):
+        reason_text = str(parsed.get("reason") or parsed.get("rule") or "").strip().lower()
+      else:
+        reason_text = str(parsed).strip().lower()
+    except Exception:
+      reason_text = str(reason_json).strip().lower()
+
+  blob = f"{tag_text} {reason_text}"
+  if "confidence" in blob or "close_confidence" in blob:
+    return "confidence_change"
+  if (
+    "risk" in blob
+    or "stop_loss" in blob
+    or "take_profit" in blob
+    or "trailing" in blob
+    or "max_hold" in blob
+  ):
+    return "risk_loop"
+  return "other"
 
 
 class DailyDbManager:
@@ -598,7 +626,7 @@ class DailyDbManager:
     for conn in self._connections_for_range(from_ms, now_ms):
       cur = conn.execute(
         """
-        SELECT ts_ms, event_type, side, price
+        SELECT ts_ms, event_type, side, price, tag, reason_json
         FROM trades
         WHERE ts_ms >= ?
           AND event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
@@ -608,25 +636,26 @@ class DailyDbManager:
       )
       for r in cur.fetchall():
         et = str(r[1] or "")
-        markers.append(
-          {
-            "t": int(r[0]),
-            "price": float(r[3]) if r[3] is not None else None,
-            "type": "ENTRY" if et == "ENTRY" else "EXIT",
-            "side": r[2],
-            "eventType": et,
-          }
-        )
+        marker: Dict[str, Any] = {
+          "t": int(r[0]),
+          "price": float(r[3]) if r[3] is not None else None,
+          "type": "ENTRY" if et == "ENTRY" else "EXIT",
+          "side": r[2],
+          "eventType": et,
+        }
+        if et in ("EXIT", "FLATTEN"):
+          marker["closeReason"] = _classify_close_reason(r[4], r[5])
+        markers.append(marker)
 
     markers.sort(key=lambda x: int(x["t"]))
     return {"candles": candles[-1440:], "markers": markers[-500:]}
 
   def query_trades_summary(self) -> Dict[str, Any]:
-    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float]]] = []
+    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[str], Optional[str]]] = []
     for _, conn in self._iter_all_connections():
       cur = conn.execute(
         """
-        SELECT ts_ms, event_type, side, qty, price, pnl
+        SELECT ts_ms, event_type, side, qty, price, pnl, tag, reason_json
         FROM trades
         WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
         ORDER BY ts_ms ASC
@@ -641,6 +670,8 @@ class DailyDbManager:
             float(r[3]) if r[3] is not None else None,
             float(r[4]) if r[4] is not None else None,
             float(r[5]) if r[5] is not None else None,
+            str(r[6] or "") if r[6] is not None else None,
+            str(r[7] or "") if r[7] is not None else None,
           )
         )
 
@@ -648,8 +679,9 @@ class DailyDbManager:
 
     open_leg: Optional[Dict[str, Any]] = None
     closed: List[Tuple[int, Optional[float]]] = []
+    close_reasons: List[str] = []
 
-    for ts_ms, et, side, qty, price, pnl in rows:
+    for ts_ms, et, side, qty, price, pnl, tag, reason_json in rows:
       if et == "ENTRY":
         open_leg = {
           "ts_ms": ts_ms,
@@ -673,6 +705,7 @@ class DailyDbManager:
             realized = (oprice - price) * oqty
 
       closed.append((ts_ms, realized))
+      close_reasons.append(_classify_close_reason(tag, reason_json))
       open_leg = None
 
     pnls = [float(p) for (_, p) in closed if p is not None]
@@ -682,6 +715,9 @@ class DailyDbManager:
     now_ms = int(time.time() * 1000)
     day_ago = now_ms - 24 * 60 * 60 * 1000
     realized_24h = sum(float(p or 0.0) for (ts, p) in closed if ts >= day_ago and p is not None)
+    closed_by_confidence = sum(1 for r in close_reasons if r == "confidence_change")
+    closed_by_risk = sum(1 for r in close_reasons if r == "risk_loop")
+    closed_by_other = sum(1 for r in close_reasons if r == "other")
 
     return {
       "totalTrades": len(closed),
@@ -690,6 +726,9 @@ class DailyDbManager:
       "avgLoss": (sum(losses) / len(losses)) if losses else 0.0,
       "realizedPnlTotal": sum(pnls) if pnls else 0.0,
       "realizedPnlToday": realized_24h,
+      "closedByConfidence": closed_by_confidence,
+      "closedByRiskLoop": closed_by_risk,
+      "closedByOther": closed_by_other,
     }
 
   def query_realized_pnl_since(self, from_ms: int) -> float:
