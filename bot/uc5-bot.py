@@ -59,6 +59,44 @@ def _f(x: Any) -> Optional[float]:
     return None
 
 
+def _rate(x: Any) -> Optional[float]:
+  """
+  Parse funding-like rates and normalize to decimal fraction.
+  Examples:
+    "-0.0025%" -> -0.000025
+    -0.000025  -> -0.000025
+    -0.0025    -> -0.0025 (already decimal in many APIs)
+    -0.25      -> -0.0025 (likely percent input)
+  """
+  if x is None:
+    return None
+  is_percent = False
+  if isinstance(x, str):
+    s = x.strip()
+    if not s:
+      return None
+    if s.endswith("%"):
+      is_percent = True
+      s = s[:-1].strip()
+    try:
+      v = float(s)
+    except Exception:
+      return None
+  else:
+    try:
+      v = float(x)
+    except Exception:
+      return None
+
+  if is_percent:
+    return v / 100.0
+
+  # Heuristic: values above 5% are likely percent-style numbers.
+  if abs(v) >= 0.05:
+    return v / 100.0
+  return v
+
+
 def quantize_qty_to_lot(qty: float, lot_size: Optional[float]) -> float:
   q = Decimal(str(max(0.0, float(qty or 0.0))))
   if lot_size is None or float(lot_size) <= 0:
@@ -1026,15 +1064,30 @@ def fetch_funding_snapshot(eth_base: str, product_id: str) -> Dict[str, Optional
         continue
 
       if funding is None:
-        for k in ("funding", "fundingRate", "hourlyFundingRate"):
-          x = _f(row.get(k))
+        for k in (
+          "funding",
+          "fundingRate",
+          "funding_rate",
+          "hourlyFundingRate",
+          "currentFundingRate",
+          "lastFundingRate",
+          "eightHourFundingRate",
+        ):
+          x = _rate(row.get(k))
           if x is not None:
             funding = x
             break
 
       if projected is None:
-        for k in ("projectedFunding", "predictedFunding", "nextFundingRate"):
-          x = _f(row.get(k))
+        for k in (
+          "projectedFunding",
+          "predictedFunding",
+          "projectedFundingRate",
+          "nextFundingRate",
+          "nextFunding",
+          "estimatedFundingRate",
+        ):
+          x = _rate(row.get(k))
           if x is not None:
             projected = x
             break
@@ -1064,15 +1117,30 @@ def fetch_perp_metrics(
   projected = funding_raw.get("projectedFunding")
 
   if funding is None:
-    for k in ("fundingRate", "funding", "hourlyFundingRate"):
-      x = _f(row.get(k))
+    for k in (
+      "fundingRate",
+      "funding",
+      "funding_rate",
+      "hourlyFundingRate",
+      "currentFundingRate",
+      "lastFundingRate",
+      "eightHourFundingRate",
+    ):
+      x = _rate(row.get(k))
       if x is not None:
         funding = x
         break
 
   if projected is None:
-    for k in ("projectedFunding", "predictedFunding", "nextFundingRate"):
-      x = _f(row.get(k))
+    for k in (
+      "projectedFunding",
+      "predictedFunding",
+      "projectedFundingRate",
+      "nextFundingRate",
+      "nextFunding",
+      "estimatedFundingRate",
+    ):
+      x = _rate(row.get(k))
       if x is not None:
         projected = x
         break

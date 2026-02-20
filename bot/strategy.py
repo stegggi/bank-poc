@@ -275,12 +275,19 @@ def make_signal(
     +0.2 * _normalize_small(atr_pctile - 0.5, 0.5)
   )
 
+  # Always keep a live score so confidence can move even in no-trade regimes.
+  blended_score = (
+    0.55 * mom_score
+    + 0.45 * mr_score
+  )
+
   if regime == "momentum":
     score = mom_score
   elif regime == "mean_reversion":
     score = mr_score
   else:
-    score = 0.0
+    # Keep confidence informative while still blocking entries in no-trade mode.
+    score = 0.25 * blended_score
 
   p_up = clamp(sigmoid(score), 0.01, 0.99)
 
@@ -295,7 +302,8 @@ def make_signal(
     f"regime={regime}, p_up={p_up:.3f}, r10s={r10s:.5f}, r30s={r30s:.5f}, "
     f"r2m={r2m:.5f}, r5m={r5m:.5f}, atrPct={atr_pct:.6f}, atrPctile={atr_pctile:.2f}, "
     f"basis={basis:.5f}, funding={funding:.6f}, pfunding={projected_funding:.6f}, "
-    f"spreadBps={spread_bps:.2f}, oiDelta={oi_delta:.2f}, cvd={cvd_score:.3f}"
+    f"spreadBps={spread_bps:.2f}, oiDelta={oi_delta:.2f}, cvd={cvd_score:.3f}, "
+    f"mom={mom_score:.3f}, mr={mr_score:.3f}, score={score:.3f}"
   )
 
   feats = [r10s, r30s, r2m, r5m, basis, funding]
