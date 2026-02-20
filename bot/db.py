@@ -157,6 +157,18 @@ def _classify_close_reason(tag: Optional[str], reason_json: Optional[str]) -> st
   return "other"
 
 
+def _downsample_series(points: List[Dict[str, Any]], max_points: int) -> List[Dict[str, Any]]:
+  if max_points <= 0 or len(points) <= max_points:
+    return points
+  stride = max(1, len(points) // max_points)
+  sampled = points[::stride]
+  if sampled and points and sampled[-1].get("t") != points[-1].get("t"):
+    sampled.append(points[-1])
+  if len(sampled) > max_points:
+    sampled = sampled[-max_points:]
+  return sampled
+
+
 class DailyDbManager:
   """
   UTC daily DB rotation + disk retention.
@@ -647,8 +659,36 @@ class DailyDbManager:
           marker["closeReason"] = _classify_close_reason(r[4], r[5])
         markers.append(marker)
 
+    confidence: List[Dict[str, Any]] = []
+    for conn in self._connections_for_range(from_ms, now_ms):
+      cur = conn.execute(
+        """
+        SELECT ts_ms, p_up
+        FROM decisions
+        WHERE ts_ms >= ? AND ts_ms <= ? AND p_up IS NOT NULL
+        ORDER BY ts_ms ASC
+        """,
+        (int(from_ms), int(now_ms)),
+      )
+      for r in cur.fetchall():
+        try:
+          p_up = float(r[1])
+        except Exception:
+          continue
+        confidence.append(
+          {
+            "t": int(r[0]),
+            "pUp": max(0.0, min(1.0, p_up)),
+          }
+        )
+
     markers.sort(key=lambda x: int(x["t"]))
-    return {"candles": candles[-1440:], "markers": markers[-500:]}
+    confidence.sort(key=lambda x: int(x["t"]))
+    return {
+      "candles": candles[-1440:],
+      "markers": markers[-500:],
+      "confidence": _downsample_series(confidence, 3000),
+    }
 
   def query_trades_summary(self) -> Dict[str, Any]:
     rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[str], Optional[str]]] = []

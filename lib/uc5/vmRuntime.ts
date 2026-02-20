@@ -223,6 +223,7 @@ export type VmChartResponse = {
     eventType?: string;
     closeReason?: "confidence_change" | "risk_loop" | "other";
   }>;
+  confidence?: Array<{ t: number; pUp: number }>;
 };
 
 export type VmPortfolio = {
@@ -283,7 +284,7 @@ export async function getVmTradingCached(ttlMs = 2_000): Promise<VmTradingStatus
 export async function getVmChartCached(range = "24h", resolution = "1m", ttlMs = 4_000): Promise<VmChartResponse> {
   const key = `chart:${range}:${resolution}`;
   const path = `/uc5/chart?range=${encodeURIComponent(range)}&resolution=${encodeURIComponent(resolution)}`;
-  return getVmJsonCached<VmChartResponse>(key, path, ttlMs, { candles: [], markers: [] });
+  return getVmJsonCached<VmChartResponse>(key, path, ttlMs, { candles: [], markers: [], confidence: [] });
 }
 
 export async function getVmPortfolioCached(ttlMs = 3_000): Promise<VmPortfolio> {

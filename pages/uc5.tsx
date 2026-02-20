@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
-import { CartesianGrid, ComposedChart, Line, ReferenceDot, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import NavBar from "../components/NavBar";
 import { buildAdminMessage } from "../lib/uc5/auth";
 import type { Uc5Config, Uc5Status } from "../lib/uc5/types";
@@ -15,6 +15,8 @@ import type {
 
 const UI_REFRESH_SEC = 3;
 const CHART_REFRESH_SEC = 6;
+const MARKET_CHART_HEIGHT = 340;
+const CONFIDENCE_CHART_HEIGHT = MARKET_CHART_HEIGHT / 2;
 
 type NoticeKind = "success" | "error" | "info";
 type Notice = { id: number; kind: NoticeKind; text: string; pending: boolean };
@@ -181,7 +183,7 @@ export default function Uc5Page() {
   const [status, setStatus] = useState<Uc5Status | null>(null);
   const [ingestion, setIngestion] = useState<VmIngestionStatus | null>(null);
   const [trading, setTrading] = useState<VmTradingStatus | null>(null);
-  const [chart, setChart] = useState<VmChartResponse>({ candles: [], markers: [] });
+  const [chart, setChart] = useState<VmChartResponse>({ candles: [], markers: [], confidence: [] });
   const [portfolio, setPortfolio] = useState<VmPortfolio | null>(null);
   const [tradeSummary, setTradeSummary] = useState<VmTradesSummary | null>(null);
   const [setup, setSetup] = useState<VmSetupStatus | null>(null);
@@ -555,6 +557,14 @@ export default function Uc5Page() {
     [chart.candles]
   );
   const markerRows = useMemo(() => chart.markers.filter((m) => m.price != null), [chart.markers]);
+  const confidenceRows = useMemo(
+    () =>
+      (chart.confidence || []).map((p) => ({
+        t: p.t,
+        confidencePct: Math.max(0, Math.min(100, Number(p.pUp || 0) * 100)),
+      })),
+    [chart.confidence]
+  );
 
   const marginCapAmount = useMemo(() => {
     const pv = portfolio?.portfolioValueUsd || 0;
@@ -581,6 +591,58 @@ export default function Uc5Page() {
     const pad = Math.max((max - min) * 0.02, 10);
     return [min - pad, max + pad];
   }, [chartRows]);
+  const openThresholdPct = useMemo(
+    () =>
+      Math.max(
+        0,
+        Math.min(
+          100,
+          100 *
+            Number(
+              status?.runtime?.openConfidenceThreshold ??
+                edit?.openConfidenceThreshold ??
+                cfg?.openConfidenceThreshold ??
+                cfg?.confidenceThreshold ??
+                0.65
+            )
+        )
+      ),
+    [cfg?.confidenceThreshold, cfg?.openConfidenceThreshold, edit?.openConfidenceThreshold, status?.runtime?.openConfidenceThreshold]
+  );
+  const closeThresholdPct = useMemo(
+    () =>
+      Math.max(
+        0,
+        Math.min(
+          100,
+          100 *
+            Number(
+              status?.runtime?.closeConfidenceThreshold ??
+                edit?.closeConfidenceThreshold ??
+                cfg?.closeConfidenceThreshold ??
+                Math.max(
+                  0.5,
+                  Number(
+                    status?.runtime?.openConfidenceThreshold ??
+                      edit?.openConfidenceThreshold ??
+                      cfg?.openConfidenceThreshold ??
+                      cfg?.confidenceThreshold ??
+                      0.65
+                  ) - 0.1
+                )
+            )
+        )
+      ),
+    [
+      cfg?.closeConfidenceThreshold,
+      cfg?.confidenceThreshold,
+      cfg?.openConfidenceThreshold,
+      edit?.closeConfidenceThreshold,
+      edit?.openConfidenceThreshold,
+      status?.runtime?.closeConfidenceThreshold,
+      status?.runtime?.openConfidenceThreshold,
+    ]
+  );
   const renderChartTooltip = useCallback(
     (ctx: unknown) => {
       const raw = ctx as {
@@ -606,6 +668,27 @@ export default function Uc5Page() {
       );
     },
     [markerRows]
+  );
+  const renderConfidenceTooltip = useCallback(
+    (ctx: unknown) => {
+      const raw = ctx as {
+        active?: boolean;
+        label?: number;
+        payload?: Array<{ value?: number }>;
+      };
+      if (!raw.active || !raw.payload?.length) return null;
+      const ts = Number(raw.label || 0);
+      const confidence = typeof raw.payload[0]?.value === "number" ? raw.payload[0].value : null;
+      return (
+        <div style={tooltipBox}>
+          <div style={{ fontWeight: 800 }}>{new Date(ts).toLocaleString()}</div>
+          <div>Confidence: {confidence != null ? `${confidence.toFixed(1)}%` : "—"}</div>
+          <div>Open threshold: {openThresholdPct.toFixed(1)}%</div>
+          <div>Close threshold: {closeThresholdPct.toFixed(1)}%</div>
+        </div>
+      );
+    },
+    [closeThresholdPct, openThresholdPct]
   );
 
   return (
@@ -947,11 +1030,11 @@ export default function Uc5Page() {
               24h chart ({chart.candles.length} points). Markers: green=entry, amber=close by confidence, red=close by risk loop, gray=other close.
             </div>
             {chartRows.length === 0 ? (
-              <div style={{ height: 320, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
+              <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
             ) : (
-              <div style={{ width: "100%", height: 340 }}>
+              <div style={{ width: "100%", height: MARKET_CHART_HEIGHT }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }}>
+                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
                     <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
                     <XAxis
                       dataKey="t"
@@ -980,6 +1063,38 @@ export default function Uc5Page() {
                         ifOverflow="visible"
                       />
                     ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: "#666", margin: "12px 0 8px" }}>
+              Confidence history (0-100%), with open/close thresholds.
+            </div>
+            {confidenceRows.length === 0 ? (
+              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No confidence data yet.</div>
+            ) : (
+              <div style={{ width: "100%", height: CONFIDENCE_CHART_HEIGHT }}>
+                <ResponsiveContainer width="100%" height="100%">
+                  <ComposedChart data={confidenceRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
+                    <XAxis
+                      dataKey="t"
+                      type="number"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                    />
+                    <YAxis
+                      type="number"
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                      width={58}
+                    />
+                    <Tooltip content={renderConfidenceTooltip} />
+                    <ReferenceLine y={openThresholdPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
+                    <ReferenceLine y={closeThresholdPct} stroke="#1d2939" strokeDasharray="4 4" ifOverflow="extendDomain" />
+                    <Line dataKey="confidencePct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
