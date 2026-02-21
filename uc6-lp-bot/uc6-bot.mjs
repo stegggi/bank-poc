@@ -51,21 +51,6 @@ const STATE_PATH = path.join(ENV.dataDir, "state.json");
 
 const POOL_ABI = [
   {
-    name: "slot0",
-    type: "function",
-    stateMutability: "view",
-    inputs: [],
-    outputs: [
-      { name: "sqrtPriceX96", type: "uint160" },
-      { name: "tick", type: "int24" },
-      { name: "observationIndex", type: "uint16" },
-      { name: "observationCardinality", type: "uint16" },
-      { name: "observationCardinalityNext", type: "uint16" },
-      { name: "feeProtocol", type: "uint8" },
-      { name: "unlocked", type: "bool" },
-    ],
-  },
-  {
     name: "token0",
     type: "function",
     stateMutability: "view",
@@ -92,6 +77,41 @@ const POOL_ABI = [
     stateMutability: "view",
     inputs: [],
     outputs: [{ type: "uint24" }],
+  },
+];
+
+const SLOT0_ABI_V7 = [
+  {
+    name: "slot0",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "sqrtPriceX96", type: "uint160" },
+      { name: "tick", type: "int24" },
+      { name: "observationIndex", type: "uint16" },
+      { name: "observationCardinality", type: "uint16" },
+      { name: "observationCardinalityNext", type: "uint16" },
+      { name: "feeProtocol", type: "uint8" },
+      { name: "unlocked", type: "bool" },
+    ],
+  },
+];
+
+const SLOT0_ABI_V6 = [
+  {
+    name: "slot0",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [
+      { name: "sqrtPriceX96", type: "uint160" },
+      { name: "tick", type: "int24" },
+      { name: "observationIndex", type: "uint16" },
+      { name: "observationCardinality", type: "uint16" },
+      { name: "observationCardinalityNext", type: "uint16" },
+      { name: "unlocked", type: "bool" },
+    ],
   },
 ];
 
@@ -733,7 +753,7 @@ class Uc6Bot {
 
   async getPoolSnapshot(poolAddress, venue) {
     const [slot0, token0, token1, tickSpacing, fee] = await Promise.all([
-      this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "slot0" }),
+      this.readSlot0(poolAddress),
       this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "token0" }),
       this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "token1" }),
       this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "tickSpacing" }),
@@ -763,6 +783,28 @@ class Uc6Bot {
       priceUsdcPerWeth,
       updatedAt: nowIso(),
     };
+  }
+
+  async readSlot0(poolAddress) {
+    try {
+      return await this.publicClient.readContract({
+        address: poolAddress,
+        abi: SLOT0_ABI_V7,
+        functionName: "slot0",
+      });
+    } catch (errV7) {
+      try {
+        return await this.publicClient.readContract({
+          address: poolAddress,
+          abi: SLOT0_ABI_V6,
+          functionName: "slot0",
+        });
+      } catch (errV6) {
+        const m7 = errV7 instanceof Error ? errV7.message : String(errV7 || "slot0(v7) failed");
+        const m6 = errV6 instanceof Error ? errV6.message : String(errV6 || "slot0(v6) failed");
+        throw new Error(`slot0 read failed for ${poolAddress}: ${m7}; fallback: ${m6}`);
+      }
+    }
   }
 
   toUsdcPerWethPrice(sqrtPriceX96, token0, token1) {
@@ -908,7 +950,10 @@ class Uc6Bot {
           account: this.account.address,
         });
 
-        const hash = await this.walletClient.writeContract(sim.request);
+        const hash = await this.walletClient.writeContract({
+          ...sim.request,
+          account: this.account,
+        });
         await this.publicClient.waitForTransactionReceipt({ hash });
         return;
       } catch (err) {
@@ -1042,7 +1087,10 @@ class Uc6Bot {
           account: this.account.address,
         });
 
-        const hash = await this.walletClient.writeContract(sim.request);
+        const hash = await this.walletClient.writeContract({
+          ...sim.request,
+          account: this.account,
+        });
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
 
         let tokenId = this.extractMintedTokenId(receipt, npmAddress);
