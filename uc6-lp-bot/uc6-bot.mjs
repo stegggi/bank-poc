@@ -24,6 +24,9 @@ import { verifyMessage } from "ethers";
 const VERSION = "uc6-lp-bot/0.1";
 const USDC_DECIMALS = 6;
 const WETH_DECIMALS = 18;
+const Q96 = 2n ** 96n;
+const UINT128_MAX = (2n ** 128n) - 1n;
+const EVENT_RING_LIMIT = 50;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -345,6 +348,7 @@ const DEFAULT_SETTINGS = {
   version: 1,
   tradingEnabled: true,
   killSwitch: false,
+  failureCooldownSec: 900,
   venue: "slipstream",
   bandHalfBps: 100,
   edgeRebalancePct: 0.85,
@@ -353,7 +357,13 @@ const DEFAULT_SETTINGS = {
   slippageBps: 30,
   pollIntervalMs: 2000,
   maxDeployUsdc: 50_000,
-  keepUsdcReserve: 25,
+  reserveMinUsdc: 25,
+  reservePct: 0,
+  reserveMaxUsdc: 0,
+  compoundMode: "on_rebalance",
+  harvestThresholdUsd: 30,
+  churnProtectionEnabled: false,
+  churnMaxCostToFeeRatio: 0.4,
 };
 
 function sleep(ms) {
@@ -386,13 +396,34 @@ function toBool(v, fallback) {
   return fallback;
 }
 
+function toRatio(v, fallback) {
+  const n = toNumber(v, fallback);
+  if (!Number.isFinite(n)) return fallback;
+  if (n > 1) return n / 100;
+  return n;
+}
+
 function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
   const src = input && typeof input === "object" ? input : {};
   const killSwitch = toBool(src.killSwitch, baseSettings.killSwitch);
+  const reserveMinUsdc = clamp(
+    toNumber(src.reserveMinUsdc ?? src.keepUsdcReserve, baseSettings.reserveMinUsdc),
+    0,
+    5_000_000
+  );
+  const reservePct = clamp(toRatio(src.reservePct, baseSettings.reservePct), 0, 1);
+  const reserveMaxUsdcRaw = toNumber(src.reserveMaxUsdc, baseSettings.reserveMaxUsdc);
+  const reserveMaxUsdc = clamp(reserveMaxUsdcRaw, 0, 5_000_000);
+  const compoundMode = src.compoundMode === "threshold_harvest" ? "threshold_harvest" : "on_rebalance";
   const out = {
     version: 1,
     tradingEnabled: killSwitch ? false : toBool(src.tradingEnabled, baseSettings.tradingEnabled),
     killSwitch,
+    failureCooldownSec: clamp(
+      Math.round(toNumber(src.failureCooldownSec, baseSettings.failureCooldownSec)),
+      30,
+      86_400
+    ),
     venue: src.venue === "uniswapv3" ? "uniswapv3" : "slipstream",
     bandHalfBps: clamp(Math.round(toNumber(src.bandHalfBps, baseSettings.bandHalfBps)), 10, 5000),
     edgeRebalancePct: clamp(toNumber(src.edgeRebalancePct, baseSettings.edgeRebalancePct), 0.1, 0.99),
@@ -405,7 +436,18 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     slippageBps: clamp(Math.round(toNumber(src.slippageBps, baseSettings.slippageBps)), 1, 2_000),
     pollIntervalMs: clamp(Math.round(toNumber(src.pollIntervalMs, baseSettings.pollIntervalMs)), 500, 60_000),
     maxDeployUsdc: clamp(toNumber(src.maxDeployUsdc, baseSettings.maxDeployUsdc), 0, 5_000_000),
-    keepUsdcReserve: clamp(toNumber(src.keepUsdcReserve, baseSettings.keepUsdcReserve), 0, 500_000),
+    reserveMinUsdc,
+    reservePct,
+    reserveMaxUsdc,
+    keepUsdcReserve: reserveMinUsdc,
+    compoundMode,
+    harvestThresholdUsd: clamp(toNumber(src.harvestThresholdUsd, baseSettings.harvestThresholdUsd), 0, 1_000_000),
+    churnProtectionEnabled: toBool(src.churnProtectionEnabled, baseSettings.churnProtectionEnabled),
+    churnMaxCostToFeeRatio: clamp(
+      toNumber(src.churnMaxCostToFeeRatio, baseSettings.churnMaxCostToFeeRatio),
+      0,
+      100
+    ),
   };
   return out;
 }
@@ -419,6 +461,11 @@ function defaultState(accountAddress) {
     dayKey: utcDayKey(),
     rebalancesToday: 0,
     lastRebalanceAt: null,
+    lastRebalanceAttemptAt: null,
+    lastRebalanceFailedAt: null,
+    rebalanceFailureCooldownUntil: null,
+    consecutiveRebalanceFailures: 0,
+    pendingCompoundUsd: 0,
     position: {
       venue: "slipstream",
       tokenId: null,
@@ -432,7 +479,9 @@ function defaultState(accountAddress) {
       primary: null,
       fallback: null,
       wallet: null,
+      collectableNow: { usdc: 0, weth: 0, usd: 0, isEstimated: true },
     },
+    events: [],
     lastDecision: null,
     lastError: null,
   };
@@ -675,6 +724,7 @@ class Uc6Bot {
     this.settingsMtimeMs = 0;
     this.loopRunning = false;
     this.stopRequested = false;
+    this.activeAction = null;
     this.ownerNonceUsed = new Map();
     this.ownerRateLimiter = new SimpleRateLimiter(20, 60_000);
     this.server = null;
@@ -752,6 +802,10 @@ class Uc6Bot {
         ...(parsed.latest || {}),
       },
     };
+    if (!Array.isArray(this.state.events)) this.state.events = [];
+    if (this.state.events.length > EVENT_RING_LIMIT) {
+      this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
+    }
   }
 
   async persistState() {
@@ -798,6 +852,243 @@ class Uc6Bot {
       this.state.dayKey = dayKey;
       this.state.rebalancesToday = 0;
     }
+  }
+
+  getSpotUsdcPerWeth() {
+    const primary = this.state.latest?.primary?.priceUsdcPerWeth;
+    if (Number.isFinite(primary) && primary > 0) return primary;
+    const fallback = this.state.latest?.fallback?.priceUsdcPerWeth;
+    if (Number.isFinite(fallback) && fallback > 0) return fallback;
+    return 0;
+  }
+
+  getEffectiveReserveTargetUsdc(totalValueUsd) {
+    const minUsdc = Number(this.settings.reserveMinUsdc || 0);
+    const pct = Number(this.settings.reservePct || 0);
+    const maxUsdc = Number(this.settings.reserveMaxUsdc || 0);
+    let target = Math.max(0, minUsdc, totalValueUsd * pct);
+    if (maxUsdc > 0) target = Math.min(target, maxUsdc);
+    return target;
+  }
+
+  toUsdForTokenAmountRaw(tokenAddress, amountRaw, spotUsdcPerWeth) {
+    if (!amountRaw || amountRaw <= 0n) return 0;
+    if (sameAddress(tokenAddress, this.usdc)) {
+      return Number(formatUnits(amountRaw, USDC_DECIMALS));
+    }
+    if (sameAddress(tokenAddress, this.weth)) {
+      return Number(formatUnits(amountRaw, WETH_DECIMALS)) * spotUsdcPerWeth;
+    }
+    return 0;
+  }
+
+  pushEvent(event) {
+    if (!Array.isArray(this.state.events)) this.state.events = [];
+    const next = {
+      atIso: nowIso(),
+      type: "info",
+      reason: "n/a",
+      txHashes: [],
+      gasUsd: 0,
+      swapCostUsd: 0,
+      mintBurnUsd: 0,
+      feesCollectedUsd: 0,
+      rewardsUsd: 0,
+      netUsd: 0,
+      isEstimated: false,
+      ...event,
+    };
+    const last = this.state.events[this.state.events.length - 1];
+    if (last && last.type === next.type && last.reason === next.reason) {
+      const lastMs = Date.parse(last.atIso || "");
+      const nextMs = Date.parse(next.atIso || "");
+      if (Number.isFinite(lastMs) && Number.isFinite(nextMs) && nextMs - lastMs < 15_000) {
+        return;
+      }
+    }
+    this.state.events.push(next);
+    if (this.state.events.length > EVENT_RING_LIMIT) {
+      this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
+    }
+  }
+
+  getEventsSince(startMs = null) {
+    const events = Array.isArray(this.state.events) ? this.state.events : [];
+    if (!startMs) return events;
+    return events.filter((ev) => {
+      const ms = Date.parse(ev.atIso || "");
+      return Number.isFinite(ms) && ms >= startMs;
+    });
+  }
+
+  summarizeEvents(events) {
+    let feesUsd = 0;
+    let rewardsUsd = 0;
+    let gasUsd = 0;
+    let swapCostsUsd = 0;
+    let mintBurnUsd = 0;
+    let rebalances = 0;
+    for (const ev of events) {
+      feesUsd += Number(ev.feesCollectedUsd || 0);
+      rewardsUsd += Number(ev.rewardsUsd || 0);
+      gasUsd += Number(ev.gasUsd || 0);
+      swapCostsUsd += Number(ev.swapCostUsd || 0);
+      mintBurnUsd += Number(ev.mintBurnUsd || 0);
+      if (ev.type === "recenter") rebalances += 1;
+    }
+    const totalCostsUsd = gasUsd + swapCostsUsd + mintBurnUsd;
+    const netUsd = feesUsd + rewardsUsd - totalCostsUsd;
+    return {
+      feesUsd,
+      rewardsUsd,
+      gasUsd,
+      swapCostsUsd,
+      mintBurnUsd,
+      totalCostsUsd,
+      netUsd,
+      rebalances,
+      churnRatio: feesUsd > 0 ? totalCostsUsd / feesUsd : totalCostsUsd > 0 ? Number.POSITIVE_INFINITY : 0,
+    };
+  }
+
+  parseLastErrorObject() {
+    const raw = this.state.lastError;
+    if (!raw) return null;
+    const m = String(raw).match(/^(\d{4}-\d{2}-\d{2}T[^\s]+)\s+([\s\S]*)$/);
+    if (!m) return { atIso: null, message: String(raw) };
+    return { atIso: m[1], message: m[2] };
+  }
+
+  approxSqrtPriceX96FromTick(tick) {
+    const sqrt = Math.pow(1.0001, Number(tick) / 2);
+    if (!Number.isFinite(sqrt) || sqrt <= 0) return 0n;
+    return BigInt(Math.floor(sqrt * Number(Q96)));
+  }
+
+  lpAmountsFromLiquidity(liquidityRaw, tickLower, tickUpper, sqrtPriceX96Raw, token0, token1) {
+    const liquidity = BigInt(liquidityRaw || 0);
+    if (liquidity <= 0n) return { usdcRaw: 0n, wethRaw: 0n };
+    const sqrtP = BigInt(sqrtPriceX96Raw || 0n);
+    const sqrtA = this.approxSqrtPriceX96FromTick(tickLower);
+    const sqrtB = this.approxSqrtPriceX96FromTick(tickUpper);
+    if (sqrtP <= 0n || sqrtA <= 0n || sqrtB <= 0n || sqrtB <= sqrtA) return { usdcRaw: 0n, wethRaw: 0n };
+
+    let amount0 = 0n;
+    let amount1 = 0n;
+
+    if (sqrtP <= sqrtA) {
+      amount0 = (liquidity * (sqrtB - sqrtA) * Q96) / (sqrtB * sqrtA);
+    } else if (sqrtP < sqrtB) {
+      amount0 = (liquidity * (sqrtB - sqrtP) * Q96) / (sqrtB * sqrtP);
+      amount1 = (liquidity * (sqrtP - sqrtA)) / Q96;
+    } else {
+      amount1 = (liquidity * (sqrtB - sqrtA)) / Q96;
+    }
+
+    let usdcRaw = 0n;
+    let wethRaw = 0n;
+    if (sameAddress(token0, this.usdc)) usdcRaw = amount0;
+    if (sameAddress(token1, this.usdc)) usdcRaw = amount1;
+    if (sameAddress(token0, this.weth)) wethRaw = amount0;
+    if (sameAddress(token1, this.weth)) wethRaw = amount1;
+    return { usdcRaw, wethRaw };
+  }
+
+  distanceToEdge(position, currentTick) {
+    if (!position) return { ticks: null, pct: null };
+    const lower = Number(position.tickLower);
+    const upper = Number(position.tickUpper);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper) || !Number.isFinite(currentTick) || upper <= lower) {
+      return { ticks: null, pct: null };
+    }
+    const ticksToLower = currentTick - lower;
+    const ticksToUpper = upper - currentTick;
+    const ticks = Math.max(0, Math.min(ticksToLower, ticksToUpper));
+    const halfWidth = (upper - lower) / 2;
+    const pct = halfWidth > 0 ? clamp(ticks / halfWidth, 0, 1) : null;
+    return { ticks, pct };
+  }
+
+  beginAction(type, reason) {
+    this.activeAction = {
+      type,
+      reason,
+      atIso: nowIso(),
+      txHashes: [],
+      gasUsd: 0,
+      swapCostUsd: 0,
+      mintBurnUsd: 0,
+      feesCollectedUsd: 0,
+      rewardsUsd: 0,
+      isEstimated: false,
+    };
+  }
+
+  addTxToActiveAction(kind, hash, receipt) {
+    if (!this.activeAction) return;
+    if (hash) this.activeAction.txHashes.push(String(hash));
+    const gasUsed = BigInt(receipt?.gasUsed || 0n);
+    const gasPrice = BigInt(receipt?.effectiveGasPrice || 0n);
+    const gasWei = gasUsed * gasPrice;
+    const gasEth = Number(formatUnits(gasWei, 18));
+    const gasUsd = gasEth * this.getSpotUsdcPerWeth();
+    this.activeAction.gasUsd += gasUsd;
+    if (kind === "mint" || kind === "decrease" || kind === "collect" || kind === "burn") {
+      this.activeAction.mintBurnUsd += gasUsd;
+    }
+  }
+
+  addSwapCostToActiveAction(usd, isEstimated = true) {
+    if (!this.activeAction) return;
+    this.activeAction.swapCostUsd += Number(usd || 0);
+    this.activeAction.isEstimated = this.activeAction.isEstimated || Boolean(isEstimated);
+  }
+
+  addFeesToActiveAction(usd) {
+    if (!this.activeAction) return;
+    this.activeAction.feesCollectedUsd += Number(usd || 0);
+  }
+
+  finalizeActiveAction(typeOverride = null, reasonOverride = null, extra = {}) {
+    if (!this.activeAction) return;
+    const action = this.activeAction;
+    this.activeAction = null;
+    const type = typeOverride || action.type || "info";
+    const reason = reasonOverride || action.reason || "n/a";
+    const netUsd =
+      Number(action.feesCollectedUsd || 0) +
+      Number(action.rewardsUsd || 0) -
+      (Number(action.gasUsd || 0) + Number(action.swapCostUsd || 0) + Number(action.mintBurnUsd || 0));
+    this.pushEvent({
+      type,
+      reason,
+      atIso: action.atIso,
+      txHashes: action.txHashes,
+      gasUsd: Number(action.gasUsd || 0),
+      swapCostUsd: Number(action.swapCostUsd || 0),
+      mintBurnUsd: Number(action.mintBurnUsd || 0),
+      feesCollectedUsd: Number(action.feesCollectedUsd || 0),
+      rewardsUsd: Number(action.rewardsUsd || 0),
+      netUsd,
+      isEstimated: Boolean(action.isEstimated),
+      ...extra,
+    });
+  }
+
+  getFailureCooldownGate() {
+    const now = Date.now();
+    const untilIso = this.state.rebalanceFailureCooldownUntil || null;
+    const untilMs = untilIso ? Date.parse(untilIso) : 0;
+    if (untilMs && Number.isFinite(untilMs) && now < untilMs) {
+      const remainingSec = Math.ceil((untilMs - now) / 1000);
+      return {
+        allowed: false,
+        reason: `failure_cooldown ${remainingSec}s`,
+        remainingSec,
+        until: untilIso,
+      };
+    }
+    return { allowed: true, reason: "ok", remainingSec: 0, until: untilIso };
   }
 
   async getPoolSnapshot(poolAddress, venue) {
@@ -876,22 +1167,97 @@ class Uc6Bot {
   }
 
   async refreshSnapshots() {
-    const [primary, fallback, usdcBalanceRaw, wethBalanceRaw] = await Promise.all([
+    const [primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw] = await Promise.all([
       this.getPoolSnapshot(this.slipstreamPool, "slipstream"),
       this.getPoolSnapshot(this.uniswapPool, "uniswapv3").catch(() => null),
       this.readTokenBalance(this.usdc),
       this.readTokenBalance(this.weth),
+      this.publicClient.getBalance({ address: this.account.address }),
     ]);
+
+    const spot = this.toNumberOrZero(primary?.priceUsdcPerWeth) || this.toNumberOrZero(fallback?.priceUsdcPerWeth);
+    const usdcValue = Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS));
+    const wethValue = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)) * spot;
+    const ethValue = Number(formatUnits(ethBalanceRaw, 18)) * spot;
 
     this.state.latest.primary = primary;
     this.state.latest.fallback = fallback;
     this.state.latest.wallet = {
       usdc: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
       weth: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
+      eth: Number(formatUnits(ethBalanceRaw, 18)),
+      valuesUsd: {
+        usdc: usdcValue,
+        weth: wethValue,
+        eth: ethValue,
+        total: usdcValue + wethValue + ethValue,
+      },
       updatedAt: nowIso(),
     };
 
-    return { primary, fallback, usdcBalanceRaw, wethBalanceRaw };
+    return { primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
+  }
+
+  toNumberOrZero(v) {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : 0;
+  }
+
+  async collectableNowSnapshot() {
+    const tokenId = this.state.position?.tokenId;
+    if (!tokenId) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
+    const posRaw = await this.publicClient.readContract({
+      address: npm,
+      abi: NPM_POSITION_ABI,
+      functionName: "positions",
+      args: [BigInt(tokenId)],
+    });
+    const token0 = getAddress(posRaw.token0 ?? posRaw[2]);
+    const token1 = getAddress(posRaw.token1 ?? posRaw[3]);
+    try {
+      const sim = await this.publicClient.simulateContract({
+        address: npm,
+        abi: NPM_POSITION_ABI,
+        functionName: "collect",
+        args: [
+          {
+            tokenId: BigInt(tokenId),
+            recipient: this.account.address,
+            amount0Max: UINT128_MAX,
+            amount1Max: UINT128_MAX,
+          },
+        ],
+        account: this.account.address,
+      });
+      const out0 = BigInt(
+        Array.isArray(sim.result)
+          ? sim.result[0]
+          : sim.result?.amount0 ?? sim.result?.[0] ?? 0n
+      );
+      const out1 = BigInt(
+        Array.isArray(sim.result)
+          ? sim.result[1]
+          : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
+      );
+      let usdcRaw = 0n;
+      let wethRaw = 0n;
+      if (sameAddress(token0, this.usdc)) usdcRaw = out0;
+      if (sameAddress(token1, this.usdc)) usdcRaw = out1;
+      if (sameAddress(token0, this.weth)) wethRaw = out0;
+      if (sameAddress(token1, this.weth)) wethRaw = out1;
+      const spot = this.getSpotUsdcPerWeth();
+      const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
+      const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+      return {
+        usdc,
+        weth,
+        usd: usdc + weth * spot,
+        isEstimated: false,
+      };
+    } catch {
+      return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    }
   }
 
   async readTokenBalance(tokenAddress) {
@@ -925,7 +1291,8 @@ class Uc6Bot {
       args: [spender, maxUint256],
       account: this.account,
     });
-    await this.publicClient.waitForTransactionReceipt({ hash });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    this.addTxToActiveAction("approve", hash, receipt);
   }
 
   priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot) {
@@ -1006,7 +1373,15 @@ class Uc6Bot {
           ...sim.request,
           account: this.account,
         });
-        await this.publicClient.waitForTransactionReceipt({ hash });
+        const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+        this.addTxToActiveAction("mint", hash, receipt);
+        this.addTxToActiveAction("swap", hash, receipt);
+        const spot = this.getSpotUsdcPerWeth();
+        const amountInUsd = this.toUsdForTokenAmountRaw(tokenIn, amountIn, spot);
+        const poolFeeFraction = Number(fee || 0) > 0 ? Number(fee) / 1_000_000 : 0;
+        const slippageFraction = Math.max(0, Number(slippageBps || 0)) / 10_000;
+        const estimatedSwapCostUsd = amountInUsd * (poolFeeFraction + slippageFraction);
+        this.addSwapCostToActiveAction(estimatedSwapCostUsd, true);
         return;
       } catch (err) {
         lastErr = err;
@@ -1041,10 +1416,20 @@ class Uc6Bot {
 
   parsePositionResult(pos) {
     if (!pos) return null;
+    const token0 = pos.token0 ?? pos[2] ?? null;
+    const token1 = pos.token1 ?? pos[3] ?? null;
+    const fee = Number(pos.fee ?? pos[4] ?? 0);
     const tickLower = Number(pos.tickLower ?? pos[5] ?? 0);
     const tickUpper = Number(pos.tickUpper ?? pos[6] ?? 0);
     const liquidity = BigInt(pos.liquidity ?? pos[7] ?? 0);
-    return { tickLower, tickUpper, liquidity };
+    return {
+      token0: token0 ? getAddress(token0) : null,
+      token1: token1 ? getAddress(token1) : null,
+      fee,
+      tickLower,
+      tickUpper,
+      liquidity,
+    };
   }
 
   extractMintedTokenId(receipt, npmAddress) {
@@ -1255,8 +1640,12 @@ class Uc6Bot {
         ],
         account: this.account,
       });
-      await this.publicClient.waitForTransactionReceipt({ hash: hashDec });
+      const recDec = await this.publicClient.waitForTransactionReceipt({ hash: hashDec });
+      this.addTxToActiveAction("decrease", hashDec, recDec);
     }
+
+    const preUsdc = await this.readTokenBalance(this.usdc);
+    const preWeth = await this.readTokenBalance(this.weth);
 
     await this.assertTxAllowed("close_collect");
     const hashCollect = await this.walletClient.writeContract({
@@ -1273,7 +1662,17 @@ class Uc6Bot {
       ],
       account: this.account,
     });
-    await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
+    const recCollect = await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
+    this.addTxToActiveAction("collect", hashCollect, recCollect);
+
+    const postUsdc = await this.readTokenBalance(this.usdc);
+    const postWeth = await this.readTokenBalance(this.weth);
+    const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
+    const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
+    const feesUsd =
+      Number(formatUnits(usdcDelta, USDC_DECIMALS)) +
+      Number(formatUnits(wethDelta, WETH_DECIMALS)) * this.getSpotUsdcPerWeth();
+    this.addFeesToActiveAction(feesUsd);
 
     try {
       await this.assertTxAllowed("close_burn");
@@ -1284,10 +1683,46 @@ class Uc6Bot {
         args: [id],
         account: this.account,
       });
-      await this.publicClient.waitForTransactionReceipt({ hash: hashBurn });
+      const recBurn = await this.publicClient.waitForTransactionReceipt({ hash: hashBurn });
+      this.addTxToActiveAction("burn", hashBurn, recBurn);
     } catch {
       // Burn can fail if dust remains; position is still closed if liquidity is zero.
     }
+  }
+
+  async collectPositionFees({ npmAddress, tokenId }) {
+    if (!tokenId) return { usdc: 0, weth: 0, usd: 0 };
+    await this.assertTxAllowed("harvest_collect");
+    const id = BigInt(tokenId);
+    const preUsdc = await this.readTokenBalance(this.usdc);
+    const preWeth = await this.readTokenBalance(this.weth);
+
+    const hashCollect = await this.walletClient.writeContract({
+      address: npmAddress,
+      abi: NPM_POSITION_ABI,
+      functionName: "collect",
+      args: [
+        {
+          tokenId: id,
+          recipient: this.account.address,
+          amount0Max: UINT128_MAX,
+          amount1Max: UINT128_MAX,
+        },
+      ],
+      account: this.account,
+    });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
+    this.addTxToActiveAction("collect", hashCollect, receipt);
+
+    const postUsdc = await this.readTokenBalance(this.usdc);
+    const postWeth = await this.readTokenBalance(this.weth);
+    const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
+    const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
+    const usdc = Number(formatUnits(usdcDelta, USDC_DECIMALS));
+    const weth = Number(formatUnits(wethDelta, WETH_DECIMALS));
+    const usd = usdc + weth * this.getSpotUsdcPerWeth();
+    this.addFeesToActiveAction(usd);
+    return { usdc, weth, usd };
   }
 
   async normalizeInventoryToUsdc({ router, fee, tickSpacing, snapshot }) {
@@ -1322,7 +1757,72 @@ class Uc6Bot {
       return { allowed: false, reason: "daily limit reached", remainingSec: null };
     }
 
+    const failureGate = this.getFailureCooldownGate();
+    if (!failureGate.allowed) {
+      return {
+        allowed: false,
+        reason: failureGate.reason,
+        remainingSec: failureGate.remainingSec,
+      };
+    }
+
+    if (this.settings.churnProtectionEnabled) {
+      const start24h = Date.now() - 24 * 60 * 60 * 1000;
+      const stats24h = this.summarizeEvents(this.getEventsSince(start24h));
+      const ratio = stats24h.churnRatio;
+      const maxRatio = Number(this.settings.churnMaxCostToFeeRatio || 0);
+      const shouldBlock =
+        !Number.isFinite(ratio) ? stats24h.totalCostsUsd > 0 : ratio > maxRatio;
+      if (shouldBlock) {
+        return {
+          allowed: false,
+          reason: `churn_protection ratio=${Number.isFinite(ratio) ? ratio.toFixed(2) : "inf"}`,
+          remainingSec: null,
+        };
+      }
+    }
+
     return { allowed: true, reason: "ok", remainingSec: 0 };
+  }
+
+  markRebalanceFailure(err, triggerReason) {
+    const now = Date.now();
+    const at = new Date(now).toISOString();
+    const cooldownSec = Math.max(0, Number(this.settings.failureCooldownSec || 0));
+    const untilIso = cooldownSec > 0 ? new Date(now + cooldownSec * 1000).toISOString() : null;
+
+    this.state.lastRebalanceAttemptAt = at;
+    this.state.lastRebalanceFailedAt = at;
+    this.state.rebalanceFailureCooldownUntil = untilIso;
+    this.state.consecutiveRebalanceFailures = Number(this.state.consecutiveRebalanceFailures || 0) + 1;
+    this.setLastError(err);
+    this.setDecision({
+      action: "failed",
+      reason: triggerReason,
+      error: err instanceof Error ? err.message : String(err || "unknown"),
+      txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
+      consecutiveRebalanceFailures: this.state.consecutiveRebalanceFailures,
+      failureCooldownUntil: untilIso,
+    });
+  }
+
+  markRebalanceSuccess(triggerReason, venue) {
+    const at = nowIso();
+    this.ensureDailyCounter();
+    this.state.lastRebalanceAttemptAt = at;
+    this.state.rebalancesToday = Number(this.state.rebalancesToday || 0) + 1;
+    this.state.lastRebalanceAt = at;
+    this.state.lastRebalanceFailedAt = null;
+    this.state.rebalanceFailureCooldownUntil = null;
+    this.state.consecutiveRebalanceFailures = 0;
+    this.state.pendingCompoundUsd = 0;
+    this.state.lastError = null;
+    this.setDecision({
+      action: "rebalanced",
+      reason: triggerReason,
+      venue,
+      txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
+    });
   }
 
   getPositionTrigger(currentTick) {
@@ -1389,6 +1889,39 @@ class Uc6Bot {
     }
   }
 
+  async maybeHarvestOnly() {
+    if (this.settings.compoundMode !== "threshold_harvest") return false;
+    const tokenId = this.state.position?.tokenId;
+    if (!tokenId) return false;
+    const collectable = this.state.latest?.collectableNow;
+    const collectableUsd = Number(collectable?.usd || 0);
+    if (collectableUsd < Number(this.settings.harvestThresholdUsd || 0)) return false;
+
+    const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
+    this.beginAction("harvest", "threshold_harvest");
+    try {
+      const collected = await this.collectPositionFees({ npmAddress: npm, tokenId });
+      this.state.pendingCompoundUsd = Number(this.state.pendingCompoundUsd || 0) + Number(collected.usd || 0);
+      this.setDecision({
+        action: "harvest",
+        reason: "threshold_harvest",
+        collectedUsd: Number(collected.usd || 0),
+        pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
+        txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
+      });
+      this.finalizeActiveAction("harvest", "threshold_harvest", {
+        note: "increaseLiquidity not implemented; collected fees kept as pending compound",
+      });
+      return true;
+    } catch (err) {
+      this.setLastError(err);
+      this.finalizeActiveAction("error", "harvest_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+      return false;
+    }
+  }
+
   async rebalanceSlipstream(snapshot) {
     const router = this.slipstreamRouter;
     const npm = this.slipstreamNpm;
@@ -1412,7 +1945,10 @@ class Uc6Bot {
     });
 
     const usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-    const keepReserveRaw = parseUnits(this.settings.keepUsdcReserve.toFixed(6), USDC_DECIMALS);
+    const walletSnapshot = this.state.latest?.wallet;
+    const totalValueUsd = Number(walletSnapshot?.valuesUsd?.total || 0);
+    const effectiveReserveUsdc = this.getEffectiveReserveTargetUsdc(totalValueUsd);
+    const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(6), USDC_DECIMALS);
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
 
     const freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
@@ -1493,21 +2029,26 @@ class Uc6Bot {
 
     if (this.settings.killSwitch) {
       this.setDecision({ action: "monitor", reason: "kill_switch_active", tradingEnabled: false, gate });
+      this.pushEvent({ type: "blocked", reason: "kill_switch_active" });
       return;
     }
 
     if (!this.settings.tradingEnabled) {
       this.setDecision({ action: "monitor", reason: trigger.reason, tradingEnabled: false, gate });
+      this.pushEvent({ type: "blocked", reason: "trading_disabled" });
       return;
     }
 
     if (!trigger.trigger) {
+      const harvested = await this.maybeHarvestOnly();
+      if (harvested) return;
       this.setDecision({ action: "monitor", reason: trigger.reason, edgeProgress: trigger.edgeProgress, gate });
       return;
     }
 
     if (!gate.allowed) {
       this.setDecision({ action: "skipped", reason: trigger.reason, gate });
+      this.pushEvent({ type: "blocked", reason: gate.reason });
       return;
     }
 
@@ -1520,11 +2061,17 @@ class Uc6Bot {
       return;
     }
 
-    await this.rebalanceSlipstream(primary);
-    this.ensureDailyCounter();
-    this.state.rebalancesToday = Number(this.state.rebalancesToday || 0) + 1;
-    this.state.lastRebalanceAt = nowIso();
-    this.setDecision({ action: "rebalanced", reason: trigger.reason, venue: "slipstream" });
+    this.beginAction("recenter", trigger.reason);
+    try {
+      await this.rebalanceSlipstream(primary);
+      this.markRebalanceSuccess(trigger.reason, "slipstream");
+      this.finalizeActiveAction("recenter", trigger.reason);
+    } catch (err) {
+      this.markRebalanceFailure(err, trigger.reason);
+      this.finalizeActiveAction("error", trigger.reason, {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+    }
   }
 
   async loopOnce() {
@@ -1532,6 +2079,11 @@ class Uc6Bot {
     await this.loadSettings(false);
     const snapshots = await this.refreshSnapshots();
     await this.reconcilePositionFromChain();
+    try {
+      this.state.latest.collectableNow = await this.collectableNowSnapshot();
+    } catch {
+      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    }
 
     const tokenId = this.state.position?.tokenId;
     if (tokenId && this.state.position?.tickLower != null && this.state.position?.tickUpper != null) {
@@ -1540,7 +2092,6 @@ class Uc6Bot {
     }
 
     await this.evaluateAndAct();
-    this.state.lastError = null;
   }
 
   async mainLoop() {
@@ -1567,6 +2118,67 @@ class Uc6Bot {
   statusPayload() {
     const gate = this.getRebalanceGate();
     const latest = this.state.latest || {};
+    const primary = latest.primary || null;
+    const fallback = latest.fallback || null;
+    const venueActive = this.settings.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const activePool = venueActive === "uniswapv3" ? fallback || primary : primary || fallback;
+    const selectorType = venueActive === "uniswapv3" ? "fee" : "tickSpacing";
+    const selectorValue = selectorType === "fee" ? Number(activePool?.fee || 0) : Number(activePool?.tickSpacing || 0);
+    const spotUsdcPerWeth = this.getSpotUsdcPerWeth();
+    const walletState = latest.wallet || {};
+    const walletUsdc = Number(walletState.usdc || 0);
+    const walletWeth = Number(walletState.weth || 0);
+    const walletEth = Number(walletState.eth || 0);
+    const walletValueUsd =
+      Number(walletState.valuesUsd?.total || 0) || walletUsdc + walletWeth * spotUsdcPerWeth + walletEth * spotUsdcPerWeth;
+
+    const pos = this.state.position || {};
+    const token0 = activePool?.token0 || this.weth;
+    const token1 = activePool?.token1 || this.usdc;
+    const tickLower = Number(pos.tickLower);
+    const tickUpper = Number(pos.tickUpper);
+    const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
+    const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
+    const lpAmountsRaw =
+      hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96
+        ? this.lpAmountsFromLiquidity(liquidityRaw, tickLower, tickUpper, BigInt(activePool.sqrtPriceX96), token0, token1)
+        : { usdcRaw: 0n, wethRaw: 0n };
+
+    const lpUsdc = Number(formatUnits(lpAmountsRaw.usdcRaw, USDC_DECIMALS));
+    const lpWeth = Number(formatUnits(lpAmountsRaw.wethRaw, WETH_DECIMALS));
+    const lpUsdValue = lpUsdc + lpWeth * spotUsdcPerWeth;
+    const sideUsd = {
+      usdc: lpUsdc,
+      weth: lpWeth * spotUsdcPerWeth,
+    };
+
+    const distance = this.distanceToEdge(pos, Number(activePool?.tick ?? 0));
+    const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(walletValueUsd + lpUsdValue);
+    const reserveTargetUsd = reserveTargetUsdc;
+    const portfolioTotalUsd = walletValueUsd + lpUsdValue;
+    const deployedPct = portfolioTotalUsd > 0 ? (lpUsdValue / portfolioTotalUsd) * 100 : 0;
+
+    const now = Date.now();
+    const todayStart = Date.parse(`${utcDayKey()}T00:00:00.000Z`);
+    const events24h = this.getEventsSince(now - 24 * 60 * 60 * 1000);
+    const events7d = this.getEventsSince(now - 7 * 24 * 60 * 60 * 1000);
+    const events30d = this.getEventsSince(now - 30 * 24 * 60 * 60 * 1000);
+    const eventsToday = this.getEventsSince(todayStart);
+    const eventsAll = this.getEventsSince(null);
+    const todayStats = this.summarizeEvents(eventsToday);
+    const stats24h = this.summarizeEvents(events24h);
+    const stats7d = this.summarizeEvents(events7d);
+    const stats30d = this.summarizeEvents(events30d);
+    const statsAll = this.summarizeEvents(eventsAll);
+
+    const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    const avgCapitalToday = lpUsdValue > 0 ? lpUsdValue : 1;
+    const avgCapital7d = lpUsdValue > 0 ? lpUsdValue : 1;
+    const avgCapital30d = lpUsdValue > 0 ? lpUsdValue : 1;
+    const aprToday = lpUsdValue > 0 ? (todayStats.netUsd / avgCapitalToday) * 365 : null;
+    const apr7d = lpUsdValue > 0 ? (stats7d.netUsd / avgCapital7d) * 365 : null;
+    const apr30d = events30d.length > 0 && lpUsdValue > 0 ? (stats30d.netUsd / avgCapital30d) * 365 : null;
+    const churnRatioToday = Number.isFinite(todayStats.churnRatio) ? todayStats.churnRatio : null;
 
     return {
       ok: true,
@@ -1575,17 +2187,135 @@ class Uc6Bot {
       account: this.account.address,
       tradingEnabled: this.settings.tradingEnabled && !this.settings.killSwitch,
       killSwitch: Boolean(this.settings.killSwitch),
-      settings: this.settings,
       market: {
-        primary: latest.primary,
-        fallback: latest.fallback,
+        chain: { name: "Base", chainId: base.id },
+        venueActive,
+        pair: { base: "WETH", quote: "USDC" },
+        selector: { type: selectorType, value: selectorValue },
+        poolAddress: activePool?.pool || null,
+        spotPrice: {
+          usdcPerWeth: spotUsdcPerWeth,
+          updatedAtIso: activePool?.updatedAt || null,
+        },
+        tick: {
+          current: Number(activePool?.tick ?? 0),
+          spacing: Number(activePool?.tickSpacing ?? 0),
+        },
+        primary,
+        fallback,
       },
-      wallet: latest.wallet,
-      position: this.state.position,
+      settings: {
+        tradingEnabled: this.settings.tradingEnabled,
+        killSwitch: this.settings.killSwitch,
+        venue: this.settings.venue,
+        bandHalfBps: this.settings.bandHalfBps,
+        edgeRebalancePct: this.settings.edgeRebalancePct,
+        minRebalanceIntervalSec: this.settings.minRebalanceIntervalSec,
+        maxRebalancesPerDay: this.settings.maxRebalancesPerDay,
+        slippageBps: this.settings.slippageBps,
+        pollIntervalMs: this.settings.pollIntervalMs,
+        maxDeployUsdc: this.settings.maxDeployUsdc,
+        reservePolicy: {
+          minUsdc: this.settings.reserveMinUsdc,
+          pct: this.settings.reservePct,
+          maxUsdc: this.settings.reserveMaxUsdc,
+          effectiveTargetUsdc: reserveTargetUsdc,
+        },
+        compoundMode: this.settings.compoundMode,
+        harvestThresholdUsd: this.settings.harvestThresholdUsd,
+        failureCooldownSec: this.settings.failureCooldownSec,
+        churnProtection: {
+          enabled: this.settings.churnProtectionEnabled,
+          maxCostToFeeRatio: this.settings.churnMaxCostToFeeRatio,
+          currentRatioToday: churnRatioToday,
+        },
+        keepUsdcReserve: this.settings.keepUsdcReserve,
+      },
+      position: {
+        tokenId: pos.tokenId || null,
+        tickLower: pos.tickLower ?? null,
+        tickUpper: pos.tickUpper ?? null,
+        centerTick: pos.centerTick ?? null,
+        inRange: Boolean(pos.inRange),
+        distanceToEdge: distance,
+        liquidity: pos.liquidity || null,
+        amountsInLP: {
+          usdc: lpUsdc,
+          weth: lpWeth,
+          usdValue: lpUsdValue,
+          sideUsd,
+        },
+      },
+      wallet: {
+        balances: {
+          usdc: walletUsdc,
+          weth: walletWeth,
+          eth: walletEth,
+        },
+        valuesUsd: {
+          usdc: walletUsdc,
+          weth: walletWeth * spotUsdcPerWeth,
+          eth: walletEth * spotUsdcPerWeth,
+          total: walletValueUsd,
+        },
+        allocationUsd: {
+          idle: walletValueUsd,
+          lpDeployed: lpUsdValue,
+          reserveTarget: reserveTargetUsd,
+        },
+        deployedPct,
+      },
+      fees: {
+        collectableNow,
+        collectedTodayUsd: todayStats.feesUsd,
+        collected7dUsd: stats7d.feesUsd,
+        collectedTotalUsd: statsAll.feesUsd,
+        pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
+      },
+      costs: {
+        gasTodayUsd: todayStats.gasUsd,
+        gas7dUsd: stats7d.gasUsd,
+        gasTotalUsd: statsAll.gasUsd,
+        swapCostsTodayUsd: todayStats.swapCostsUsd,
+        swapCosts7dUsd: stats7d.swapCostsUsd,
+        swapCostsTotalUsd: statsAll.swapCostsUsd,
+        mintBurnTodayUsd: todayStats.mintBurnUsd,
+        mintBurn7dUsd: stats7d.mintBurnUsd,
+        mintBurnTotalUsd: statsAll.mintBurnUsd,
+        totalTodayUsd: todayStats.totalCostsUsd,
+        total7dUsd: stats7d.totalCostsUsd,
+        totalTotalUsd: statsAll.totalCostsUsd,
+      },
+      pnl: {
+        netTodayUsd: todayStats.netUsd,
+        net7dUsd: stats7d.netUsd,
+        netTotalUsd: statsAll.netUsd,
+        aprToday,
+        apr7d,
+        apr30d,
+      },
+      ops: {
+        rebalancesToday: this.state.rebalancesToday,
+        rebalances24h: stats24h.rebalances,
+        rebalances7d: stats7d.rebalances,
+        churnRatioToday,
+        lastRebalanceAtIso: this.state.lastRebalanceAt,
+        cooldownRemainingSec: gate.remainingSec,
+        lastDecision: this.state.lastDecision,
+        lastError: this.parseLastErrorObject(),
+      },
+      events: {
+        lastN: eventsAll.slice(-50),
+      },
+      // Backward-compatible mirrors:
       counters: {
         dayKey: this.state.dayKey,
         rebalancesToday: this.state.rebalancesToday,
         lastRebalanceAt: this.state.lastRebalanceAt,
+        lastRebalanceAttemptAt: this.state.lastRebalanceAttemptAt,
+        lastRebalanceFailedAt: this.state.lastRebalanceFailedAt,
+        rebalanceFailureCooldownUntil: this.state.rebalanceFailureCooldownUntil,
+        consecutiveRebalanceFailures: Number(this.state.consecutiveRebalanceFailures || 0),
         canRebalanceNow: gate.allowed,
         reason: gate.reason,
       },

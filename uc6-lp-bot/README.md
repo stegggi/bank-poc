@@ -52,6 +52,7 @@ cp /opt/uc6-bot/app/.env.example /opt/uc6-bot/.env
   "version": 1,
   "tradingEnabled": true,
   "killSwitch": false,
+  "failureCooldownSec": 900,
   "venue": "slipstream",
   "bandHalfBps": 100,
   "edgeRebalancePct": 0.85,
@@ -60,11 +61,21 @@ cp /opt/uc6-bot/app/.env.example /opt/uc6-bot/.env
   "slippageBps": 30,
   "pollIntervalMs": 2000,
   "maxDeployUsdc": 50000,
-  "keepUsdcReserve": 25
+  "reserveMinUsdc": 25,
+  "reservePct": 0,
+  "reserveMaxUsdc": 0,
+  "compoundMode": "on_rebalance",
+  "harvestThresholdUsd": 30,
+  "churnProtectionEnabled": false,
+  "churnMaxCostToFeeRatio": 0.4
 }
 ```
 
 If `killSwitch` is `true`, the bot force-disables trading and rejects tx attempts.
+
+If a rebalance fails, bot enters a failure cooldown (`failureCooldownSec`) and blocks further rebalance attempts until cooldown expires.
+
+Reserve target is computed as `max(reserveMinUsdc, reservePct * portfolioValueUsd)` and capped by `reserveMaxUsdc` when `reserveMaxUsdc > 0`.
 
 4. Install systemd unit and start
 ```bash
@@ -91,11 +102,14 @@ curl http://35.205.209.20:8797/status
 Set kill switch from VM (hot-reloads):
 
 ```bash
-tmp="$(mktemp)"
-sudo jq '.killSwitch=true | .tradingEnabled=false' /opt/uc6-bot/settings.json | sudo tee "$tmp" >/dev/null
-sudo mv "$tmp" /opt/uc6-bot/settings.json
-sudo chown uc6:uc6 /opt/uc6-bot/settings.json
-sudo chmod 600 /opt/uc6-bot/settings.json
+sudo bash -c '
+set -euo pipefail
+tmp=$(mktemp /opt/uc6-bot/settings.XXXXXX)
+jq ".killSwitch=true | .tradingEnabled=false" /opt/uc6-bot/settings.json > "$tmp"
+mv "$tmp" /opt/uc6-bot/settings.json
+chown uc6:uc6 /opt/uc6-bot/settings.json
+chmod 600 /opt/uc6-bot/settings.json
+'
 ```
 
 To intentionally clear kill switch later, set `UC6_ALLOW_KILL_SWITCH_RESET=true` in `/opt/uc6-bot/.env` and use owner settings update.
