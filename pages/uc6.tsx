@@ -518,6 +518,21 @@ export default function Uc6Page() {
     }
   }, [draft, submitOwnerUpdate]);
 
+  const enableTrading = useCallback(async () => {
+    if (!draft) return;
+    setError("");
+    setNotice("");
+    setBusy("enable-trading");
+    try {
+      const payload = buildPayload({ ...draft, killSwitch: false, tradingEnabled: true });
+      await submitOwnerUpdate(payload, "Trading enabled");
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to enable trading.");
+    } finally {
+      setBusy("");
+    }
+  }, [draft, submitOwnerUpdate]);
+
   const updateNumber = useCallback((key: keyof Uc6DraftSettings, value: string) => {
     const num = Number(value);
     setDraft((prev) => {
@@ -562,7 +577,10 @@ export default function Uc6Page() {
               {walletAddress ? "Reconnect MetaMask" : "Connect MetaMask"}
             </button>
             <button style={styles.buttonSecondary} onClick={switchToBase} disabled={busy !== "" || !walletAddress || isBase}>
-              Switch To Base
+              {isBase ? "On Base" : "Switch To Base"}
+            </button>
+            <button style={styles.buttonSuccess} onClick={enableTrading} disabled={busy !== "" || !isOwner || !draft}>
+              Enable Trading
             </button>
             <button style={styles.buttonDanger} onClick={emergencyStop} disabled={busy !== "" || !isOwner || !draft || draft.killSwitch}>
               Emergency Stop
@@ -760,6 +778,9 @@ export default function Uc6Page() {
             <div style={styles.row}>
               <button style={styles.button} onClick={saveSettings} disabled={busy !== ""}>
                 Save Settings
+              </button>
+              <button style={styles.buttonSuccess} onClick={enableTrading} disabled={busy !== "" || draft.tradingEnabled}>
+                Enable Trading
               </button>
               <button style={styles.buttonDanger} onClick={emergencyStop} disabled={busy !== "" || draft.killSwitch}>
                 Emergency Stop
@@ -964,6 +985,15 @@ const styles: Record<string, CSSProperties> = {
   buttonDanger: {
     border: "1px solid #8a1010",
     background: "#b91c1c",
+    color: "#fff",
+    borderRadius: 8,
+    padding: "8px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
+  buttonSuccess: {
+    border: "1px solid #0f5132",
+    background: "#198754",
     color: "#fff",
     borderRadius: 8,
     padding: "8px 14px",
