@@ -1927,6 +1927,7 @@ class Uc6Bot {
     const npm = this.slipstreamNpm;
 
     const currentTokenId = this.state.position?.tokenId;
+    let closedExistingPosition = false;
     if (currentTokenId) {
       await this.closePosition({ npmAddress: npm, tokenId: currentTokenId });
       this.state.position = {
@@ -1935,14 +1936,19 @@ class Uc6Bot {
         liquidity: null,
         inRange: null,
       };
+      closedExistingPosition = true;
     }
 
-    await this.normalizeInventoryToUsdc({
-      router,
-      fee: snapshot.fee,
-      tickSpacing: snapshot.tickSpacing,
-      snapshot,
-    });
+    // Only normalize after closing an existing position. When opening from a failed prior attempt,
+    // keep inventory mix to avoid repeated back-and-forth swaps.
+    if (closedExistingPosition) {
+      await this.normalizeInventoryToUsdc({
+        router,
+        fee: snapshot.fee,
+        tickSpacing: snapshot.tickSpacing,
+        snapshot,
+      });
+    }
 
     const usdcBalanceRaw = await this.readTokenBalance(this.usdc);
     const walletSnapshot = this.state.latest?.wallet;
@@ -1957,7 +1963,8 @@ class Uc6Bot {
       throw new Error("No deployable USDC after reserve and maxDeploy limits");
     }
 
-    const swapIn = deployableUsdcRaw / 2n;
+    // Move only part of USDC to WETH. Use ceil division so small deploy amounts still get some WETH.
+    const swapIn = (deployableUsdcRaw + 1n) / 2n;
     if (swapIn > 0n) {
       await this.swapExactInputSingle({
         router,
@@ -1974,12 +1981,61 @@ class Uc6Bot {
     const usdcAfter = await this.readTokenBalance(this.usdc);
     const wethAfter = await this.readTokenBalance(this.weth);
 
-    const usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
-    const usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
-    const wethToUse = wethAfter;
+    let usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
+    let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+    let wethToUse = wethAfter;
+
+    // Recovery path: if one side is unexpectedly empty, do a one-shot top-up swap.
+    if ((usdcToUse <= 0n || wethToUse <= 0n) && (usdcAfter > 0n || wethAfter > 0n)) {
+      if (wethToUse <= 0n && usdcToUse > 0n) {
+        const topUpUsdcIn = usdcToUse / 4n;
+        if (topUpUsdcIn > 0n) {
+          await this.swapExactInputSingle({
+            router,
+            tokenIn: this.usdc,
+            tokenOut: this.weth,
+            amountIn: topUpUsdcIn,
+            slippageBps: this.settings.slippageBps,
+            fee: snapshot.fee,
+            tickSpacing: snapshot.tickSpacing,
+            snapshot,
+          });
+        }
+      } else if (usdcToUse <= 0n && wethToUse > 0n) {
+        const topUpWethIn = wethToUse / 4n;
+        if (topUpWethIn > 0n) {
+          await this.swapExactInputSingle({
+            router,
+            tokenIn: this.weth,
+            tokenOut: this.usdc,
+            amountIn: topUpWethIn,
+            slippageBps: this.settings.slippageBps,
+            fee: snapshot.fee,
+            tickSpacing: snapshot.tickSpacing,
+            snapshot,
+          });
+        }
+      }
+
+      const usdcRetry = await this.readTokenBalance(this.usdc);
+      const wethRetry = await this.readTokenBalance(this.weth);
+      usdcSpendable = usdcRetry > keepReserveRaw ? usdcRetry - keepReserveRaw : 0n;
+      usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+      wethToUse = wethRetry;
+    }
 
     if (usdcToUse <= 0n || wethToUse <= 0n) {
-      throw new Error("Insufficient dual-asset balances for LP mint");
+      const diag = {
+        reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
+        maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
+        usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
+        wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
+        usdcSpendable: Number(formatUnits(usdcSpendable, USDC_DECIMALS)),
+        usdcToUse: Number(formatUnits(usdcToUse > 0n ? usdcToUse : 0n, USDC_DECIMALS)),
+        wethToUse: Number(formatUnits(wethToUse > 0n ? wethToUse : 0n, WETH_DECIMALS)),
+        spot: this.getSpotUsdcPerWeth(),
+      };
+      throw new Error(`Insufficient dual-asset balances for LP mint ${JSON.stringify(diag)}`);
     }
 
     const token0 = snapshot.token0;
