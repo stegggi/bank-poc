@@ -442,8 +442,18 @@ async function ensureDir(dir) {
 async function readJsonIfExists(filePath) {
   try {
     const text = await fsp.readFile(filePath, "utf8");
+    if (!text || !text.trim()) return null;
     return JSON.parse(text);
   } catch (err) {
+    if (err instanceof SyntaxError) {
+      try {
+        const badPath = `${filePath}.bad-${Date.now()}`;
+        await fsp.rename(filePath, badPath);
+      } catch {
+        // ignore backup move errors
+      }
+      return null;
+    }
     if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") {
       return null;
     }
@@ -669,11 +679,30 @@ class Uc6Bot {
 
   async init() {
     await ensureDir(ENV.dataDir);
-    await this.loadSettings(true);
-    await this.loadState();
-    await this.refreshSnapshots();
-    await this.reconcilePositionFromChain();
-    await this.persistState();
+    try {
+      await this.loadSettings(true);
+    } catch (err) {
+      this.settings = { ...DEFAULT_SETTINGS };
+      this.setLastError(err);
+    }
+
+    try {
+      await this.loadState();
+    } catch (err) {
+      this.state = defaultState(this.account.address);
+      this.setLastError(err);
+    }
+
+    try {
+      await this.refreshSnapshots();
+      await this.reconcilePositionFromChain();
+    } catch (err) {
+      this.setLastError(err);
+    }
+
+    await this.persistState().catch((err) => {
+      this.setLastError(err);
+    });
   }
 
   async loadSettings(force = false) {
