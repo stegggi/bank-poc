@@ -248,6 +248,9 @@ const NPM_MINT_ABI_TICK = [
       { name: "amount1", type: "uint256" },
     ],
   },
+];
+
+const NPM_MINT_ABI_TICK_WITH_PRICE = [
   {
     name: "mint",
     type: "function",
@@ -1020,6 +1023,7 @@ class Uc6Bot {
 
     const candidates = [
       {
+        name: "mint-fee",
         abi: NPM_MINT_ABI_FEE,
         args: [
           {
@@ -1038,6 +1042,7 @@ class Uc6Bot {
         ],
       },
       {
+        name: "mint-tickSpacing",
         abi: NPM_MINT_ABI_TICK,
         args: [
           {
@@ -1056,7 +1061,8 @@ class Uc6Bot {
         ],
       },
       {
-        abi: NPM_MINT_ABI_TICK,
+        name: "mint-tickSpacing-sqrtPrice",
+        abi: NPM_MINT_ABI_TICK_WITH_PRICE,
         args: [
           {
             token0,
@@ -1077,6 +1083,7 @@ class Uc6Bot {
     ];
 
     let lastErr = null;
+    const errors = [];
     for (const candidate of candidates) {
       try {
         const sim = await this.publicClient.simulateContract({
@@ -1118,10 +1125,19 @@ class Uc6Bot {
         };
       } catch (err) {
         lastErr = err;
+        errors.push(
+          `${candidate.name}: ${err instanceof Error ? err.message : String(err || "unknown")}`
+        );
       }
     }
 
-    throw new Error(`Mint failed: ${lastErr instanceof Error ? lastErr.message : String(lastErr || "unknown")}`);
+    const tail =
+      errors.length > 0 ? ` | candidates => ${errors.join(" || ")}` : "";
+    throw new Error(
+      `Mint failed: ${
+        lastErr instanceof Error ? lastErr.message : String(lastErr || "unknown")
+      }${tail}`
+    );
   }
 
   async closePosition({ npmAddress, tokenId }) {
