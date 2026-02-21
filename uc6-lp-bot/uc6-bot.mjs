@@ -26,7 +26,7 @@ const USDC_DECIMALS = 6;
 const WETH_DECIMALS = 18;
 const Q96 = 2n ** 96n;
 const UINT128_MAX = (2n ** 128n) - 1n;
-const EVENT_RING_LIMIT = 50;
+const EVENT_RING_LIMIT = 5;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",

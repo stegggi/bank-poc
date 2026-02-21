@@ -534,7 +534,7 @@ export default function Uc6Page() {
   }, []);
 
   const decision = (status?.ops?.lastDecision || status?.lastDecision || {}) as Record<string, unknown>;
-  const events = (status?.events?.lastN || []).slice(-20).reverse();
+  const events = (status?.events?.lastN || []).slice(-5).reverse();
   const inRange = Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
   const bandPct = n(status?.settings?.bandHalfBps, 0) / 100;
