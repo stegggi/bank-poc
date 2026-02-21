@@ -25,6 +25,7 @@ export default function NavBar({ active }: NavBarProps) {
   const isKyc = active === "kyc-badge";
   const isUc4 = active === "uc4" || active === "context-vault";
   const isUc5 = active === "uc5";
+  const isUc6 = active === "uc6";
 
   const groups = useMemo<
     Array<{
@@ -84,10 +85,18 @@ export default function NavBar({ active }: NavBarProps) {
           pills: [{ href: "/uc5", label: "State demo", on: isUc5 }],
         },
       },
+      {
+        uc: "UC6",
+        title: "LP automation",
+        items: {
+          kind: "pills",
+          pills: [{ href: "/uc6", label: "UC6: LP Bot", on: isUc6 }],
+        },
+      },
 
       // Placeholders (disabled so they don’t navigate)
     ],
-    [active, isBankA, isBankB, isKyc, isUc4, isUc5]
+    [active, isBankA, isBankB, isKyc, isUc4, isUc5, isUc6]
   );
 
   return (

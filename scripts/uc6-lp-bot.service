@@ -1,0 +1,25 @@
+[Unit]
+Description=UC6 LP Bot (Base Slipstream)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=uc6
+Group=uc6
+WorkingDirectory=/opt/uc6-bot/app
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node --env-file=/opt/uc6-bot/.env /opt/uc6-bot/app/uc6-bot.mjs
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/uc6-bot
+MemoryMax=350M
+CPUQuota=25%
+LimitNOFILE=4096
+
+[Install]
+WantedBy=multi-user.target

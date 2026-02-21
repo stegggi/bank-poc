@@ -1,0 +1,19 @@
+{
+  "name": "uc6-lp-bot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "UC6 LP Bot (Base mainnet, Slipstream primary)",
+  "main": "uc6-bot.mjs",
+  "scripts": {
+    "start": "node uc6-bot.mjs",
+    "check": "node --check uc6-bot.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "ethers": "^6.15.0",
+    "viem": "^2.40.2"
+  }
+}
