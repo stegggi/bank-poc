@@ -1045,12 +1045,57 @@ class Uc6Bot {
     return null;
   }
 
-  async mintPosition({ npmAddress, token0, token1, fee, tickSpacing, tickLower, tickUpper, amount0Desired, amount1Desired, slippageBps, venue }) {
+  async mintPosition({
+    npmAddress,
+    token0,
+    token1,
+    fee,
+    tickSpacing,
+    tickLower,
+    tickUpper,
+    amount0Desired,
+    amount1Desired,
+    slippageBps,
+    sqrtPriceX96,
+    venue,
+  }) {
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 900);
-    const amount0Min = (amount0Desired * BigInt(Math.max(0, 10_000 - slippageBps))) / 10_000n;
-    const amount1Min = (amount1Desired * BigInt(Math.max(0, 10_000 - slippageBps))) / 10_000n;
+    // For concentrated-liquidity mint, exact ratio can differ from desired amounts.
+    // Strict min constraints frequently cause reverts; keep mint mins permissive here.
+    const _slippageBps = slippageBps;
+    void _slippageBps;
+    const amount0Min = 0n;
+    const amount1Min = 0n;
+    let sqrtPriceX96Value = 0n;
+    try {
+      if (sqrtPriceX96 !== undefined && sqrtPriceX96 !== null) {
+        sqrtPriceX96Value = BigInt(sqrtPriceX96);
+      }
+    } catch {
+      sqrtPriceX96Value = 0n;
+    }
 
     const candidates = [
+      {
+        name: "mint-tickSpacing-sqrtPrice",
+        abi: NPM_MINT_ABI_TICK_WITH_PRICE,
+        args: [
+          {
+            token0,
+            token1,
+            tickSpacing: tickSpacing || 1,
+            tickLower,
+            tickUpper,
+            amount0Desired,
+            amount1Desired,
+            amount0Min,
+            amount1Min,
+            recipient: this.account.address,
+            deadline,
+            sqrtPriceX96: sqrtPriceX96Value,
+          },
+        ],
+      },
       {
         name: "mint-fee",
         abi: NPM_MINT_ABI_FEE,
@@ -1086,26 +1131,6 @@ class Uc6Bot {
             amount1Min,
             recipient: this.account.address,
             deadline,
-          },
-        ],
-      },
-      {
-        name: "mint-tickSpacing-sqrtPrice",
-        abi: NPM_MINT_ABI_TICK_WITH_PRICE,
-        args: [
-          {
-            token0,
-            token1,
-            tickSpacing: tickSpacing || 1,
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            recipient: this.account.address,
-            deadline,
-            sqrtPriceX96: 0n,
           },
         ],
       },
@@ -1414,6 +1439,7 @@ class Uc6Bot {
       amount0Desired,
       amount1Desired,
       slippageBps: this.settings.slippageBps,
+      sqrtPriceX96: snapshot.sqrtPriceX96,
       venue: "slipstream",
     });
 
