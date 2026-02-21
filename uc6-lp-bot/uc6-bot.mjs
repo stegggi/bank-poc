@@ -1962,17 +1962,43 @@ class Uc6Bot {
       });
     }
 
-    const usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+    let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+    let wethBalanceRaw = await this.readTokenBalance(this.weth);
     const walletSnapshot = this.state.latest?.wallet;
     const totalValueUsd = Number(walletSnapshot?.valuesUsd?.total || 0);
     const effectiveReserveUsdc = this.getEffectiveReserveTargetUsdc(totalValueUsd);
     const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(6), USDC_DECIMALS);
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
 
-    const freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
-    const deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+    let freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+    let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+    if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
+      // If wallet drifted to WETH while no position exists, restore deployable USDC once.
+      await this.swapExactInputSingle({
+        router,
+        tokenIn: this.weth,
+        tokenOut: this.usdc,
+        amountIn: wethBalanceRaw,
+        slippageBps: this.settings.slippageBps,
+        fee: snapshot.fee,
+        tickSpacing: snapshot.tickSpacing,
+        snapshot,
+      });
+      usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+      wethBalanceRaw = await this.readTokenBalance(this.weth);
+      freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+      deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+    }
     if (deployableUsdcRaw <= 0n) {
-      throw new Error("No deployable USDC after reserve and maxDeploy limits");
+      throw new Error(
+        `No deployable USDC after reserve and maxDeploy limits ${JSON.stringify({
+          reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
+          maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
+          usdcBalance: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
+          wethBalance: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
+          freeUsdc: Number(formatUnits(freeUsdcRaw, USDC_DECIMALS)),
+        })}`
+      );
     }
 
     // Move only part of USDC to WETH. Use ceil division so small deploy amounts still get some WETH.
