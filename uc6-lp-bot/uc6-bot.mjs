@@ -129,7 +129,7 @@ const NPM_POSITION_ABI = [
       { name: "operator", type: "address" },
       { name: "token0", type: "address" },
       { name: "token1", type: "address" },
-      { name: "fee", type: "uint24" },
+      { name: "tickSpacing", type: "int24" },
       { name: "tickLower", type: "int24" },
       { name: "tickUpper", type: "int24" },
       { name: "liquidity", type: "uint128" },
@@ -1417,14 +1417,15 @@ class Uc6Bot {
     if (!pos) return null;
     const token0 = pos.token0 ?? pos[2] ?? null;
     const token1 = pos.token1 ?? pos[3] ?? null;
-    const fee = Number(pos.fee ?? pos[4] ?? 0);
+    const selector = Number(pos.tickSpacing ?? pos.fee ?? pos[4] ?? 0);
     const tickLower = Number(pos.tickLower ?? pos[5] ?? 0);
     const tickUpper = Number(pos.tickUpper ?? pos[6] ?? 0);
     const liquidity = BigInt(pos.liquidity ?? pos[7] ?? 0);
     return {
       token0: token0 ? getAddress(token0) : null,
       token1: token1 ? getAddress(token1) : null,
-      fee,
+      fee: selector,
+      tickSpacing: selector,
       tickLower,
       tickUpper,
       liquidity,
@@ -1480,66 +1481,77 @@ class Uc6Bot {
       sqrtPriceX96Value = 0n;
     }
 
-    const candidates = [
-      {
-        name: "mint-tickSpacing-sqrtPrice",
-        abi: NPM_MINT_ABI_TICK_WITH_PRICE,
-        args: [
-          {
-            token0,
-            token1,
-            tickSpacing: tickSpacing || 1,
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            recipient: this.account.address,
-            deadline,
-            sqrtPriceX96: sqrtPriceX96Value,
-          },
-        ],
-      },
-      {
-        name: "mint-fee",
-        abi: NPM_MINT_ABI_FEE,
-        args: [
-          {
-            token0,
-            token1,
-            fee: Math.max(1, fee || 3000),
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            recipient: this.account.address,
-            deadline,
-          },
-        ],
-      },
-      {
-        name: "mint-tickSpacing",
-        abi: NPM_MINT_ABI_TICK,
-        args: [
-          {
-            token0,
-            token1,
-            tickSpacing: tickSpacing || 1,
-            tickLower,
-            tickUpper,
-            amount0Desired,
-            amount1Desired,
-            amount0Min,
-            amount1Min,
-            recipient: this.account.address,
-            deadline,
-          },
-        ],
-      },
-    ];
+    let candidates = [];
+    if (venue === "slipstream") {
+      // Slipstream NPM mint signature includes sqrtPriceX96.
+      // For existing pools, pass 0 to avoid createPool path.
+      candidates = [
+        {
+          name: "mint-slipstream-existing-pool",
+          abi: NPM_MINT_ABI_TICK_WITH_PRICE,
+          args: [
+            {
+              token0,
+              token1,
+              tickSpacing: tickSpacing || 1,
+              tickLower,
+              tickUpper,
+              amount0Desired,
+              amount1Desired,
+              amount0Min,
+              amount1Min,
+              recipient: this.account.address,
+              deadline,
+              sqrtPriceX96: 0n,
+            },
+          ],
+        },
+      ];
+      if (sqrtPriceX96Value > 0n) {
+        candidates.push({
+          name: "mint-slipstream-init-pool",
+          abi: NPM_MINT_ABI_TICK_WITH_PRICE,
+          args: [
+            {
+              token0,
+              token1,
+              tickSpacing: tickSpacing || 1,
+              tickLower,
+              tickUpper,
+              amount0Desired,
+              amount1Desired,
+              amount0Min,
+              amount1Min,
+              recipient: this.account.address,
+              deadline,
+              sqrtPriceX96: sqrtPriceX96Value,
+            },
+          ],
+        });
+      }
+    } else {
+      candidates = [
+        {
+          name: "mint-uniswap-fee",
+          abi: NPM_MINT_ABI_FEE,
+          args: [
+            {
+              token0,
+              token1,
+              fee: Math.max(1, fee || 3000),
+              tickLower,
+              tickUpper,
+              amount0Desired,
+              amount1Desired,
+              amount0Min,
+              amount1Min,
+              recipient: this.account.address,
+              deadline,
+            },
+          ],
+        },
+      ];
+    }
 
     let lastErr = null;
     const errors = [];
