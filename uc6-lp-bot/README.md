@@ -18,6 +18,7 @@ Additional protections:
 - in-memory rate limit (`20 req/min/IP`) on bot owner endpoints
 - one-time nonce replay protection on the bot
 - settings are persisted atomically to `/opt/uc6-bot/settings.json`
+- hard kill switch (`settings.killSwitch`) blocks all tx paths even if the loop is running
 
 ## Files on VM
 
@@ -42,6 +43,7 @@ cp /opt/uc6-bot/app/.env.example /opt/uc6-bot/.env
 # - UC6_PRIVATE_KEY
 # - UC6_ADMIN_TOKEN
 # - UC6_OWNER_ADDRESS
+# - optional: UC6_ALLOW_KILL_SWITCH_RESET=false
 ```
 
 3. Create default `/opt/uc6-bot/settings.json`
@@ -49,6 +51,7 @@ cp /opt/uc6-bot/app/.env.example /opt/uc6-bot/.env
 {
   "version": 1,
   "tradingEnabled": true,
+  "killSwitch": false,
   "venue": "slipstream",
   "bandHalfBps": 100,
   "edgeRebalancePct": 0.85,
@@ -60,6 +63,8 @@ cp /opt/uc6-bot/app/.env.example /opt/uc6-bot/.env
   "keepUsdcReserve": 25
 }
 ```
+
+If `killSwitch` is `true`, the bot force-disables trading and rejects tx attempts.
 
 4. Install systemd unit and start
 ```bash
@@ -80,6 +85,20 @@ curl http://35.205.209.20:8797/status
 - `UC6_BOT_ADMIN_TOKEN=<same as VM UC6_ADMIN_TOKEN>`
 - `UC6_OWNER_ADDRESS=<owner wallet>`
 - `NEXT_PUBLIC_UC6_OWNER_ADDRESS=<same owner wallet>`
+
+## Emergency stop
+
+Set kill switch from VM (hot-reloads):
+
+```bash
+tmp="$(mktemp)"
+sudo jq '.killSwitch=true | .tradingEnabled=false' /opt/uc6-bot/settings.json | sudo tee "$tmp" >/dev/null
+sudo mv "$tmp" /opt/uc6-bot/settings.json
+sudo chown uc6:uc6 /opt/uc6-bot/settings.json
+sudo chmod 600 /opt/uc6-bot/settings.json
+```
+
+To intentionally clear kill switch later, set `UC6_ALLOW_KILL_SWITCH_RESET=true` in `/opt/uc6-bot/.env` and use owner settings update.
 
 ## Local check
 

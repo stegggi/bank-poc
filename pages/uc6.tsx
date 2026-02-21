@@ -17,6 +17,7 @@ type Uc6Venue = "slipstream" | "uniswapv3";
 
 type Uc6Settings = {
   tradingEnabled: boolean;
+  killSwitch: boolean;
   venue: Uc6Venue;
   bandHalfBps: number;
   edgeRebalancePct: number;
@@ -28,13 +29,14 @@ type Uc6Settings = {
   keepUsdcReserve: number;
 };
 
-type NumericSettingKey = Exclude<keyof Uc6Settings, "tradingEnabled" | "venue">;
+type NumericSettingKey = Exclude<keyof Uc6Settings, "tradingEnabled" | "killSwitch" | "venue">;
 
 type Uc6Status = {
   ok?: boolean;
   ts?: string;
   account?: string;
   tradingEnabled?: boolean;
+  killSwitch?: boolean;
   settings?: Partial<Uc6Settings>;
   market?: {
     primary?: {
@@ -74,6 +76,7 @@ type Uc6Status = {
 function defaultSettings(): Uc6Settings {
   return {
     tradingEnabled: true,
+    killSwitch: false,
     venue: "slipstream",
     bandHalfBps: 100,
     edgeRebalancePct: 0.85,
@@ -96,6 +99,7 @@ function coerceSettings(raw: Partial<Uc6Settings> | undefined): Uc6Settings {
   const venue = raw?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
   return {
     tradingEnabled: raw?.tradingEnabled ?? defaults.tradingEnabled,
+    killSwitch: raw?.killSwitch ?? defaults.killSwitch,
     venue,
     bandHalfBps: n(raw?.bandHalfBps, defaults.bandHalfBps),
     edgeRebalancePct: n(raw?.edgeRebalancePct, defaults.edgeRebalancePct),
@@ -290,7 +294,10 @@ export default function Uc6Page() {
 
     setBusy("save");
     try {
-      const payload = { ...draft };
+      const payload = draft.killSwitch ? { ...draft, tradingEnabled: false } : { ...draft };
+      if (payload.killSwitch && payload.tradingEnabled) {
+        payload.tradingEnabled = false;
+      }
       const challenge = await fetchJson<{ ok: true; message: string; expiresAt: string }>("/api/uc6/challenge", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -322,6 +329,67 @@ export default function Uc6Page() {
       await refreshStatus();
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to update UC6 settings.");
+    } finally {
+      setBusy("");
+    }
+  }, [draft, isOwner, refreshStatus, walletAddress]);
+
+  const emergencyStop = useCallback(async () => {
+    if (!draft) return;
+    setError("");
+    setNotice("");
+    if (!walletAddress) {
+      setError("Connect MetaMask first.");
+      return;
+    }
+    if (!isOwner) {
+      setError("Only the configured owner wallet can update UC6 settings.");
+      return;
+    }
+    const eth = getEthereum();
+    if (!eth) {
+      setError("MetaMask is unavailable.");
+      return;
+    }
+
+    setBusy("emergency-stop");
+    try {
+      const payload: Uc6Settings = {
+        ...draft,
+        tradingEnabled: false,
+        killSwitch: true,
+      };
+      const challenge = await fetchJson<{ ok: true; message: string; expiresAt: string }>("/api/uc6/challenge", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          address: walletAddress,
+          action: "update_settings",
+          payload,
+        }),
+      });
+
+      const provider = new BrowserProvider(eth);
+      const signer = await provider.getSigner();
+      const signature = await signer.signMessage(challenge.message);
+
+      const out = await fetchJson<{ ok?: boolean; settings?: Partial<Uc6Settings> }>("/api/uc6/owner/settings", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          message: challenge.message,
+          signature,
+          payload,
+        }),
+      });
+
+      if (out.settings) {
+        setDraft(coerceSettings(out.settings));
+      }
+      setNotice(`Emergency stop activated. Challenge expired at ${challenge.expiresAt}.`);
+      await refreshStatus();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to activate emergency stop.");
     } finally {
       setBusy("");
     }
@@ -373,6 +441,7 @@ export default function Uc6Page() {
           <div style={styles.metaGrid}>
             <StatusCell label="Bot account" value={status?.account || "—"} mono />
             <StatusCell label="Trading enabled" value={String(status?.tradingEnabled ?? status?.settings?.tradingEnabled ?? false)} />
+            <StatusCell label="Kill switch" value={String(status?.killSwitch ?? status?.settings?.killSwitch ?? false)} />
             <StatusCell label="Primary venue" value={status?.market?.primary?.venue || status?.settings?.venue || "—"} />
             <StatusCell label="Primary tick" value={String(status?.market?.primary?.tick ?? "—")} />
             <StatusCell label="Primary price" value={fmtNum(status?.market?.primary?.priceUsdcPerWeth, 4)} />
@@ -395,9 +464,31 @@ export default function Uc6Page() {
             <h2 style={styles.h2}>Owner Controls</h2>
             <div style={styles.formGrid}>
               <label style={styles.field}>
+                <span>killSwitch</span>
+                <select
+                  value={draft.killSwitch ? "true" : "false"}
+                  onChange={(e) =>
+                    setDraft((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            killSwitch: e.target.value === "true",
+                            tradingEnabled: e.target.value === "true" ? false : prev.tradingEnabled,
+                          }
+                        : prev
+                    )
+                  }
+                >
+                  <option value="false">false</option>
+                  <option value="true">true</option>
+                </select>
+              </label>
+
+              <label style={styles.field}>
                 <span>tradingEnabled</span>
                 <select
                   value={draft.tradingEnabled ? "true" : "false"}
+                  disabled={draft.killSwitch}
                   onChange={(e) =>
                     setDraft((prev) => (prev ? { ...prev, tradingEnabled: e.target.value === "true" } : prev))
                   }
@@ -453,9 +544,17 @@ export default function Uc6Page() {
                 onChange={(v) => updateNumber("keepUsdcReserve", v)}
               />
             </div>
+            {draft.killSwitch && (
+              <p style={styles.killSwitchNotice}>
+                Kill switch is active. Trading is forcibly blocked in bot tx paths until intentionally reset.
+              </p>
+            )}
             <div style={styles.row}>
               <button style={styles.button} onClick={saveSettings} disabled={busy !== ""}>
                 Save Settings
+              </button>
+              <button style={styles.buttonDanger} onClick={emergencyStop} disabled={busy !== "" || draft.killSwitch}>
+                Emergency Stop
               </button>
             </div>
           </section>
@@ -546,6 +645,15 @@ const styles: Record<string, CSSProperties> = {
     cursor: "pointer",
     fontWeight: 700,
   },
+  buttonDanger: {
+    border: "1px solid #8a1010",
+    background: "#b91c1c",
+    color: "#fff",
+    borderRadius: 8,
+    padding: "8px 14px",
+    cursor: "pointer",
+    fontWeight: 700,
+  },
   alert: {
     marginTop: 12,
     border: "1px solid",
@@ -596,5 +704,14 @@ const styles: Record<string, CSSProperties> = {
     gap: 6,
     fontSize: 13,
     color: "#2a3c57",
+  },
+  killSwitchNotice: {
+    marginTop: 12,
+    border: "1px solid #f2c69d",
+    borderRadius: 8,
+    padding: "8px 10px",
+    fontSize: 13,
+    color: "#6b3906",
+    background: "#fff7ed",
   },
 };

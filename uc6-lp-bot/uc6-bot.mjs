@@ -344,6 +344,7 @@ const ERC721_TRANSFER_EVENT = {
 const DEFAULT_SETTINGS = {
   version: 1,
   tradingEnabled: true,
+  killSwitch: false,
   venue: "slipstream",
   bandHalfBps: 100,
   edgeRebalancePct: 0.85,
@@ -387,9 +388,11 @@ function toBool(v, fallback) {
 
 function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
   const src = input && typeof input === "object" ? input : {};
+  const killSwitch = toBool(src.killSwitch, baseSettings.killSwitch);
   const out = {
     version: 1,
-    tradingEnabled: toBool(src.tradingEnabled, baseSettings.tradingEnabled),
+    tradingEnabled: killSwitch ? false : toBool(src.tradingEnabled, baseSettings.tradingEnabled),
+    killSwitch,
     venue: src.venue === "uniswapv3" ? "uniswapv3" : "slipstream",
     bandHalfBps: clamp(Math.round(toNumber(src.bandHalfBps, baseSettings.bandHalfBps)), 10, 5000),
     edgeRebalancePct: clamp(toNumber(src.edgeRebalancePct, baseSettings.edgeRebalancePct), 0.1, 0.99),
@@ -756,6 +759,20 @@ class Uc6Bot {
     await writeJsonAtomic(STATE_PATH, this.state);
   }
 
+  async assertTxAllowed(context = "tx") {
+    try {
+      await this.loadSettings(false);
+    } catch (err) {
+      this.setLastError(err);
+    }
+    if (this.settings.killSwitch) {
+      throw new Error(`Kill switch active; blocked ${context}`);
+    }
+    if (!this.settings.tradingEnabled) {
+      throw new Error(`Trading disabled; blocked ${context}`);
+    }
+  }
+
   setLastError(err) {
     const msg = err instanceof Error ? err.message : String(err || "unknown error");
     this.state.lastError = `${nowIso()} ${msg}`;
@@ -899,6 +916,7 @@ class Uc6Bot {
     if (amount <= 0n) return;
     const allowance = await this.readAllowance(tokenAddress, spender);
     if (allowance >= amount) return;
+    await this.assertTxAllowed("approve");
 
     const hash = await this.walletClient.writeContract({
       address: tokenAddress,
@@ -937,6 +955,7 @@ class Uc6Bot {
   async swapExactInputSingle({ router, tokenIn, tokenOut, amountIn, slippageBps, fee, tickSpacing, snapshot }) {
     if (amountIn <= 0n) return;
 
+    await this.assertTxAllowed("swap");
     await this.approveIfNeeded(tokenIn, router, amountIn);
     const estimatedOut = this.priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot);
     const amountOutMinimum = this.minOutFromEstimate(estimatedOut, slippageBps);
@@ -982,6 +1001,7 @@ class Uc6Bot {
           account: this.account.address,
         });
 
+        await this.assertTxAllowed("swap_write");
         const hash = await this.walletClient.writeContract({
           ...sim.request,
           account: this.account,
@@ -1059,6 +1079,7 @@ class Uc6Bot {
     sqrtPriceX96,
     venue,
   }) {
+    await this.assertTxAllowed("mint");
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 900);
     // For concentrated-liquidity mint, exact ratio can differ from desired amounts.
     // Strict min constraints frequently cause reverts; keep mint mins permissive here.
@@ -1148,6 +1169,7 @@ class Uc6Bot {
           account: this.account.address,
         });
 
+        await this.assertTxAllowed("mint_write");
         const hash = await this.walletClient.writeContract({
           ...sim.request,
           account: this.account,
@@ -1196,6 +1218,7 @@ class Uc6Bot {
 
   async closePosition({ npmAddress, tokenId }) {
     if (!tokenId) return;
+    await this.assertTxAllowed("close_position");
     const id = BigInt(tokenId);
 
     let posRaw;
@@ -1216,6 +1239,7 @@ class Uc6Bot {
 
     if (pos.liquidity > 0n) {
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
+      await this.assertTxAllowed("close_decrease_liquidity");
       const hashDec = await this.walletClient.writeContract({
         address: npmAddress,
         abi: NPM_POSITION_ABI,
@@ -1234,6 +1258,7 @@ class Uc6Bot {
       await this.publicClient.waitForTransactionReceipt({ hash: hashDec });
     }
 
+    await this.assertTxAllowed("close_collect");
     const hashCollect = await this.walletClient.writeContract({
       address: npmAddress,
       abi: NPM_POSITION_ABI,
@@ -1251,6 +1276,7 @@ class Uc6Bot {
     await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
 
     try {
+      await this.assertTxAllowed("close_burn");
       const hashBurn = await this.walletClient.writeContract({
         address: npmAddress,
         abi: NPM_POSITION_ABI,
@@ -1267,6 +1293,7 @@ class Uc6Bot {
   async normalizeInventoryToUsdc({ router, fee, tickSpacing, snapshot }) {
     const wethBal = await this.readTokenBalance(this.weth);
     if (wethBal <= 0n) return;
+    await this.assertTxAllowed("normalize_inventory");
 
     await this.swapExactInputSingle({
       router,
@@ -1464,6 +1491,11 @@ class Uc6Bot {
     const gate = this.getRebalanceGate();
     const trigger = this.getPositionTrigger(primary.tick);
 
+    if (this.settings.killSwitch) {
+      this.setDecision({ action: "monitor", reason: "kill_switch_active", tradingEnabled: false, gate });
+      return;
+    }
+
     if (!this.settings.tradingEnabled) {
       this.setDecision({ action: "monitor", reason: trigger.reason, tradingEnabled: false, gate });
       return;
@@ -1541,7 +1573,8 @@ class Uc6Bot {
       ts: nowIso(),
       version: VERSION,
       account: this.account.address,
-      tradingEnabled: this.settings.tradingEnabled,
+      tradingEnabled: this.settings.tradingEnabled && !this.settings.killSwitch,
+      killSwitch: Boolean(this.settings.killSwitch),
       settings: this.settings,
       market: {
         primary: latest.primary,
@@ -1592,6 +1625,20 @@ class Uc6Bot {
       }
 
       const nextSettings = normalizeSettings(payload, this.settings);
+      if (this.settings.killSwitch && !nextSettings.killSwitch) {
+        const allowReset = String(process.env.UC6_ALLOW_KILL_SWITCH_RESET || "")
+          .trim()
+          .toLowerCase();
+        if (!(allowReset === "1" || allowReset === "true" || allowReset === "yes")) {
+          return jsonResponse(res, 409, {
+            error:
+              "Kill switch reset blocked. Set UC6_ALLOW_KILL_SWITCH_RESET=true on VM for intentional manual reset.",
+          });
+        }
+      }
+      if (nextSettings.killSwitch) {
+        nextSettings.tradingEnabled = false;
+      }
       await writeJsonAtomic(SETTINGS_PATH, nextSettings);
       this.settings = nextSettings;
       try {
@@ -1620,7 +1667,8 @@ class Uc6Bot {
       return jsonResponse(res, 200, {
         ok: true,
         ts: nowIso(),
-        tradingEnabled: this.settings.tradingEnabled,
+        tradingEnabled: this.settings.tradingEnabled && !this.settings.killSwitch,
+        killSwitch: Boolean(this.settings.killSwitch),
         account: this.account.address,
       });
     }
