@@ -1374,7 +1374,6 @@ class Uc6Bot {
           account: this.account,
         });
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-        this.addTxToActiveAction("mint", hash, receipt);
         this.addTxToActiveAction("swap", hash, receipt);
         const spot = this.getSpotUsdcPerWeth();
         const amountInUsd = this.toUsdForTokenAmountRaw(tokenIn, amountIn, spot);
@@ -1560,6 +1559,7 @@ class Uc6Bot {
           account: this.account,
         });
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+        this.addTxToActiveAction("mint", hash, receipt);
 
         let tokenId = this.extractMintedTokenId(receipt, npmAddress);
         if (!tokenId) {
@@ -2046,21 +2046,67 @@ class Uc6Bot {
     await this.approveIfNeeded(token0, npm, amount0Desired);
     await this.approveIfNeeded(token1, npm, amount1Desired);
 
-    const targetRange = this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, this.settings.bandHalfBps);
-    const minted = await this.mintPosition({
-      npmAddress: npm,
-      token0,
-      token1,
-      fee: snapshot.fee,
-      tickSpacing: snapshot.tickSpacing,
-      tickLower: targetRange.tickLower,
-      tickUpper: targetRange.tickUpper,
-      amount0Desired,
-      amount1Desired,
-      slippageBps: this.settings.slippageBps,
-      sqrtPriceX96: snapshot.sqrtPriceX96,
-      venue: "slipstream",
-    });
+    let mintBasis = snapshot;
+    try {
+      mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+    } catch {
+      // Keep provided snapshot as fallback.
+    }
+    let targetRange = this.computeTargetRange(
+      mintBasis.tick,
+      mintBasis.tickSpacing,
+      this.settings.bandHalfBps
+    );
+
+    let minted;
+    try {
+      minted = await this.mintPosition({
+        npmAddress: npm,
+        token0,
+        token1,
+        fee: mintBasis.fee,
+        tickSpacing: mintBasis.tickSpacing,
+        tickLower: targetRange.tickLower,
+        tickUpper: targetRange.tickUpper,
+        amount0Desired,
+        amount1Desired,
+        slippageBps: this.settings.slippageBps,
+        sqrtPriceX96: mintBasis.sqrtPriceX96,
+        venue: "slipstream",
+      });
+    } catch (firstErr) {
+      let retryBasis = mintBasis;
+      try {
+        retryBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+      } catch {
+        // Keep prior basis on retry.
+      }
+      targetRange = this.computeTargetRange(
+        retryBasis.tick,
+        retryBasis.tickSpacing,
+        this.settings.bandHalfBps
+      );
+      try {
+        minted = await this.mintPosition({
+          npmAddress: npm,
+          token0,
+          token1,
+          fee: retryBasis.fee,
+          tickSpacing: retryBasis.tickSpacing,
+          tickLower: targetRange.tickLower,
+          tickUpper: targetRange.tickUpper,
+          amount0Desired,
+          amount1Desired,
+          slippageBps: this.settings.slippageBps,
+          sqrtPriceX96: retryBasis.sqrtPriceX96,
+          venue: "slipstream",
+        });
+      } catch (retryErr) {
+        throw new Error(
+          `mint_retry_failed: first=${firstErr instanceof Error ? firstErr.message : String(firstErr || "unknown")} | retry=${retryErr instanceof Error ? retryErr.message : String(retryErr || "unknown")}`
+        );
+      }
+    }
 
     this.state.position = {
       venue: "slipstream",
