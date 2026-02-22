@@ -1472,35 +1472,39 @@ class Uc6Bot {
     return BigInt(0);
   }
 
-  async quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing }) {
-    const candidates = [
-      {
-        address: this.slipstreamQuoter,
-        abi: QUOTER_ABI_TICK_V2,
-        args: [
-          {
-            tokenIn,
-            tokenOut,
-            tickSpacing: tickSpacing || 1,
-            amountIn,
-            sqrtPriceLimitX96: BigInt(0),
-          },
-        ],
-      },
-      {
-        address: this.uniswapQuoter,
-        abi: QUOTER_ABI_FEE_V2,
-        args: [
-          {
-            tokenIn,
-            tokenOut,
-            amountIn,
-            fee: Math.max(1, Number(fee || 0) || 3000),
-            sqrtPriceLimitX96: BigInt(0),
-          },
-        ],
-      },
-    ];
+  async quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing, venueHint = null }) {
+    const slipstreamCandidate = {
+      address: this.slipstreamQuoter,
+      abi: QUOTER_ABI_TICK_V2,
+      args: [
+        {
+          tokenIn,
+          tokenOut,
+          tickSpacing: tickSpacing || 1,
+          amountIn,
+          sqrtPriceLimitX96: BigInt(0),
+        },
+      ],
+    };
+    const uniswapCandidate = {
+      address: this.uniswapQuoter,
+      abi: QUOTER_ABI_FEE_V2,
+      args: [
+        {
+          tokenIn,
+          tokenOut,
+          amountIn,
+          fee: Math.max(1, Number(fee || 0) || 3000),
+          sqrtPriceLimitX96: BigInt(0),
+        },
+      ],
+    };
+    const candidates =
+      venueHint === "slipstream"
+        ? [slipstreamCandidate]
+        : venueHint === "uniswapv3"
+          ? [uniswapCandidate]
+          : [slipstreamCandidate, uniswapCandidate];
 
     for (const c of candidates) {
       try {
@@ -1568,7 +1572,12 @@ class Uc6Bot {
     await this.approveIfNeeded(tokenIn, router, amountIn);
     const preInBalance = await this.readTokenBalance(tokenIn);
     const preOutBalance = await this.readTokenBalance(tokenOut);
-    const quoterQuote = await this.quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing }).catch(
+    const venueHint = sameAddress(router, this.slipstreamRouter)
+      ? "slipstream"
+      : sameAddress(router, this.uniswapRouter)
+        ? "uniswapv3"
+        : null;
+    const quoterQuote = await this.quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing, venueHint }).catch(
       () => ({ amountOut: BigInt(0), source: "none" })
     );
     const estimatedOut = this.priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot);
@@ -1661,7 +1670,15 @@ class Uc6Bot {
           slippageBpsReal,
           isEstimated: false,
         });
-        return;
+        return {
+          tokenIn,
+          tokenOut,
+          actualIn,
+          actualOut,
+          quoteOut,
+          quoteSource,
+          slippageBpsReal,
+        };
       } catch (err) {
         lastErr = err;
       }
@@ -2135,13 +2152,28 @@ class Uc6Bot {
     try {
       let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
       let wethBalanceRaw = await this.readTokenBalance(this.weth);
+      const applySwapDelta = (swapRes) => {
+        if (!swapRes) return;
+        const actualIn = BigInt(swapRes.actualIn || 0);
+        const actualOut = BigInt(swapRes.actualOut || 0);
+        if (sameAddress(swapRes.tokenIn, this.usdc)) {
+          usdcBalanceRaw = usdcBalanceRaw > actualIn ? usdcBalanceRaw - actualIn : 0n;
+        } else if (sameAddress(swapRes.tokenIn, this.weth)) {
+          wethBalanceRaw = wethBalanceRaw > actualIn ? wethBalanceRaw - actualIn : 0n;
+        }
+        if (sameAddress(swapRes.tokenOut, this.usdc)) {
+          usdcBalanceRaw += actualOut;
+        } else if (sameAddress(swapRes.tokenOut, this.weth)) {
+          wethBalanceRaw += actualOut;
+        }
+      };
 
       let freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
       let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
 
       // If wallet is WETH-heavy and no deployable USDC remains, convert to USDC first.
       if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
-        await this.swapExactInputSingle({
+        const swapRes = await this.swapExactInputSingle({
           router,
           tokenIn: this.weth,
           tokenOut: this.usdc,
@@ -2151,8 +2183,7 @@ class Uc6Bot {
           tickSpacing: snapshot.tickSpacing,
           snapshot,
         });
-        usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-        wethBalanceRaw = await this.readTokenBalance(this.weth);
+        applySwapDelta(swapRes);
         freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
         deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
       }
@@ -2164,7 +2195,7 @@ class Uc6Bot {
 
       const swapIn = deployableUsdcRaw > 0n ? (deployableUsdcRaw + 1n) / 2n : 0n;
       if (swapIn > 0n) {
-        await this.swapExactInputSingle({
+        const swapRes = await this.swapExactInputSingle({
           router,
           tokenIn: this.usdc,
           tokenOut: this.weth,
@@ -2174,10 +2205,11 @@ class Uc6Bot {
           tickSpacing: snapshot.tickSpacing,
           snapshot,
         });
+        applySwapDelta(swapRes);
       }
 
-      const usdcAfter = await this.readTokenBalance(this.usdc);
-      const wethAfter = await this.readTokenBalance(this.weth);
+      const usdcAfter = usdcBalanceRaw;
+      const wethAfter = wethBalanceRaw;
       let usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
       let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
       let wethToUse = wethAfter;
@@ -2187,7 +2219,7 @@ class Uc6Bot {
         if (wethToUse <= 0n && usdcToUse > 0n) {
           const topUpUsdcIn = usdcToUse / 4n;
           if (topUpUsdcIn > 0n) {
-            await this.swapExactInputSingle({
+            const swapRes = await this.swapExactInputSingle({
               router,
               tokenIn: this.usdc,
               tokenOut: this.weth,
@@ -2197,11 +2229,12 @@ class Uc6Bot {
               tickSpacing: snapshot.tickSpacing,
               snapshot,
             });
+            applySwapDelta(swapRes);
           }
         } else if (usdcToUse <= 0n && wethToUse > 0n) {
           const topUpWethIn = wethToUse / 4n;
           if (topUpWethIn > 0n) {
-            await this.swapExactInputSingle({
+            const swapRes = await this.swapExactInputSingle({
               router,
               tokenIn: this.weth,
               tokenOut: this.usdc,
@@ -2211,11 +2244,12 @@ class Uc6Bot {
               tickSpacing: snapshot.tickSpacing,
               snapshot,
             });
+            applySwapDelta(swapRes);
           }
         }
 
-        const usdcRetry = await this.readTokenBalance(this.usdc);
-        const wethRetry = await this.readTokenBalance(this.weth);
+        const usdcRetry = usdcBalanceRaw;
+        const wethRetry = wethBalanceRaw;
         usdcSpendable = usdcRetry > keepReserveRaw ? usdcRetry - keepReserveRaw : 0n;
         usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
         wethToUse = wethRetry;
@@ -2235,17 +2269,36 @@ class Uc6Bot {
 
       const token0 = snapshot.token0;
       const token1 = snapshot.token1;
-      const amount0Desired = sameAddress(token0, this.usdc) ? usdcToUse : wethToUse;
-      const amount1Desired = sameAddress(token1, this.usdc) ? usdcToUse : wethToUse;
+      let amount0Desired = sameAddress(token0, this.usdc) ? usdcToUse : wethToUse;
+      let amount1Desired = sameAddress(token1, this.usdc) ? usdcToUse : wethToUse;
+      // Leave a tiny dust buffer to avoid STF from race/rounding issues on exact wallet amounts.
+      if (amount0Desired > 10n) amount0Desired = (amount0Desired * 9990n) / 10000n;
+      if (amount1Desired > 10n) amount1Desired = (amount1Desired * 9990n) / 10000n;
 
       await this.approveIfNeeded(token0, npm, amount0Desired);
       await this.approveIfNeeded(token1, npm, amount1Desired);
-      await this.increaseLiquidityPosition({
-        npmAddress: npm,
-        tokenId,
-        amount0Desired,
-        amount1Desired,
-      });
+      try {
+        await this.increaseLiquidityPosition({
+          npmAddress: npm,
+          tokenId,
+          amount0Desired,
+          amount1Desired,
+        });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err || "");
+        if (!(msg.includes('function "increaseLiquidity" reverted') && /\bSTF\b/.test(msg))) {
+          throw err;
+        }
+        // One retry with a stronger haircut if token transfer uses slightly more than expected.
+        const amount0Retry = amount0Desired > 100n ? (amount0Desired * 9950n) / 10000n : amount0Desired;
+        const amount1Retry = amount1Desired > 100n ? (amount1Desired * 9950n) / 10000n : amount1Desired;
+        await this.increaseLiquidityPosition({
+          npmAddress: npm,
+          tokenId,
+          amount0Desired: amount0Retry,
+          amount1Desired: amount1Retry,
+        });
+      }
 
       this.state.pendingCompoundUsd = 0;
       this.setDecision({
