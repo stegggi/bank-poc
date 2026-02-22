@@ -1812,6 +1812,8 @@ class Uc6Bot {
     let lastErr = null;
     const errors = [];
     for (const candidate of candidates) {
+      let broadcastedHash = null;
+      let broadcastedReceiptStatus = null;
       try {
         const sim = await this.publicClient.simulateContract({
           address: npmAddress,
@@ -1826,8 +1828,13 @@ class Uc6Bot {
           ...sim.request,
           account: this.account,
         });
+        broadcastedHash = hash;
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+        broadcastedReceiptStatus = receipt.status || null;
         this.addTxToActiveAction("mint", hash, receipt);
+        if (receipt.status && receipt.status !== "success") {
+          throw new Error(`Mint tx reverted on-chain (${candidate.name}) hash=${hash}`);
+        }
 
         let tokenId = this.extractMintedTokenId(receipt, npmAddress);
         if (!tokenId) {
@@ -1853,10 +1860,18 @@ class Uc6Bot {
           venue,
         };
       } catch (err) {
+        if (broadcastedHash && err && typeof err === "object") {
+          err.uc6MintTxBroadcasted = true;
+          err.uc6MintTxHash = broadcastedHash;
+          err.uc6MintReceiptStatus = broadcastedReceiptStatus;
+        }
         lastErr = err;
         errors.push(
           `${candidate.name}: ${err instanceof Error ? err.message : String(err || "unknown")}`
         );
+        // Never auto-try another on-chain mint candidate after a tx has been broadcast.
+        // Let the failure cooldown handle retries on later loop iterations.
+        if (broadcastedHash) break;
       }
     }
 
@@ -2399,66 +2414,74 @@ class Uc6Bot {
     await this.approveIfNeeded(token0, npm, amount0Desired);
     await this.approveIfNeeded(token1, npm, amount1Desired);
 
+    const maxPreflightMintAttempts = 3;
     let mintBasis = snapshot;
-    try {
-      mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
-    } catch {
-      // Keep provided snapshot as fallback.
-    }
     let targetRange = this.computeTargetRange(
       mintBasis.tick,
       mintBasis.tickSpacing,
       this.settings.bandHalfBps
     );
-
     let minted;
-    try {
-      minted = await this.mintPosition({
-        npmAddress: npm,
-        token0,
-        token1,
-        fee: mintBasis.fee,
-        tickSpacing: mintBasis.tickSpacing,
-        tickLower: targetRange.tickLower,
-        tickUpper: targetRange.tickUpper,
-        amount0Desired,
-        amount1Desired,
-        slippageBps: this.settings.slippageBps,
-        sqrtPriceX96: mintBasis.sqrtPriceX96,
-        venue: "slipstream",
-      });
-    } catch (firstErr) {
-      let retryBasis = mintBasis;
-      try {
-        retryBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
-      } catch {
-        // Keep prior basis on retry.
+    let lastMintErr = null;
+    const preflightErrors = [];
+
+    for (let attempt = 1; attempt <= maxPreflightMintAttempts; attempt += 1) {
+      if (attempt > 1) {
+        try {
+          mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+        } catch {
+          // Keep prior snapshot if refresh fails.
+        }
+        targetRange = this.computeTargetRange(
+          mintBasis.tick,
+          mintBasis.tickSpacing,
+          this.settings.bandHalfBps
+        );
+      } else {
+        try {
+          mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+          targetRange = this.computeTargetRange(
+            mintBasis.tick,
+            mintBasis.tickSpacing,
+            this.settings.bandHalfBps
+          );
+        } catch {
+          // Keep provided snapshot on first attempt if refresh fails.
+        }
       }
-      targetRange = this.computeTargetRange(
-        retryBasis.tick,
-        retryBasis.tickSpacing,
-        this.settings.bandHalfBps
-      );
+
       try {
         minted = await this.mintPosition({
           npmAddress: npm,
           token0,
           token1,
-          fee: retryBasis.fee,
-          tickSpacing: retryBasis.tickSpacing,
+          fee: mintBasis.fee,
+          tickSpacing: mintBasis.tickSpacing,
           tickLower: targetRange.tickLower,
           tickUpper: targetRange.tickUpper,
           amount0Desired,
           amount1Desired,
           slippageBps: this.settings.slippageBps,
-          sqrtPriceX96: retryBasis.sqrtPriceX96,
+          sqrtPriceX96: mintBasis.sqrtPriceX96,
           venue: "slipstream",
         });
-      } catch (retryErr) {
-        throw new Error(
-          `mint_retry_failed: first=${firstErr instanceof Error ? firstErr.message : String(firstErr || "unknown")} | retry=${retryErr instanceof Error ? retryErr.message : String(retryErr || "unknown")}`
+        break;
+      } catch (err) {
+        lastMintErr = err;
+        preflightErrors.push(
+          `attempt${attempt}: ${err instanceof Error ? err.message : String(err || "unknown")}`
         );
+        // If a mint tx was broadcast, do not try more on-chain mints in this rebalance attempt.
+        if (err && typeof err === "object" && err.uc6MintTxBroadcasted) {
+          break;
+        }
       }
+    }
+
+    if (!minted) {
+      throw new Error(
+        `mint_retry_failed: ${preflightErrors.join(" | ") || (lastMintErr instanceof Error ? lastMintErr.message : String(lastMintErr || "unknown"))}`
+      );
     }
 
     this.state.position = {
@@ -2548,6 +2571,9 @@ class Uc6Bot {
     this.beginAction("recenter", effectiveTrigger.reason);
     try {
       await this.rebalanceSlipstream(primary);
+      if (!this.state.position?.tokenId) {
+        throw new Error("Rebalance finished without an active LP position (tokenId missing)");
+      }
       this.markRebalanceSuccess(effectiveTrigger.reason, "slipstream");
       this.finalizeActiveAction("recenter", effectiveTrigger.reason, forceRebalance ? { requestedAt: forceRequestedAt } : {});
     } catch (err) {
