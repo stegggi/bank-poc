@@ -2186,6 +2186,21 @@ class Uc6Bot {
       const tick = Number(this.state.latest?.primary?.tick ?? 0);
       this.state.position.inRange = tick > pos.tickLower && tick < pos.tickUpper;
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || "");
+      // Slipstream/Uniswap position managers revert with reason `ID` when tokenId no longer exists
+      // (e.g. just burned during a recenter). Treat this as a state reconciliation signal, not an error.
+      if (msg.includes('function "positions" reverted') && /\bID\b/.test(msg)) {
+        this.state.position = {
+          ...this.state.position,
+          tokenId: null,
+          tickLower: null,
+          tickUpper: null,
+          centerTick: null,
+          liquidity: null,
+          inRange: null,
+        };
+        return;
+      }
       this.setLastError(err);
     }
   }
