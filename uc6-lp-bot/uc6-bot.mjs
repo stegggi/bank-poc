@@ -29,6 +29,7 @@ const UINT128_MAX = (2n ** 128n) - 1n;
 const EVENT_RING_LIMIT = 5;
 const ACCOUNTING_EVENT_LIMIT = 5000;
 const MIN_IDLE_TOPUP_USD = 1;
+const USDC_RESERVE_GUARD_RAW = BigInt(250000); // 0.25 USDC safety buffer above reserve target
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -2156,6 +2157,7 @@ class Uc6Bot {
     const router = this.slipstreamRouter;
     const npm = this.slipstreamNpm;
     const keepReserveRaw = parseUnits(reserveTargetUsdc.toFixed(6), USDC_DECIMALS);
+    const keepReserveTopUpRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
     const minUsdcDeployRaw = parseUnits("1", USDC_DECIMALS);
 
@@ -2179,7 +2181,7 @@ class Uc6Bot {
         }
       };
 
-      let freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+      let freeUsdcRaw = usdcBalanceRaw > keepReserveTopUpRaw ? usdcBalanceRaw - keepReserveTopUpRaw : 0n;
       let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
 
       // If wallet is WETH-heavy and no deployable USDC remains, convert to USDC first.
@@ -2195,7 +2197,7 @@ class Uc6Bot {
           snapshot,
         });
         applySwapDelta(swapRes);
-        freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+        freeUsdcRaw = usdcBalanceRaw > keepReserveTopUpRaw ? usdcBalanceRaw - keepReserveTopUpRaw : 0n;
         deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
       }
 
@@ -2270,7 +2272,7 @@ class Uc6Bot {
 
       const usdcAfter = usdcBalanceRaw;
       const wethAfter = wethBalanceRaw;
-      let usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
+      let usdcSpendable = usdcAfter > keepReserveTopUpRaw ? usdcAfter - keepReserveTopUpRaw : 0n;
       let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
       let wethToUse = wethAfter;
 
@@ -2310,7 +2312,7 @@ class Uc6Bot {
 
         const usdcRetry = usdcBalanceRaw;
         const wethRetry = wethBalanceRaw;
-        usdcSpendable = usdcRetry > keepReserveRaw ? usdcRetry - keepReserveRaw : 0n;
+        usdcSpendable = usdcRetry > keepReserveTopUpRaw ? usdcRetry - keepReserveTopUpRaw : 0n;
         usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
         wethToUse = wethRetry;
       }
@@ -2332,7 +2334,7 @@ class Uc6Bot {
       // Re-read once before increaseLiquidity sizing, then keep a dust buffer.
       const usdcBeforeIncrease = await this.readTokenBalance(this.usdc);
       const wethBeforeIncrease = await this.readTokenBalance(this.weth);
-      const usdcSpendableNow = usdcBeforeIncrease > keepReserveRaw ? usdcBeforeIncrease - keepReserveRaw : 0n;
+      const usdcSpendableNow = usdcBeforeIncrease > keepReserveTopUpRaw ? usdcBeforeIncrease - keepReserveTopUpRaw : 0n;
       const usdcCap = usdcSpendableNow < maxDeployRaw ? usdcSpendableNow : maxDeployRaw;
       const wethCap = wethBeforeIncrease;
       let amount0Desired = sameAddress(token0, this.usdc) ? (usdcToUse < usdcCap ? usdcToUse : usdcCap) : (wethToUse < wethCap ? wethToUse : wethCap);
@@ -2716,9 +2718,10 @@ class Uc6Bot {
     const totalValueUsd = Number(walletSnapshot?.valuesUsd?.total || 0);
     const effectiveReserveUsdc = this.getEffectiveReserveTargetUsdc(totalValueUsd);
     const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(6), USDC_DECIMALS);
+    const keepReserveRebalanceRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
 
-    let freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+    let freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
     let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
     if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
       // If wallet drifted to WETH while no position exists, restore deployable USDC once.
@@ -2734,13 +2737,14 @@ class Uc6Bot {
       });
       usdcBalanceRaw = await this.readTokenBalance(this.usdc);
       wethBalanceRaw = await this.readTokenBalance(this.weth);
-      freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+      freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
       deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
     }
     if (deployableUsdcRaw <= 0n) {
       throw new Error(
         `No deployable USDC after reserve and maxDeploy limits ${JSON.stringify({
           reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
+          reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
           maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
           usdcBalance: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
           wethBalance: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
@@ -2767,7 +2771,7 @@ class Uc6Bot {
     const usdcAfter = await this.readTokenBalance(this.usdc);
     const wethAfter = await this.readTokenBalance(this.weth);
 
-    let usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
+    let usdcSpendable = usdcAfter > keepReserveRebalanceRaw ? usdcAfter - keepReserveRebalanceRaw : 0n;
     let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
     let wethToUse = wethAfter;
 
@@ -2805,7 +2809,7 @@ class Uc6Bot {
 
       const usdcRetry = await this.readTokenBalance(this.usdc);
       const wethRetry = await this.readTokenBalance(this.weth);
-      usdcSpendable = usdcRetry > keepReserveRaw ? usdcRetry - keepReserveRaw : 0n;
+      usdcSpendable = usdcRetry > keepReserveRebalanceRaw ? usdcRetry - keepReserveRebalanceRaw : 0n;
       usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
       wethToUse = wethRetry;
     }
@@ -2813,6 +2817,7 @@ class Uc6Bot {
     if (usdcToUse <= 0n || wethToUse <= 0n) {
       const diag = {
         reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
+        reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
         maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
         usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
         wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
