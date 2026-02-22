@@ -460,6 +460,7 @@ const DEFAULT_SETTINGS = {
   slippageBps: 30,
   pollIntervalMs: 2000,
   maxDeployUsdc: 50_000,
+  minTopUpUsd: 20,
   reserveMinUsdc: 25,
   reservePct: 0,
   reserveMaxUsdc: 0,
@@ -539,6 +540,7 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     slippageBps: clamp(Math.round(toNumber(src.slippageBps, baseSettings.slippageBps)), 1, 2_000),
     pollIntervalMs: clamp(Math.round(toNumber(src.pollIntervalMs, baseSettings.pollIntervalMs)), 500, 60_000),
     maxDeployUsdc: clamp(toNumber(src.maxDeployUsdc, baseSettings.maxDeployUsdc), 0, 5_000_000),
+    minTopUpUsd: clamp(toNumber(src.minTopUpUsd, baseSettings.minTopUpUsd), 0, 1_000_000),
     reserveMinUsdc,
     reservePct,
     reserveMaxUsdc,
@@ -2145,7 +2147,8 @@ class Uc6Bot {
       walletTotalUsd + Number(this.state.latest?.lp?.usdValue || 0)
     );
     const deployableSignalUsd = Math.max(0, usdcBalNum - reserveTargetUsdc) + (wethBalNum * spot);
-    if (!(deployableSignalUsd > MIN_IDLE_TOPUP_USD)) return false;
+    const minTopUpUsd = Math.max(MIN_IDLE_TOPUP_USD, Number(this.settings.minTopUpUsd || 0));
+    if (!(deployableSignalUsd > minTopUpUsd)) return false;
 
     const failureGate = this.getFailureCooldownGate();
     if (!failureGate.allowed) return false;
@@ -2201,7 +2204,56 @@ class Uc6Bot {
         return false;
       }
 
-      const swapIn = deployableUsdcRaw > minUsdcDeployRaw ? (deployableUsdcRaw + 1n) / 2n : 0n;
+      // Estimate the in-range token ratio for the current position and solve for a larger
+      // one-shot USDC->WETH swap amount instead of defaulting to a 50/50 USD split.
+      let swapIn = BigInt(0);
+      if (deployableUsdcRaw > minUsdcDeployRaw) {
+        let targetUsdcPerWeth = spot > 0 ? spot : Number(snapshot?.priceUsdcPerWeth || 0);
+        try {
+          const lower = Number(this.state.position?.tickLower);
+          const upper = Number(this.state.position?.tickUpper);
+          const sqrtPriceX96 = snapshot?.sqrtPriceX96 != null ? BigInt(snapshot.sqrtPriceX96) : null;
+          if (Number.isFinite(lower) && Number.isFinite(upper) && sqrtPriceX96 && upper > lower) {
+            const sampleLiquidity = BigInt("1000000000000000000");
+            const ratioSample = this.lpAmountsFromLiquidity(
+              sampleLiquidity,
+              lower,
+              upper,
+              sqrtPriceX96,
+              snapshot.token0,
+              snapshot.token1
+            );
+            const sampleUsdc = Number(formatUnits(ratioSample.usdcRaw || BigInt(0), USDC_DECIMALS));
+            const sampleWeth = Number(formatUnits(ratioSample.wethRaw || BigInt(0), WETH_DECIMALS));
+            if (sampleUsdc > 0 && sampleWeth > 0) {
+              targetUsdcPerWeth = sampleUsdc / sampleWeth;
+            }
+          }
+        } catch {
+          // fall back to spot-price split
+        }
+
+        const spotPx = spot > 0 ? spot : Number(snapshot?.priceUsdcPerWeth || 0);
+        const usdcDeployNom = Number(formatUnits(deployableUsdcRaw, USDC_DECIMALS));
+        const wethNom = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS));
+        if (targetUsdcPerWeth > 0 && spotPx > 0 && Number.isFinite(usdcDeployNom) && Number.isFinite(wethNom)) {
+          const imbalanceUsdc = usdcDeployNom - targetUsdcPerWeth * wethNom;
+          if (imbalanceUsdc > 0) {
+            const xUsdc = imbalanceUsdc / (1 + targetUsdcPerWeth / spotPx);
+            if (xUsdc > 0) {
+              const clampedUsdc = Math.min(usdcDeployNom, Math.max(0, xUsdc));
+              if (clampedUsdc > 0) {
+                swapIn = parseUnits(clampedUsdc.toFixed(6), USDC_DECIMALS);
+              }
+            }
+          }
+        }
+
+        // Fallback when ratio estimate is unavailable.
+        if (swapIn <= 0n) {
+          swapIn = (deployableUsdcRaw + 1n) / 2n;
+        }
+      }
       if (swapIn > 0n) {
         const swapRes = await this.swapExactInputSingle({
           router,
@@ -3100,6 +3152,7 @@ class Uc6Bot {
         slippageBps: this.settings.slippageBps,
         pollIntervalMs: this.settings.pollIntervalMs,
         maxDeployUsdc: this.settings.maxDeployUsdc,
+        minTopUpUsd: this.settings.minTopUpUsd,
         reservePolicy: {
           minUsdc: this.settings.reserveMinUsdc,
           pct: this.settings.reservePct,
