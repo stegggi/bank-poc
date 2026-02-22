@@ -305,7 +305,11 @@ function fmtNum(v: number | null | undefined, digits = 2): string {
 
 function fmtUsd(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
-  return `$${fmtNum(v, 2)}`;
+  const n = Number(v);
+  if (n !== 0 && Math.abs(n) < 0.01) {
+    return n < 0 ? "-<$0.01" : "<$0.01";
+  }
+  return `$${fmtNum(n, 2)}`;
 }
 
 function fmtPct(v: number | null | undefined, digits = 2): string {

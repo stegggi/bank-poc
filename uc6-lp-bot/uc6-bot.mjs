@@ -398,6 +398,17 @@ const ERC721_TRANSFER_EVENT = {
   ],
 };
 
+const NPM_COLLECT_EVENT = {
+  type: "event",
+  name: "Collect",
+  inputs: [
+    { indexed: true, name: "tokenId", type: "uint256" },
+    { indexed: false, name: "recipient", type: "address" },
+    { indexed: false, name: "amount0", type: "uint256" },
+    { indexed: false, name: "amount1", type: "uint256" },
+  ],
+};
+
 const DEFAULT_SETTINGS = {
   version: 1,
   tradingEnabled: true,
@@ -1659,6 +1670,26 @@ class Uc6Bot {
     return null;
   }
 
+  extractCollectedAmountsFromReceipt(receipt, npmAddress, tokenId) {
+    let amount0 = BigInt(0);
+    let amount1 = BigInt(0);
+    const wantTokenId = tokenId != null ? BigInt(tokenId) : null;
+    for (const log of receipt?.logs || []) {
+      if (!sameAddress(log.address, npmAddress)) continue;
+      try {
+        const decoded = decodeEventLog({ abi: [NPM_COLLECT_EVENT], data: log.data, topics: log.topics });
+        if (decoded.eventName !== "Collect") continue;
+        const evTokenId = BigInt(decoded.args.tokenId ?? 0);
+        if (wantTokenId != null && evTokenId !== wantTokenId) continue;
+        amount0 += BigInt(decoded.args.amount0 ?? 0);
+        amount1 += BigInt(decoded.args.amount1 ?? 0);
+      } catch {
+        // ignore unrelated logs
+      }
+    }
+    return { amount0, amount1 };
+  }
+
   async mintPosition({
     npmAddress,
     token0,
@@ -1893,6 +1924,8 @@ class Uc6Bot {
     const feesUsd =
       Number(formatUnits(usdcDelta, USDC_DECIMALS)) +
       Number(formatUnits(wethDelta, WETH_DECIMALS)) * this.getSpotUsdcPerWeth();
+    // For rebalance close, collect() contains principal + fees after decreaseLiquidity.
+    // We attribute only pre-close collectable fees (or fallback computed value if override absent).
     this.addFeesToActiveAction(feeValueOverrideUsd == null ? feesUsd : feeValueOverrideUsd);
     this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
 
@@ -1916,6 +1949,18 @@ class Uc6Bot {
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0 };
     await this.assertTxAllowed("harvest_collect");
     const id = BigInt(tokenId);
+    let posRaw = null;
+    try {
+      posRaw = await this.publicClient.readContract({
+        address: npmAddress,
+        abi: NPM_POSITION_ABI,
+        functionName: "positions",
+        args: [id],
+      });
+    } catch {
+      posRaw = null;
+    }
+    const pos = posRaw ? this.parsePositionResult(posRaw) : null;
     const preUsdc = await this.readTokenBalance(this.usdc);
     const preWeth = await this.readTokenBalance(this.weth);
 
@@ -1936,12 +1981,29 @@ class Uc6Bot {
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
     this.addTxToActiveAction("collect", hashCollect, receipt);
 
+    const decodedCollect = this.extractCollectedAmountsFromReceipt(receipt, npmAddress, id);
+
     const postUsdc = await this.readTokenBalance(this.usdc);
     const postWeth = await this.readTokenBalance(this.weth);
     const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
     const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
-    const usdc = Number(formatUnits(usdcDelta, USDC_DECIMALS));
-    const weth = Number(formatUnits(wethDelta, WETH_DECIMALS));
+    let usdcRaw = usdcDelta;
+    let wethRaw = wethDelta;
+    if (pos && (decodedCollect.amount0 > 0n || decodedCollect.amount1 > 0n)) {
+      let mappedUsdc = 0n;
+      let mappedWeth = 0n;
+      if (sameAddress(pos.token0, this.usdc)) mappedUsdc = decodedCollect.amount0;
+      if (sameAddress(pos.token1, this.usdc)) mappedUsdc = decodedCollect.amount1;
+      if (sameAddress(pos.token0, this.weth)) mappedWeth = decodedCollect.amount0;
+      if (sameAddress(pos.token1, this.weth)) mappedWeth = decodedCollect.amount1;
+      // Prefer exact decoded amounts if mapping succeeded.
+      if (mappedUsdc > 0n || mappedWeth > 0n) {
+        usdcRaw = mappedUsdc;
+        wethRaw = mappedWeth;
+      }
+    }
+    const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
+    const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
     const usd = usdc + weth * this.getSpotUsdcPerWeth();
     this.addFeesToActiveAction(usd);
     this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
