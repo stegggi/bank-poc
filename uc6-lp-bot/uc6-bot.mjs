@@ -1811,6 +1811,9 @@ class Uc6Bot {
 
     let lastErr = null;
     const errors = [];
+    let anyBroadcastedMintTx = false;
+    let lastBroadcastedMintTxHash = null;
+    let lastBroadcastedMintReceiptStatus = null;
     for (const candidate of candidates) {
       let broadcastedHash = null;
       let broadcastedReceiptStatus = null;
@@ -1865,6 +1868,11 @@ class Uc6Bot {
           err.uc6MintTxHash = broadcastedHash;
           err.uc6MintReceiptStatus = broadcastedReceiptStatus;
         }
+        if (broadcastedHash) {
+          anyBroadcastedMintTx = true;
+          lastBroadcastedMintTxHash = broadcastedHash;
+          lastBroadcastedMintReceiptStatus = broadcastedReceiptStatus;
+        }
         lastErr = err;
         errors.push(
           `${candidate.name}: ${err instanceof Error ? err.message : String(err || "unknown")}`
@@ -1877,11 +1885,17 @@ class Uc6Bot {
 
     const tail =
       errors.length > 0 ? ` | candidates => ${errors.join(" || ")}` : "";
-    throw new Error(
+    const wrapped = new Error(
       `Mint failed: ${
         lastErr instanceof Error ? lastErr.message : String(lastErr || "unknown")
       }${tail}`
     );
+    if (anyBroadcastedMintTx) {
+      wrapped.uc6MintTxBroadcasted = true;
+      wrapped.uc6MintTxHash = lastBroadcastedMintTxHash;
+      wrapped.uc6MintReceiptStatus = lastBroadcastedMintReceiptStatus;
+    }
+    throw wrapped;
   }
 
   async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null }) {
