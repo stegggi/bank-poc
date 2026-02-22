@@ -574,6 +574,12 @@ function defaultState(accountAddress) {
     forceRebalanceRequestedAt: null,
     forceRebalanceRecoveryPending: false,
     pendingCompoundUsd: 0,
+    rangeStats: {
+      sinceIso: nowIso(),
+      lastSampleAtIso: null,
+      eligibleMs: 0,
+      inRangeMs: 0,
+    },
     position: {
       venue: "slipstream",
       tokenId: null,
@@ -866,6 +872,8 @@ class Uc6Bot {
       this.setLastError(err);
     }
 
+    this.resetRangeStatsSampler(Date.now());
+
     await this.persistState().catch((err) => {
       this.setLastError(err);
     });
@@ -917,6 +925,14 @@ class Uc6Bot {
     };
     if (!Array.isArray(this.state.events)) this.state.events = [];
     if (!Array.isArray(this.state.ledgerEvents)) this.state.ledgerEvents = Array.isArray(this.state.events) ? [...this.state.events] : [];
+    if (!this.state.rangeStats || typeof this.state.rangeStats !== "object") {
+      this.state.rangeStats = { ...baseState.rangeStats };
+    } else {
+      this.state.rangeStats = {
+        ...baseState.rangeStats,
+        ...this.state.rangeStats,
+      };
+    }
     if (this.state.events.length > EVENT_RING_LIMIT) {
       this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
     }
@@ -928,6 +944,46 @@ class Uc6Bot {
   async persistState() {
     this.state.updatedAt = nowIso();
     await writeJsonAtomic(STATE_PATH, this.state);
+  }
+
+  resetRangeStatsSampler(nowMs = Date.now()) {
+    if (!this.state.rangeStats || typeof this.state.rangeStats !== "object") {
+      this.state.rangeStats = {
+        sinceIso: new Date(nowMs).toISOString(),
+        lastSampleAtIso: null,
+        eligibleMs: 0,
+        inRangeMs: 0,
+      };
+    }
+    this.state.rangeStats.lastSampleAtIso = new Date(nowMs).toISOString();
+    if (!this.state.rangeStats.sinceIso) this.state.rangeStats.sinceIso = this.state.rangeStats.lastSampleAtIso;
+  }
+
+  updateRangeStats(nowMs = Date.now()) {
+    if (!this.state.rangeStats || typeof this.state.rangeStats !== "object") {
+      this.resetRangeStatsSampler(nowMs);
+      return;
+    }
+    const prevIso = this.state.rangeStats.lastSampleAtIso || null;
+    const prevMs = prevIso ? Date.parse(prevIso) : NaN;
+    if (Number.isFinite(prevMs) && nowMs > prevMs) {
+      let deltaMs = nowMs - prevMs;
+      // After process restarts or long pauses, reset the sampler instead of counting downtime.
+      if (deltaMs > 120_000) {
+        this.resetRangeStatsSampler(nowMs);
+        return;
+      }
+      const eligible = Boolean(this.settings.tradingEnabled) && !Boolean(this.settings.killSwitch);
+      const inRange = eligible && Boolean(this.state.position?.inRange);
+      if (eligible) {
+        this.state.rangeStats.eligibleMs = Number(this.state.rangeStats.eligibleMs || 0) + deltaMs;
+      }
+      if (inRange) {
+        this.state.rangeStats.inRangeMs = Number(this.state.rangeStats.inRangeMs || 0) + deltaMs;
+      }
+    }
+    this.state.rangeStats.lastSampleAtIso = new Date(nowMs).toISOString();
+    if (!this.state.rangeStats.sinceIso) this.state.rangeStats.sinceIso = this.state.rangeStats.lastSampleAtIso;
   }
 
   async assertTxAllowed(context = "tx") {
@@ -3209,6 +3265,7 @@ class Uc6Bot {
       const tick = snapshots.primary.tick;
       this.state.position.inRange = tick > this.state.position.tickLower && tick < this.state.position.tickUpper;
     }
+    this.updateRangeStats(Date.now());
 
     await this.evaluateAndAct();
   }
@@ -3298,6 +3355,10 @@ class Uc6Bot {
     const apr7d = lpUsdValue > 0 ? (stats7d.netUsd / avgCapital7d) * 365 : null;
     const apr30d = events30d.length > 0 && lpUsdValue > 0 ? (stats30d.netUsd / avgCapital30d) * 365 : null;
     const churnRatioToday = Number.isFinite(todayStats.churnRatio) ? todayStats.churnRatio : null;
+    const rangeStats = this.state.rangeStats || {};
+    const inRangeEligibleMs = Number(rangeStats.inRangeMs || 0);
+    const eligibleTradingMs = Number(rangeStats.eligibleMs || 0);
+    const timeInRangePct = eligibleTradingMs > 0 ? inRangeEligibleMs / eligibleTradingMs : null;
 
     return {
       ok: true,
@@ -3419,6 +3480,12 @@ class Uc6Bot {
         rebalances24h: stats24h.rebalances,
         rebalances7d: stats7d.rebalances,
         churnRatioToday,
+        timeInRange: {
+          sinceIso: rangeStats.sinceIso || null,
+          eligibleMs: eligibleTradingMs,
+          inRangeMs: inRangeEligibleMs,
+          pct: timeInRangePct,
+        },
         lastRebalanceAtIso: this.state.lastRebalanceAt,
         cooldownRemainingSec: gate.remainingSec,
         forceRebalanceRequestedAtIso: this.state.forceRebalanceRequestedAt || null,

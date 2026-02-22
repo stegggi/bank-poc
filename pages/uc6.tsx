@@ -165,6 +165,12 @@ type Uc6Status = {
     rebalances24h?: number;
     rebalances7d?: number;
     churnRatioToday?: number | null;
+    timeInRange?: {
+      sinceIso?: string | null;
+      eligibleMs?: number;
+      inRangeMs?: number;
+      pct?: number | null;
+    };
     lastRebalanceAtIso?: string | null;
     cooldownRemainingSec?: number | null;
     lastDecision?: Record<string, unknown> | null;
@@ -698,6 +704,8 @@ export default function Uc6Page() {
               <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
               <Metric label="Distance To Edge" value={`${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`} />
               <Metric label="Edge Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
+              <Metric label="Time In Range (Trading On)" value={status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100)} />
+              <Metric label="Time In Range Since" value={status?.ops?.timeInRange?.sinceIso || "—"} />
               <Metric label="Min Rebalance Interval" value={`${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s`} />
               <Metric
                 label="Cooldown Remaining"
