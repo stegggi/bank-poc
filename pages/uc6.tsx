@@ -743,15 +743,13 @@ export default function Uc6Page() {
                 <button
                   style={styles.buttonSecondary}
                   onClick={forceRebalance}
-                  disabled={busy !== "" || !isBase || Boolean(status?.killSwitch) || !status?.tradingEnabled}
+                  disabled={busy !== "" || Boolean(status?.killSwitch) || !status?.tradingEnabled}
                   title={
                     status?.killSwitch
                       ? "Kill switch active"
                       : !status?.tradingEnabled
                         ? "Trading is disabled"
-                        : !isBase
-                          ? "Switch MetaMask to Base first"
-                          : "Request an immediate rebalance (owner-only)"
+                        : "Request an immediate rebalance (owner-only)"
                   }
                 >
                   Force Rebalance
