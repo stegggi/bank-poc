@@ -27,6 +27,7 @@ const WETH_DECIMALS = 18;
 const Q96 = 2n ** 96n;
 const UINT128_MAX = (2n ** 128n) - 1n;
 const EVENT_RING_LIMIT = 5;
+const ACCOUNTING_EVENT_LIMIT = 5000;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -531,6 +532,7 @@ function defaultState(accountAddress) {
     rebalanceFailureCooldownUntil: null,
     consecutiveRebalanceFailures: 0,
     forceRebalanceRequestedAt: null,
+    forceRebalanceRecoveryPending: false,
     pendingCompoundUsd: 0,
     position: {
       venue: "slipstream",
@@ -548,6 +550,7 @@ function defaultState(accountAddress) {
       collectableNow: { usdc: 0, weth: 0, usd: 0, isEstimated: true },
     },
     events: [],
+    ledgerEvents: [],
     lastDecision: null,
     lastError: null,
   };
@@ -871,8 +874,12 @@ class Uc6Bot {
       },
     };
     if (!Array.isArray(this.state.events)) this.state.events = [];
+    if (!Array.isArray(this.state.ledgerEvents)) this.state.ledgerEvents = Array.isArray(this.state.events) ? [...this.state.events] : [];
     if (this.state.events.length > EVENT_RING_LIMIT) {
       this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
+    }
+    if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
+      this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
     }
   }
 
@@ -952,6 +959,7 @@ class Uc6Bot {
 
   pushEvent(event) {
     if (!Array.isArray(this.state.events)) this.state.events = [];
+    if (!Array.isArray(this.state.ledgerEvents)) this.state.ledgerEvents = [];
     const next = {
       atIso: nowIso(),
       type: "info",
@@ -980,10 +988,18 @@ class Uc6Bot {
     if (this.state.events.length > EVENT_RING_LIMIT) {
       this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
     }
+    this.state.ledgerEvents.push(next);
+    if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
+      this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
+    }
   }
 
   getEventsSince(startMs = null) {
-    const events = Array.isArray(this.state.events) ? this.state.events : [];
+    const events = Array.isArray(this.state.ledgerEvents)
+      ? this.state.ledgerEvents
+      : Array.isArray(this.state.events)
+        ? this.state.events
+        : [];
     if (!startMs) return events;
     return events.filter((ev) => {
       const ms = Date.parse(ev.atIso || "");
@@ -2452,8 +2468,11 @@ class Uc6Bot {
     const forceRebalance = Boolean(forceRequestedAt);
     const gate = this.getRebalanceGate();
     const trigger = this.getPositionTrigger(primary.tick);
+    const recoveryRetry = Boolean(this.state.forceRebalanceRecoveryPending) && trigger.reason === "no_position";
     const effectiveTrigger = forceRebalance
       ? { ...trigger, trigger: true, reason: "manual_force" }
+      : recoveryRetry
+        ? { ...trigger, trigger: true, reason: "recovery_retry" }
       : trigger;
 
     if (this.settings.killSwitch) {
@@ -2492,7 +2511,7 @@ class Uc6Bot {
       return;
     }
 
-    if (!forceRebalance && !gate.allowed) {
+    if (!forceRebalance && !recoveryRetry && !gate.allowed) {
       this.setDecision({ action: "skipped", reason: effectiveTrigger.reason, gate });
       this.pushEvent({ type: "blocked", reason: gate.reason });
       return;
@@ -2500,6 +2519,7 @@ class Uc6Bot {
 
     if (this.settings.venue === "uniswapv3") {
       if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
+      if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
       this.setDecision({
         action: "skipped",
         reason: effectiveTrigger.reason,
@@ -2509,12 +2529,17 @@ class Uc6Bot {
     }
 
     if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
+    if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
     this.beginAction("recenter", effectiveTrigger.reason);
     try {
       await this.rebalanceSlipstream(primary);
       this.markRebalanceSuccess(effectiveTrigger.reason, "slipstream");
       this.finalizeActiveAction("recenter", effectiveTrigger.reason, forceRebalance ? { requestedAt: forceRequestedAt } : {});
     } catch (err) {
+      if (forceRebalance && !this.state.position?.tokenId) {
+        // Force-rebalance can close first and then fail on re-open; allow one quick retry.
+        this.state.forceRebalanceRecoveryPending = true;
+      }
       this.markRebalanceFailure(err, effectiveTrigger.reason);
       this.finalizeActiveAction("error", effectiveTrigger.reason, {
         message: err instanceof Error ? err.message : String(err || "unknown"),
@@ -2751,6 +2776,7 @@ class Uc6Bot {
         lastRebalanceAtIso: this.state.lastRebalanceAt,
         cooldownRemainingSec: gate.remainingSec,
         forceRebalanceRequestedAtIso: this.state.forceRebalanceRequestedAt || null,
+        forceRebalanceRecoveryPending: Boolean(this.state.forceRebalanceRecoveryPending),
         lastDecision: this.state.lastDecision,
         lastError: this.parseLastErrorObject(),
       },
@@ -2767,6 +2793,7 @@ class Uc6Bot {
         rebalanceFailureCooldownUntil: this.state.rebalanceFailureCooldownUntil,
         consecutiveRebalanceFailures: Number(this.state.consecutiveRebalanceFailures || 0),
         forceRebalanceRequestedAt: this.state.forceRebalanceRequestedAt || null,
+        forceRebalanceRecoveryPending: Boolean(this.state.forceRebalanceRecoveryPending),
         canRebalanceNow: gate.allowed,
         reason: gate.reason,
       },
