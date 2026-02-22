@@ -426,6 +426,16 @@ const ERC721_TRANSFER_EVENT = {
   ],
 };
 
+const ERC20_TRANSFER_EVENT = {
+  type: "event",
+  name: "Transfer",
+  inputs: [
+    { indexed: true, name: "from", type: "address" },
+    { indexed: true, name: "to", type: "address" },
+    { indexed: false, name: "value", type: "uint256" },
+  ],
+};
+
 const NPM_COLLECT_EVENT = {
   type: "event",
   name: "Collect",
@@ -1618,10 +1628,17 @@ class Uc6Bot {
         });
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
         this.addTxToActiveAction("swap", hash, receipt);
+        if (receipt.status && receipt.status !== "success") {
+          throw new Error(`Swap tx reverted on-chain hash=${hash}`);
+        }
+        const inDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenIn);
+        const outDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenOut);
         const postInBalance = await this.readTokenBalance(tokenIn);
         const postOutBalance = await this.readTokenBalance(tokenOut);
-        const actualOut = postOutBalance > preOutBalance ? postOutBalance - preOutBalance : BigInt(0);
-        const actualIn = preInBalance > postInBalance ? preInBalance - postInBalance : BigInt(0);
+        const actualOutByBalance = postOutBalance > preOutBalance ? postOutBalance - preOutBalance : BigInt(0);
+        const actualInByBalance = preInBalance > postInBalance ? preInBalance - postInBalance : BigInt(0);
+        const actualOut = outDelta.inflow > 0n ? outDelta.inflow : actualOutByBalance;
+        const actualIn = inDelta.outflow > 0n ? inDelta.outflow : actualInByBalance;
         const quoteGap = quoteOut > actualOut ? quoteOut - actualOut : BigInt(0);
         const spot = this.getSpotUsdcPerWeth();
         const quoteOutUsd = this.usdValueForTokenOutDelta(tokenOut, quoteOut, spot);
@@ -1731,6 +1748,24 @@ class Uc6Bot {
       }
     }
     return { amount0, amount1 };
+  }
+
+  extractWalletErc20DeltaFromReceipt(receipt, tokenAddress) {
+    let inflow = BigInt(0);
+    let outflow = BigInt(0);
+    for (const log of receipt?.logs || []) {
+      if (!sameAddress(log.address, tokenAddress)) continue;
+      try {
+        const decoded = decodeEventLog({ abi: [ERC20_TRANSFER_EVENT], data: log.data, topics: log.topics });
+        if (decoded.eventName !== "Transfer") continue;
+        const value = BigInt(decoded.args.value ?? 0);
+        if (sameAddress(decoded.args.from, this.account.address)) outflow += value;
+        if (sameAddress(decoded.args.to, this.account.address)) inflow += value;
+      } catch {
+        // ignore unrelated logs
+      }
+    }
+    return { inflow, outflow };
   }
 
   async mintPosition({
@@ -2221,7 +2256,13 @@ class Uc6Bot {
       this.finalizeActiveAction("topup", "idle_deploy");
       return true;
     } catch (err) {
-      this.markRebalanceFailure(err, "idle_deploy");
+      this.setLastError(err);
+      this.setDecision({
+        action: "topup_failed",
+        reason: "idle_deploy",
+        error: err instanceof Error ? err.message : String(err || "unknown"),
+        txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
+      });
       this.finalizeActiveAction("error", "idle_deploy_failed", {
         message: err instanceof Error ? err.message : String(err || "unknown"),
       });
