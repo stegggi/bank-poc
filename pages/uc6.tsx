@@ -15,7 +15,7 @@ type EthereumProvider = Eip1193Provider & {
 
 type Uc6Venue = "slipstream" | "uniswapv3";
 type CompoundMode = "on_rebalance" | "threshold_harvest";
-type OwnerAction = "update_settings" | "force_rebalance";
+type OwnerAction = "update_settings" | "force_rebalance" | "liquidate_and_pause";
 
 type Uc6DraftSettings = {
   tradingEnabled: boolean;
@@ -474,7 +474,7 @@ export default function Uc6Page() {
     }: {
       action: OwnerAction;
       payload: unknown;
-      endpoint: "/api/uc6/owner/settings" | "/api/uc6/owner/force-rebalance";
+      endpoint: "/api/uc6/owner/settings" | "/api/uc6/owner/force-rebalance" | "/api/uc6/owner/liquidate-and-pause";
       successPrefix: string;
     }) => {
       if (!walletAddress) throw new Error("Connect MetaMask first.");
@@ -583,6 +583,36 @@ export default function Uc6Page() {
       setBusy("");
     }
   }, [submitSignedOwnerAction]);
+
+  const liquidateAndPause = useCallback(async () => {
+    setError("");
+    setNotice("");
+    if (!status?.position?.tokenId) {
+      setError("No active LP position to liquidate.");
+      return;
+    }
+    const confirmed =
+      typeof window === "undefined"
+        ? true
+        : window.confirm(
+            "This will close the entire LP position, return tokens to the wallet, and then enable the kill switch (trading disabled). Continue?"
+          );
+    if (!confirmed) return;
+
+    setBusy("liquidate-and-pause");
+    try {
+      await submitSignedOwnerAction({
+        action: "liquidate_and_pause",
+        payload: {},
+        endpoint: "/api/uc6/owner/liquidate-and-pause",
+        successPrefix: "LP liquidated and trading disabled",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to liquidate LP and pause trading.");
+    } finally {
+      setBusy("");
+    }
+  }, [status?.position?.tokenId, submitSignedOwnerAction]);
 
   const updateNumber = useCallback((key: keyof Uc6DraftSettings, value: string) => {
     const num = Number(value);
@@ -694,6 +724,18 @@ export default function Uc6Page() {
           </Card>
 
           <Card title="LP Position Composition">
+            {isOwner && (
+              <div style={{ ...styles.row, marginBottom: 12 }}>
+                <button
+                  style={styles.buttonDanger}
+                  onClick={liquidateAndPause}
+                  disabled={busy !== "" || !status?.position?.tokenId}
+                  title={!status?.position?.tokenId ? "No active LP position" : "Close LP and enable kill switch"}
+                >
+                  Liquidate LP + Pause
+                </button>
+              </div>
+            )}
             <div style={styles.metaGrid}>
               <Metric label="USDC in LP" value={`${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`} />
               <Metric label="WETH in LP" value={`${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`} />

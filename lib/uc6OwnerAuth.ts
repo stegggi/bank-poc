@@ -15,7 +15,7 @@ type GlobalUc6 = typeof globalThis & {
   __uc6RateLimit?: RateLimitStore;
 };
 
-export type OwnerAction = "update_settings" | "force_rebalance";
+export type OwnerAction = "update_settings" | "force_rebalance" | "liquidate_and_pause";
 
 export type Uc6OwnerMessageParams = {
   action: OwnerAction;
@@ -130,7 +130,7 @@ export function parseOwnerMessage(message: string): ParsedUc6OwnerMessage {
   }
 
   const action = fields.action;
-  if (action !== "update_settings" && action !== "force_rebalance") {
+  if (action !== "update_settings" && action !== "force_rebalance" && action !== "liquidate_and_pause") {
     throw new Error("Unsupported owner action");
   }
 

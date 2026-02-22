@@ -53,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const body = (req.body || {}) as ChallengeRequest;
     const action = String(body.action || "") as OwnerAction;
-    if (action !== "update_settings" && action !== "force_rebalance") {
+    if (action !== "update_settings" && action !== "force_rebalance" && action !== "liquidate_and_pause") {
       return res.status(400).json({ error: "Unsupported action" });
     }
     const address = getAddress(String(body.address || ""));

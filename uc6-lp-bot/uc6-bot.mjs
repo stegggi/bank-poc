@@ -836,6 +836,8 @@ class Uc6Bot {
     this.loopRunning = false;
     this.stopRequested = false;
     this.activeAction = null;
+    this.lastLedgerRepairAtMs = 0;
+    this.ledgerRepairInFlight = false;
     this.ownerNonceUsed = new Map();
     this.ownerRateLimiter = new SimpleRateLimiter(20, 60_000);
     this.server = null;
@@ -1062,7 +1064,9 @@ class Uc6Bot {
       mintBurnUsd += Number(ev.mintBurnUsd || 0);
       if (ev.type === "recenter") rebalances += 1;
     }
-    const totalCostsUsd = gasUsd + swapCostsUsd + mintBurnUsd;
+    // `gasUsd` is tracked as total tx gas and `mintBurnUsd` is a labeled subset
+    // (mint/increase/decrease/collect/burn gas). Do not double-count it in totals.
+    const totalCostsUsd = gasUsd + swapCostsUsd;
     const netUsd = feesUsd + rewardsUsd - totalCostsUsd;
     return {
       feesUsd,
@@ -1182,10 +1186,11 @@ class Uc6Bot {
     this.activeAction = null;
     const type = typeOverride || action.type || "info";
     const reason = reasonOverride || action.reason || "n/a";
+    // `mintBurnUsd` is informational (subset of gasUsd), so net should not subtract it again.
     const netUsd =
       Number(action.feesCollectedUsd || 0) +
       Number(action.rewardsUsd || 0) -
-      (Number(action.gasUsd || 0) + Number(action.swapCostUsd || 0) + Number(action.mintBurnUsd || 0));
+      (Number(action.gasUsd || 0) + Number(action.swapCostUsd || 0));
     const swaps = Array.isArray(action.swaps) ? action.swaps : [];
     let weightedSlippageNumerator = 0;
     let weightedSlippageDenominator = 0;
@@ -1793,6 +1798,132 @@ class Uc6Bot {
       }
     }
     return { inflow, outflow };
+  }
+
+  receiptHasCollectLog(receipt, npmAddress) {
+    for (const log of receipt?.logs || []) {
+      if (!sameAddress(log.address, npmAddress)) continue;
+      try {
+        const decoded = decodeEventLog({ abi: [NPM_COLLECT_EVENT], data: log.data, topics: log.topics });
+        if (decoded.eventName === "Collect") return true;
+      } catch {
+        // ignore unrelated logs
+      }
+    }
+    return false;
+  }
+
+  isLegacyBogusIdleDeploySwapCost(ev) {
+    if (!ev || ev.type !== "error" || ev.reason !== "idle_deploy_failed") return false;
+    const swapCost = Number(ev.swapCostUsd || 0);
+    if (!(swapCost > 1)) return false;
+    const swaps = Array.isArray(ev.swaps) ? ev.swaps : [];
+    if (swaps.length === 0) return false;
+    for (const sw of swaps) {
+      const slippage = Number(sw?.slippageBpsReal);
+      const actualOut = String(sw?.actualOut ?? "0");
+      const quoteOut = String(sw?.quoteOut ?? "0");
+      if ((Number.isFinite(slippage) && slippage >= 5_000) || (quoteOut !== "0" && actualOut === "0")) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  recomputeEventNet(ev) {
+    const fees = Number(ev?.feesCollectedUsd || 0);
+    const rewards = Number(ev?.rewardsUsd || 0);
+    const gas = Number(ev?.gasUsd || 0);
+    const swap = Number(ev?.swapCostUsd || 0);
+    return fees + rewards - (gas + swap);
+  }
+
+  sanitizeLedgerEventsInPlace() {
+    const ledger = Array.isArray(this.state.ledgerEvents) ? this.state.ledgerEvents : [];
+    let changed = false;
+    for (const ev of ledger) {
+      if (this.isLegacyBogusIdleDeploySwapCost(ev) && !ev.swapCostSanitized) {
+        ev.swapCostUsd = 0;
+        ev.swapCostSanitized = true;
+        ev.netUsd = this.recomputeEventNet(ev);
+        changed = true;
+      } else if (ev && typeof ev === "object" && ev.netUsd != null) {
+        // Normalize old events that had net double-counted against mintBurnUsd.
+        const normalizedNet = this.recomputeEventNet(ev);
+        if (Number.isFinite(normalizedNet) && Math.abs(Number(ev.netUsd || 0) - normalizedNet) > 1e-9) {
+          ev.netUsd = normalizedNet;
+          changed = true;
+        }
+      }
+    }
+    return changed;
+  }
+
+  async backfillMissingFeesFromReceipts(limit = 8) {
+    const ledger = Array.isArray(this.state.ledgerEvents) ? this.state.ledgerEvents : [];
+    if (ledger.length === 0) return false;
+    const spot = this.getSpotUsdcPerWeth();
+    let changed = false;
+    let repaired = 0;
+    for (let i = ledger.length - 1; i >= 0 && repaired < limit; i -= 1) {
+      const ev = ledger[i];
+      if (!ev || (ev.type !== "harvest" && ev.type !== "recenter")) continue;
+      if (Number(ev.feesCollectedUsd || 0) > 0) continue;
+      if (ev.feesBackfilled) continue;
+      const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes.filter((h) => typeof h === "string" && h.startsWith("0x")) : [];
+      if (txHashes.length === 0) continue;
+
+      let usdcRaw = 0n;
+      let wethRaw = 0n;
+      let sawCollect = false;
+      for (const hash of txHashes) {
+        try {
+          const receipt = await this.publicClient.getTransactionReceipt({ hash });
+          const collectOnSlip = this.receiptHasCollectLog(receipt, this.slipstreamNpm);
+          const collectOnUni = this.receiptHasCollectLog(receipt, this.uniswapNpm);
+          if (!collectOnSlip && !collectOnUni) continue;
+          sawCollect = true;
+          const usdcDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.usdc);
+          const wethDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.weth);
+          usdcRaw += BigInt(usdcDelta.inflow || 0n);
+          wethRaw += BigInt(wethDelta.inflow || 0n);
+        } catch {
+          // ignore tx receipt failures; try other txs/events
+        }
+      }
+      if (!sawCollect) continue;
+
+      const feesUsd =
+        Number(formatUnits(usdcRaw, USDC_DECIMALS)) +
+        Number(formatUnits(wethRaw, WETH_DECIMALS)) * spot;
+      if (feesUsd > 0) {
+        ev.feesCollectedUsd = feesUsd;
+        ev.feesBackfilled = true;
+        ev.netUsd = this.recomputeEventNet(ev);
+        changed = true;
+        repaired += 1;
+      } else {
+        ev.feesBackfilled = true;
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  async repairLedgerAccounting() {
+    const now = Date.now();
+    if (this.ledgerRepairInFlight) return false;
+    if (this.lastLedgerRepairAtMs && now - this.lastLedgerRepairAtMs < 60_000) return false;
+    this.ledgerRepairInFlight = true;
+    this.lastLedgerRepairAtMs = now;
+    try {
+      let changed = false;
+      if (this.sanitizeLedgerEventsInPlace()) changed = true;
+      if (await this.backfillMissingFeesFromReceipts()) changed = true;
+      return changed;
+    } finally {
+      this.ledgerRepairInFlight = false;
+    }
   }
 
   async mintPosition({
@@ -3022,6 +3153,11 @@ class Uc6Bot {
     const snapshots = await this.refreshSnapshots();
     await this.reconcilePositionFromChain();
     try {
+      await this.repairLedgerAccounting();
+    } catch (err) {
+      this.setLastError(err);
+    }
+    try {
       this.state.latest.collectableNow = await this.collectableNowSnapshot();
     } catch {
       this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
@@ -3383,6 +3519,125 @@ class Uc6Bot {
     }
   }
 
+  async handleOwnerLiquidateAndPause(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+
+    const auth = String(req.headers.authorization || "");
+    if (auth !== `Bearer ${ENV.adminToken}`) return unauthorized(res);
+
+    try {
+      const body = await readJsonBody(req);
+      const message = String(body.message || "");
+      const signature = String(body.signature || "");
+      const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+
+      if (!message || !signature) {
+        return jsonResponse(res, 400, { error: "Missing message or signature" });
+      }
+
+      const parsed = verifyOwnerSignature({
+        ownerAddress: this.ownerAddress,
+        message,
+        signature,
+        payload,
+        expectedAction: "liquidate_and_pause",
+      });
+
+      this.pruneUsedNonces();
+      if (this.ownerNonceUsed.has(parsed.nonce)) {
+        return jsonResponse(res, 409, { error: "Owner nonce already used" });
+      }
+
+      await this.loadSettings(false);
+      const tokenId = this.state.position?.tokenId || null;
+      const venue = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+      const npmAddress = venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
+      let liquidated = false;
+
+      if (tokenId) {
+        this.beginAction("liquidate", "owner_liquidate_and_pause");
+        try {
+          let preCloseCollectableUsd = Number(this.state.latest?.collectableNow?.usd || 0);
+          try {
+            const freshCollectable = await this.collectableNowSnapshot();
+            this.state.latest.collectableNow = freshCollectable;
+            preCloseCollectableUsd = Number(freshCollectable?.usd || preCloseCollectableUsd || 0);
+          } catch {
+            // keep last known collectable snapshot if refresh fails
+          }
+          await this.closePosition({
+            npmAddress,
+            tokenId,
+            feeValueOverrideUsd: preCloseCollectableUsd,
+          });
+          this.state.position = {
+            ...this.state.position,
+            venue,
+            tokenId: null,
+            tickLower: null,
+            tickUpper: null,
+            centerTick: null,
+            liquidity: null,
+            inRange: null,
+          };
+          this.state.pendingCompoundUsd = 0;
+          this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
+          this.finalizeActiveAction("liquidate", "owner_liquidate_and_pause");
+          liquidated = true;
+        } catch (err) {
+          this.setLastError(err);
+          this.finalizeActiveAction("error", "owner_liquidate_and_pause_failed", {
+            message: err instanceof Error ? err.message : String(err || "unknown"),
+          });
+          throw err;
+        }
+      }
+
+      const nextSettings = normalizeSettings(
+        {
+          ...this.settings,
+          tradingEnabled: false,
+          killSwitch: true,
+        },
+        this.settings
+      );
+      nextSettings.tradingEnabled = false;
+      nextSettings.killSwitch = true;
+
+      await writeJsonAtomic(SETTINGS_PATH, nextSettings);
+      this.settings = nextSettings;
+      try {
+        const st = await fsp.stat(SETTINGS_PATH);
+        this.settingsMtimeMs = st.mtimeMs;
+      } catch {}
+
+      this.state.forceRebalanceRequestedAt = null;
+      this.state.forceRebalanceRecoveryPending = false;
+      this.setDecision({
+        action: "owner_liquidate_and_pause",
+        by: this.ownerAddress,
+        liquidated,
+        tokenId,
+      });
+
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      await this.persistState();
+
+      return jsonResponse(res, 200, {
+        ok: true,
+        liquidated,
+        tokenId,
+        settings: this.settings,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || "Bad request");
+      return jsonResponse(res, 400, { error: msg });
+    }
+  }
+
   async handleHttp(req, res) {
     if (!req.url) return jsonResponse(res, 404, { error: "Not found" });
     const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -3407,6 +3662,9 @@ class Uc6Bot {
       }
       if (req.method === "POST" && u.pathname === "/owner/force-rebalance") {
         return await this.handleOwnerForceRebalance(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/liquidate-and-pause") {
+        return await this.handleOwnerLiquidateAndPause(req, res);
       }
       return jsonResponse(res, 405, { error: "Method not allowed" });
     }
