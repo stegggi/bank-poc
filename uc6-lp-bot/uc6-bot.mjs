@@ -1846,13 +1846,23 @@ class Uc6Bot {
         }
         if (!tokenId) throw new Error("Mint succeeded but tokenId could not be determined");
 
-        const posRaw = await this.publicClient.readContract({
-          address: npmAddress,
-          abi: NPM_POSITION_ABI,
-          functionName: "positions",
-          args: [tokenId],
-        });
-        const pos = this.parsePositionResult(posRaw);
+        let pos = null;
+        try {
+          const posRaw = await this.publicClient.readContract({
+            address: npmAddress,
+            abi: NPM_POSITION_ABI,
+            functionName: "positions",
+            args: [tokenId],
+          });
+          pos = this.parsePositionResult(posRaw);
+        } catch (posErr) {
+          const msg = posErr instanceof Error ? posErr.message : String(posErr || "");
+          // Accept successful mint tx + ERC721 transfer even if an immediate positions() read
+          // briefly returns ID on the RPC backend. Reconcile loop will fill details next tick.
+          if (!(msg.includes('function "positions" reverted') && /\bID\b/.test(msg))) {
+            throw posErr;
+          }
+        }
 
         return {
           tokenId: tokenId.toString(),
