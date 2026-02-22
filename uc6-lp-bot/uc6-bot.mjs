@@ -42,10 +42,12 @@ const ENV = {
 
   slipstreamPool: process.env.UC6_SLIPSTREAM_POOL || "0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59",
   slipstreamRouter: process.env.UC6_SLIPSTREAM_ROUTER || "0xbe6d8f0d05cc4be24d5167a3ef062215be6d18a5",
+  slipstreamQuoter: process.env.UC6_SLIPSTREAM_QUOTER || "0x254cf9e1e6e233aa1ac962cb9b05b2cfeaae15b0",
   slipstreamNpm: process.env.UC6_SLIPSTREAM_NPM || "0x827922686190790b37229fd06084350e74485b72",
 
   uniswapPool: process.env.UC6_UNISWAP_POOL || "0xd0b53d9277642d899df5c87a3966a349a798f224",
   uniswapRouter: process.env.UC6_UNISWAP_ROUTER || "0x2626664c2603336E57B271c5C0b26F421741e481",
+  uniswapQuoter: process.env.UC6_UNISWAP_QUOTER || "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
   uniswapNpm: process.env.UC6_UNISWAP_NPM || "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1",
 };
 
@@ -334,6 +336,58 @@ const ROUTER_ABI_TICK = [
   },
 ];
 
+const QUOTER_ABI_FEE_V2 = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "amountIn", type: "uint256" },
+          { name: "fee", type: "uint24" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "sqrtPriceX96After", type: "uint160" },
+      { name: "initializedTicksCrossed", type: "uint32" },
+      { name: "gasEstimate", type: "uint256" },
+    ],
+  },
+];
+
+const QUOTER_ABI_TICK_V2 = [
+  {
+    name: "quoteExactInputSingle",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "tokenIn", type: "address" },
+          { name: "tokenOut", type: "address" },
+          { name: "tickSpacing", type: "int24" },
+          { name: "amountIn", type: "uint256" },
+          { name: "sqrtPriceLimitX96", type: "uint160" },
+        ],
+      },
+    ],
+    outputs: [
+      { name: "amountOut", type: "uint256" },
+      { name: "sqrtPriceX96After", type: "uint160" },
+      { name: "initializedTicksCrossed", type: "uint32" },
+      { name: "gasEstimate", type: "uint256" },
+    ],
+  },
+];
+
 const ERC721_TRANSFER_EVENT = {
   type: "event",
   name: "Transfer",
@@ -465,6 +519,7 @@ function defaultState(accountAddress) {
     lastRebalanceFailedAt: null,
     rebalanceFailureCooldownUntil: null,
     consecutiveRebalanceFailures: 0,
+    forceRebalanceRequestedAt: null,
     pendingCompoundUsd: 0,
     position: {
       venue: "slipstream",
@@ -571,9 +626,9 @@ function sameAddress(a, b) {
   }
 }
 
-function verifyOwnerSignature({ ownerAddress, message, signature, payload }) {
+function verifyOwnerSignature({ ownerAddress, message, signature, payload, expectedAction = "update_settings" }) {
   const parsed = parseOwnerMessage(message);
-  if (parsed.action !== "update_settings") {
+  if (parsed.action !== expectedAction) {
     throw new Error("Invalid owner action");
   }
 
@@ -702,9 +757,11 @@ class Uc6Bot {
     this.weth = getAddress(ENV.weth);
     this.slipstreamPool = getAddress(ENV.slipstreamPool);
     this.slipstreamRouter = getAddress(ENV.slipstreamRouter);
+    this.slipstreamQuoter = getAddress(ENV.slipstreamQuoter);
     this.slipstreamNpm = getAddress(ENV.slipstreamNpm);
     this.uniswapPool = getAddress(ENV.uniswapPool);
     this.uniswapRouter = getAddress(ENV.uniswapRouter);
+    this.uniswapQuoter = getAddress(ENV.uniswapQuoter);
     this.uniswapNpm = getAddress(ENV.uniswapNpm);
 
     const pk = ENV.privateKey.startsWith("0x") ? ENV.privateKey : `0x${ENV.privateKey}`;
@@ -895,6 +952,8 @@ class Uc6Bot {
       feesCollectedUsd: 0,
       rewardsUsd: 0,
       netUsd: 0,
+      slippageBpsReal: null,
+      swaps: [],
       isEstimated: false,
       ...event,
     };
@@ -1020,6 +1079,7 @@ class Uc6Bot {
       mintBurnUsd: 0,
       feesCollectedUsd: 0,
       rewardsUsd: 0,
+      swaps: [],
       isEstimated: false,
     };
   }
@@ -1059,6 +1119,19 @@ class Uc6Bot {
       Number(action.feesCollectedUsd || 0) +
       Number(action.rewardsUsd || 0) -
       (Number(action.gasUsd || 0) + Number(action.swapCostUsd || 0) + Number(action.mintBurnUsd || 0));
+    const swaps = Array.isArray(action.swaps) ? action.swaps : [];
+    let weightedSlippageNumerator = 0;
+    let weightedSlippageDenominator = 0;
+    for (const sw of swaps) {
+      const q = Number(sw.quoteOutUsd || 0);
+      const s = Number(sw.slippageBpsReal);
+      if (q > 0 && Number.isFinite(s)) {
+        weightedSlippageNumerator += s * q;
+        weightedSlippageDenominator += q;
+      }
+    }
+    const slippageBpsReal =
+      weightedSlippageDenominator > 0 ? weightedSlippageNumerator / weightedSlippageDenominator : null;
     this.pushEvent({
       type,
       reason,
@@ -1070,6 +1143,8 @@ class Uc6Bot {
       feesCollectedUsd: Number(action.feesCollectedUsd || 0),
       rewardsUsd: Number(action.rewardsUsd || 0),
       netUsd,
+      slippageBpsReal,
+      swaps,
       isEstimated: Boolean(action.isEstimated),
       ...extra,
     });
@@ -1319,13 +1394,122 @@ class Uc6Bot {
     return (estimatedOut * BigInt(Math.max(0, 10_000 - slippageBps))) / 10_000n;
   }
 
+  parseAmountOutFromQuoteResult(result) {
+    if (typeof result === "bigint") return result;
+    if (Array.isArray(result)) {
+      const first = result[0];
+      return typeof first === "bigint" ? first : BigInt(first || 0);
+    }
+    if (result && typeof result === "object") {
+      const amountOut = result.amountOut ?? result[0];
+      if (typeof amountOut === "bigint") return amountOut;
+      if (amountOut != null) return BigInt(amountOut);
+    }
+    return BigInt(0);
+  }
+
+  async quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing }) {
+    const candidates = [
+      {
+        address: this.slipstreamQuoter,
+        abi: QUOTER_ABI_TICK_V2,
+        args: [
+          {
+            tokenIn,
+            tokenOut,
+            tickSpacing: tickSpacing || 1,
+            amountIn,
+            sqrtPriceLimitX96: BigInt(0),
+          },
+        ],
+      },
+      {
+        address: this.uniswapQuoter,
+        abi: QUOTER_ABI_FEE_V2,
+        args: [
+          {
+            tokenIn,
+            tokenOut,
+            amountIn,
+            fee: Math.max(1, Number(fee || 0) || 3000),
+            sqrtPriceLimitX96: BigInt(0),
+          },
+        ],
+      },
+    ];
+
+    for (const c of candidates) {
+      try {
+        const sim = await this.publicClient.simulateContract({
+          address: c.address,
+          abi: c.abi,
+          functionName: "quoteExactInputSingle",
+          args: c.args,
+          account: this.account.address,
+        });
+        const amountOut = this.parseAmountOutFromQuoteResult(sim.result);
+        if (amountOut > BigInt(0)) {
+          return { amountOut, source: sameAddress(c.address, this.slipstreamQuoter) ? "slipstream_quoter" : "uniswap_quoter" };
+        }
+      } catch {
+        // try next candidate
+      }
+    }
+
+    return { amountOut: BigInt(0), source: "none" };
+  }
+
+  toNumberTokenAmount(tokenAddress, amountRaw) {
+    if (!amountRaw || amountRaw <= BigInt(0)) return 0;
+    if (sameAddress(tokenAddress, this.usdc)) return Number(formatUnits(amountRaw, USDC_DECIMALS));
+    if (sameAddress(tokenAddress, this.weth)) return Number(formatUnits(amountRaw, WETH_DECIMALS));
+    return 0;
+  }
+
+  usdValueForTokenOutDelta(tokenAddress, amountRaw, spotUsdcPerWeth) {
+    if (!amountRaw || amountRaw <= BigInt(0)) return 0;
+    if (sameAddress(tokenAddress, this.usdc)) return Number(formatUnits(amountRaw, USDC_DECIMALS));
+    if (sameAddress(tokenAddress, this.weth)) return Number(formatUnits(amountRaw, WETH_DECIMALS)) * spotUsdcPerWeth;
+    return 0;
+  }
+
+  addSwapMetricsToActiveAction(metrics = {}) {
+    if (!this.activeAction) return;
+    if (!Array.isArray(this.activeAction.swaps)) this.activeAction.swaps = [];
+    const safe = {
+      tokenIn: metrics.tokenIn || null,
+      tokenOut: metrics.tokenOut || null,
+      quoteSource: metrics.quoteSource || null,
+      quoteOut: String(metrics.quoteOut ?? BigInt(0)),
+      actualOut: String(metrics.actualOut ?? BigInt(0)),
+      actualIn: String(metrics.actualIn ?? BigInt(0)),
+      quoteOutUsd: Number(metrics.quoteOutUsd || 0),
+      actualOutUsd: Number(metrics.actualOutUsd || 0),
+      swapCostUsd: Number(metrics.swapCostUsd || 0),
+      slippageBpsReal:
+        metrics.slippageBpsReal == null || !Number.isFinite(Number(metrics.slippageBpsReal))
+          ? null
+          : Number(metrics.slippageBpsReal),
+      isEstimated: Boolean(metrics.isEstimated),
+    };
+    this.activeAction.swaps.push(safe);
+    this.activeAction.swapCostUsd += safe.swapCostUsd;
+    this.activeAction.isEstimated = this.activeAction.isEstimated || safe.isEstimated;
+  }
+
   async swapExactInputSingle({ router, tokenIn, tokenOut, amountIn, slippageBps, fee, tickSpacing, snapshot }) {
     if (amountIn <= 0n) return;
 
     await this.assertTxAllowed("swap");
     await this.approveIfNeeded(tokenIn, router, amountIn);
+    const preInBalance = await this.readTokenBalance(tokenIn);
+    const preOutBalance = await this.readTokenBalance(tokenOut);
+    const quoterQuote = await this.quoteExactInputSingle({ tokenIn, tokenOut, amountIn, fee, tickSpacing }).catch(
+      () => ({ amountOut: BigInt(0), source: "none" })
+    );
     const estimatedOut = this.priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot);
-    const amountOutMinimum = this.minOutFromEstimate(estimatedOut, slippageBps);
+    const quotedOutForMin = quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : estimatedOut;
+    const amountOutMinimum = this.minOutFromEstimate(quotedOutForMin, slippageBps);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
     const candidates = [
@@ -1367,6 +1551,11 @@ class Uc6Bot {
           args: [c.params],
           account: this.account.address,
         });
+        const routerQuoteOut = this.parseAmountOutFromQuoteResult(sim.result);
+        const quoteOut =
+          quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : routerQuoteOut > BigInt(0) ? routerQuoteOut : estimatedOut;
+        const quoteSource =
+          quoterQuote.amountOut > BigInt(0) ? quoterQuote.source : routerQuoteOut > BigInt(0) ? "router_sim" : "price_estimate";
 
         await this.assertTxAllowed("swap_write");
         const hash = await this.walletClient.writeContract({
@@ -1375,12 +1564,32 @@ class Uc6Bot {
         });
         const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
         this.addTxToActiveAction("swap", hash, receipt);
+        const postInBalance = await this.readTokenBalance(tokenIn);
+        const postOutBalance = await this.readTokenBalance(tokenOut);
+        const actualOut = postOutBalance > preOutBalance ? postOutBalance - preOutBalance : BigInt(0);
+        const actualIn = preInBalance > postInBalance ? preInBalance - postInBalance : BigInt(0);
+        const quoteGap = quoteOut > actualOut ? quoteOut - actualOut : BigInt(0);
         const spot = this.getSpotUsdcPerWeth();
-        const amountInUsd = this.toUsdForTokenAmountRaw(tokenIn, amountIn, spot);
-        const poolFeeFraction = Number(fee || 0) > 0 ? Number(fee) / 1_000_000 : 0;
-        const slippageFraction = Math.max(0, Number(slippageBps || 0)) / 10_000;
-        const estimatedSwapCostUsd = amountInUsd * (poolFeeFraction + slippageFraction);
-        this.addSwapCostToActiveAction(estimatedSwapCostUsd, true);
+        const quoteOutUsd = this.usdValueForTokenOutDelta(tokenOut, quoteOut, spot);
+        const actualOutUsd = this.usdValueForTokenOutDelta(tokenOut, actualOut, spot);
+        const swapCostUsd = this.usdValueForTokenOutDelta(tokenOut, quoteGap, spot);
+        const slippageBpsReal =
+          quoteOut > BigInt(0)
+            ? (Number(quoteOut - actualOut) / Number(quoteOut)) * 10_000
+            : null;
+        this.addSwapMetricsToActiveAction({
+          tokenIn,
+          tokenOut,
+          quoteSource,
+          quoteOut,
+          actualOut,
+          actualIn,
+          quoteOutUsd,
+          actualOutUsd,
+          swapCostUsd: Math.max(0, swapCostUsd),
+          slippageBpsReal,
+          isEstimated: false,
+        });
         return;
       } catch (err) {
         lastErr = err;
@@ -1613,7 +1822,7 @@ class Uc6Bot {
     );
   }
 
-  async closePosition({ npmAddress, tokenId }) {
+  async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null }) {
     if (!tokenId) return;
     await this.assertTxAllowed("close_position");
     const id = BigInt(tokenId);
@@ -1684,7 +1893,8 @@ class Uc6Bot {
     const feesUsd =
       Number(formatUnits(usdcDelta, USDC_DECIMALS)) +
       Number(formatUnits(wethDelta, WETH_DECIMALS)) * this.getSpotUsdcPerWeth();
-    this.addFeesToActiveAction(feesUsd);
+    this.addFeesToActiveAction(feeValueOverrideUsd == null ? feesUsd : feeValueOverrideUsd);
+    this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
 
     try {
       await this.assertTxAllowed("close_burn");
@@ -1734,6 +1944,7 @@ class Uc6Bot {
     const weth = Number(formatUnits(wethDelta, WETH_DECIMALS));
     const usd = usdc + weth * this.getSpotUsdcPerWeth();
     this.addFeesToActiveAction(usd);
+    this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
     return { usdc, weth, usd };
   }
 
@@ -1910,18 +2121,18 @@ class Uc6Bot {
     if (collectableUsd < Number(this.settings.harvestThresholdUsd || 0)) return false;
 
     const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
-    this.beginAction("harvest", "threshold_harvest");
+    this.beginAction("harvest", "threshold");
     try {
       const collected = await this.collectPositionFees({ npmAddress: npm, tokenId });
       this.state.pendingCompoundUsd = Number(this.state.pendingCompoundUsd || 0) + Number(collected.usd || 0);
       this.setDecision({
         action: "harvest",
-        reason: "threshold_harvest",
+        reason: "threshold",
         collectedUsd: Number(collected.usd || 0),
         pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
         txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
       });
-      this.finalizeActiveAction("harvest", "threshold_harvest", {
+      this.finalizeActiveAction("harvest", "threshold", {
         note: "increaseLiquidity not implemented; collected fees kept as pending compound",
       });
       return true;
@@ -1941,7 +2152,18 @@ class Uc6Bot {
     const currentTokenId = this.state.position?.tokenId;
     let closedExistingPosition = false;
     if (currentTokenId) {
-      await this.closePosition({ npmAddress: npm, tokenId: currentTokenId });
+      let preCloseCollectableUsd = Number(this.state.latest?.collectableNow?.usd || 0);
+      try {
+        const freshCollectable = await this.collectableNowSnapshot();
+        preCloseCollectableUsd = Number(freshCollectable?.usd || 0);
+      } catch {
+        // use latest cached collectable snapshot
+      }
+      await this.closePosition({
+        npmAddress: npm,
+        tokenId: currentTokenId,
+        feeValueOverrideUsd: preCloseCollectableUsd,
+      });
       this.state.position = {
         ...this.state.position,
         tokenId: null,
@@ -2164,52 +2386,77 @@ class Uc6Bot {
       return;
     }
 
+    const forceRequestedAt = this.state.forceRebalanceRequestedAt || null;
+    const forceRebalance = Boolean(forceRequestedAt);
     const gate = this.getRebalanceGate();
     const trigger = this.getPositionTrigger(primary.tick);
+    const effectiveTrigger = forceRebalance
+      ? { ...trigger, trigger: true, reason: "manual_force" }
+      : trigger;
 
     if (this.settings.killSwitch) {
-      this.setDecision({ action: "monitor", reason: "kill_switch_active", tradingEnabled: false, gate });
+      this.setDecision({
+        action: "monitor",
+        reason: "kill_switch_active",
+        tradingEnabled: false,
+        gate,
+        forceRebalanceRequestedAt: forceRequestedAt,
+      });
       this.pushEvent({ type: "blocked", reason: "kill_switch_active" });
       return;
     }
 
     if (!this.settings.tradingEnabled) {
-      this.setDecision({ action: "monitor", reason: trigger.reason, tradingEnabled: false, gate });
+      this.setDecision({
+        action: "monitor",
+        reason: effectiveTrigger.reason,
+        tradingEnabled: false,
+        gate,
+        forceRebalanceRequestedAt: forceRequestedAt,
+      });
       this.pushEvent({ type: "blocked", reason: "trading_disabled" });
       return;
     }
 
-    if (!trigger.trigger) {
+    if (!effectiveTrigger.trigger) {
       const harvested = await this.maybeHarvestOnly();
       if (harvested) return;
-      this.setDecision({ action: "monitor", reason: trigger.reason, edgeProgress: trigger.edgeProgress, gate });
+      this.setDecision({
+        action: "monitor",
+        reason: trigger.reason,
+        edgeProgress: trigger.edgeProgress,
+        gate,
+      });
       return;
     }
 
-    if (!gate.allowed) {
-      this.setDecision({ action: "skipped", reason: trigger.reason, gate });
+    if (!forceRebalance && !gate.allowed) {
+      this.setDecision({ action: "skipped", reason: effectiveTrigger.reason, gate });
       this.pushEvent({ type: "blocked", reason: gate.reason });
       return;
     }
 
     if (this.settings.venue === "uniswapv3") {
+      if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
       this.setDecision({
         action: "skipped",
-        reason: trigger.reason,
+        reason: effectiveTrigger.reason,
         note: "uniswapv3 execution path is intentionally read-only in this version",
       });
       return;
     }
 
-    this.beginAction("recenter", trigger.reason);
+    if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
+    this.beginAction("recenter", effectiveTrigger.reason);
     try {
       await this.rebalanceSlipstream(primary);
-      this.markRebalanceSuccess(trigger.reason, "slipstream");
-      this.finalizeActiveAction("recenter", trigger.reason);
+      this.markRebalanceSuccess(effectiveTrigger.reason, "slipstream");
+      this.finalizeActiveAction("recenter", effectiveTrigger.reason, forceRebalance ? { requestedAt: forceRequestedAt } : {});
     } catch (err) {
-      this.markRebalanceFailure(err, trigger.reason);
-      this.finalizeActiveAction("error", trigger.reason, {
+      this.markRebalanceFailure(err, effectiveTrigger.reason);
+      this.finalizeActiveAction("error", effectiveTrigger.reason, {
         message: err instanceof Error ? err.message : String(err || "unknown"),
+        ...(forceRebalance ? { requestedAt: forceRequestedAt } : {}),
       });
     }
   }
@@ -2441,6 +2688,7 @@ class Uc6Bot {
         churnRatioToday,
         lastRebalanceAtIso: this.state.lastRebalanceAt,
         cooldownRemainingSec: gate.remainingSec,
+        forceRebalanceRequestedAtIso: this.state.forceRebalanceRequestedAt || null,
         lastDecision: this.state.lastDecision,
         lastError: this.parseLastErrorObject(),
       },
@@ -2456,6 +2704,7 @@ class Uc6Bot {
         lastRebalanceFailedAt: this.state.lastRebalanceFailedAt,
         rebalanceFailureCooldownUntil: this.state.rebalanceFailureCooldownUntil,
         consecutiveRebalanceFailures: Number(this.state.consecutiveRebalanceFailures || 0),
+        forceRebalanceRequestedAt: this.state.forceRebalanceRequestedAt || null,
         canRebalanceNow: gate.allowed,
         reason: gate.reason,
       },
@@ -2529,6 +2778,53 @@ class Uc6Bot {
     }
   }
 
+  async handleOwnerForceRebalance(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+
+    const auth = String(req.headers.authorization || "");
+    if (auth !== `Bearer ${ENV.adminToken}`) return unauthorized(res);
+
+    try {
+      const body = await readJsonBody(req);
+      const message = String(body.message || "");
+      const signature = String(body.signature || "");
+      const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+
+      if (!message || !signature) {
+        return jsonResponse(res, 400, { error: "Missing message or signature" });
+      }
+
+      const parsed = verifyOwnerSignature({
+        ownerAddress: this.ownerAddress,
+        message,
+        signature,
+        payload,
+        expectedAction: "force_rebalance",
+      });
+
+      this.pruneUsedNonces();
+      if (this.ownerNonceUsed.has(parsed.nonce)) {
+        return jsonResponse(res, 409, { error: "Owner nonce already used" });
+      }
+
+      this.state.forceRebalanceRequestedAt = nowIso();
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.setDecision({ action: "force_rebalance_requested", by: this.ownerAddress });
+      await this.persistState();
+
+      return jsonResponse(res, 200, {
+        ok: true,
+        forceRebalanceRequestedAt: this.state.forceRebalanceRequestedAt,
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err || "Bad request");
+      return jsonResponse(res, 400, { error: msg });
+    }
+  }
+
   async handleHttp(req, res) {
     if (!req.url) return jsonResponse(res, 404, { error: "Not found" });
     const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -2550,6 +2846,9 @@ class Uc6Bot {
     if (u.pathname.startsWith("/owner/")) {
       if (req.method === "POST" && u.pathname === "/owner/settings") {
         return await this.handleOwnerSettings(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/force-rebalance") {
+        return await this.handleOwnerForceRebalance(req, res);
       }
       return jsonResponse(res, 405, { error: "Method not allowed" });
     }

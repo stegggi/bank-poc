@@ -15,6 +15,7 @@ type EthereumProvider = Eip1193Provider & {
 
 type Uc6Venue = "slipstream" | "uniswapv3";
 type CompoundMode = "on_rebalance" | "threshold_harvest";
+type OwnerAction = "update_settings" | "force_rebalance";
 
 type Uc6DraftSettings = {
   tradingEnabled: boolean;
@@ -175,6 +176,7 @@ type Uc6Status = {
       txHashes?: string[];
       gasUsd?: number;
       swapCostUsd?: number;
+      slippageBpsReal?: number | null;
       mintBurnUsd?: number;
       feesCollectedUsd?: number;
       netUsd?: number;
@@ -453,10 +455,20 @@ export default function Uc6Page() {
     }
   }, []);
 
-  const submitOwnerUpdate = useCallback(
-    async (payload: OwnerPayload, successPrefix: string) => {
+  const submitSignedOwnerAction = useCallback(
+    async ({
+      action,
+      payload,
+      endpoint,
+      successPrefix,
+    }: {
+      action: OwnerAction;
+      payload: unknown;
+      endpoint: "/api/uc6/owner/settings" | "/api/uc6/owner/force-rebalance";
+      successPrefix: string;
+    }) => {
       if (!walletAddress) throw new Error("Connect MetaMask first.");
-      if (!isOwner) throw new Error("Only the configured owner wallet can update UC6 settings.");
+      if (!isOwner) throw new Error("Only the configured owner wallet can perform owner actions.");
       const eth = getEthereum();
       if (!eth) throw new Error("MetaMask is unavailable.");
 
@@ -465,7 +477,7 @@ export default function Uc6Page() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           address: walletAddress,
-          action: "update_settings",
+          action,
           payload,
         }),
       });
@@ -474,7 +486,7 @@ export default function Uc6Page() {
       const signer = await provider.getSigner();
       const signature = await signer.signMessage(challenge.message);
 
-      const out = await fetchJson<{ ok?: boolean; settings?: Uc6Status["settings"] }>("/api/uc6/owner/settings", {
+      const out = await fetchJson<{ ok?: boolean; settings?: Uc6Status["settings"] }>(endpoint, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ message: challenge.message, signature, payload }),
@@ -487,6 +499,17 @@ export default function Uc6Page() {
       await refreshStatus();
     },
     [isOwner, refreshStatus, walletAddress]
+  );
+
+  const submitOwnerUpdate = useCallback(
+    async (payload: OwnerPayload, successPrefix: string) =>
+      submitSignedOwnerAction({
+        action: "update_settings",
+        payload,
+        endpoint: "/api/uc6/owner/settings",
+        successPrefix,
+      }),
+    [submitSignedOwnerAction]
   );
 
   const saveSettings = useCallback(async () => {
@@ -532,6 +555,24 @@ export default function Uc6Page() {
       setBusy("");
     }
   }, [draft, submitOwnerUpdate]);
+
+  const forceRebalance = useCallback(async () => {
+    setError("");
+    setNotice("");
+    setBusy("force-rebalance");
+    try {
+      await submitSignedOwnerAction({
+        action: "force_rebalance",
+        payload: {},
+        endpoint: "/api/uc6/owner/force-rebalance",
+        successPrefix: "Force rebalance requested",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to request force rebalance.");
+    } finally {
+      setBusy("");
+    }
+  }, [submitSignedOwnerAction]);
 
   const updateNumber = useCallback((key: keyof Uc6DraftSettings, value: string) => {
     const num = Number(value);
@@ -688,11 +729,31 @@ export default function Uc6Page() {
             />
             <div style={styles.note}>
               Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
-              {status?.fees?.collectableNow?.isEstimated ? " (estimated)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
+              {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
             </div>
           </Card>
 
           <Card title="Rebalance & Activity">
+            {isOwner && (
+              <div style={{ ...styles.row, marginBottom: 12 }}>
+                <button
+                  style={styles.buttonSecondary}
+                  onClick={forceRebalance}
+                  disabled={busy !== "" || !isBase || Boolean(status?.killSwitch) || !status?.tradingEnabled}
+                  title={
+                    status?.killSwitch
+                      ? "Kill switch active"
+                      : !status?.tradingEnabled
+                        ? "Trading is disabled"
+                        : !isBase
+                          ? "Switch MetaMask to Base first"
+                          : "Request an immediate rebalance (owner-only)"
+                  }
+                >
+                  Force Rebalance
+                </button>
+              </div>
+            )}
             <div style={styles.metaGrid}>
               <Metric label="Rebalances (24h)" value={String(status?.ops?.rebalances24h ?? 0)} />
               <Metric label="Rebalances (7d)" value={String(status?.ops?.rebalances7d ?? 0)} />
@@ -709,19 +770,20 @@ export default function Uc6Page() {
 
           <Card title="Events & Decisions" fullWidth>
             <SimpleTable
-              headers={["Time", "Type", "Reason", "Tx", "Gas", "Swap", "Fees", "Net"]}
+              headers={["Time", "Type", "Reason", "Tx", "Gas", "Swap", "Slip", "Fees", "Net"]}
               rows={events.map((ev) => [
                 ev.atIso || "—",
                 ev.type || "—",
                 ev.reason || "—",
                 ev.txHashes && ev.txHashes.length > 0 ? shortAddr(ev.txHashes[0]) : "—",
                 fmtUsd(ev.gasUsd),
-                `${fmtUsd(ev.swapCostUsd)}${ev.isEstimated ? "*" : ""}`,
+                fmtUsd(ev.swapCostUsd),
+                ev.slippageBpsReal == null ? "—" : `${n(ev.slippageBpsReal, 0).toFixed(1)} bps`,
                 fmtUsd(ev.feesCollectedUsd),
                 fmtUsd(ev.netUsd),
               ])}
             />
-            <div style={styles.note}>* swap costs are currently estimated.</div>
+            <div style={styles.note}>Swap costs and slippage use quote vs actual wallet balance deltas.</div>
           </Card>
         </section>
 

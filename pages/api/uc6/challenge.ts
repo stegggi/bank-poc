@@ -4,6 +4,7 @@ import {
   bestEffortRateLimit,
   getClientIp,
   makeOwnerMessage,
+  type OwnerAction,
   normalizeOwnerSettings,
   randomNonce,
   saveChallenge,
@@ -12,7 +13,7 @@ import {
 
 type ChallengeRequest = {
   address?: string;
-  action?: string;
+  action?: OwnerAction | string;
   payload?: unknown;
 };
 
@@ -51,7 +52,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const body = (req.body || {}) as ChallengeRequest;
-    if (String(body.action || "") !== "update_settings") {
+    const action = String(body.action || "") as OwnerAction;
+    if (action !== "update_settings" && action !== "force_rebalance") {
       return res.status(400).json({ error: "Unsupported action" });
     }
     const address = getAddress(String(body.address || ""));
@@ -59,13 +61,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(403).json({ error: "Only the configured owner can request a challenge" });
     }
 
-    const normalizedPayload = normalizeOwnerSettings(body.payload || {});
+    const normalizedPayload = action === "update_settings" ? normalizeOwnerSettings(body.payload || {}) : {};
     const payloadSha256 = sha256HexFromObject(normalizedPayload);
     const nonce = randomNonce(16);
     const issuedAt = new Date().toISOString();
     const expiresAt = new Date(Date.now() + 60_000).toISOString();
     const message = makeOwnerMessage({
-      action: "update_settings",
+      action,
       owner,
       issuedAt,
       expiresAt,
@@ -75,7 +77,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     saveChallenge({
       nonce,
-      action: "update_settings",
+      action,
       owner,
       payloadSha256,
       issuedAt,
