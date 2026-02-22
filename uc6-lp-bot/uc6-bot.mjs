@@ -1567,6 +1567,13 @@ class Uc6Bot {
 
   async swapExactInputSingle({ router, tokenIn, tokenOut, amountIn, slippageBps, fee, tickSpacing, snapshot }) {
     if (amountIn <= 0n) return;
+    const minSwapIn =
+      sameAddress(tokenIn, this.usdc)
+        ? BigInt(1000) // 0.001 USDC dust floor
+        : sameAddress(tokenIn, this.weth)
+          ? BigInt("1000000000000") // 1e-6 WETH dust floor
+          : BigInt(1);
+    if (amountIn < minSwapIn) return null;
 
     await this.assertTxAllowed("swap");
     await this.approveIfNeeded(tokenIn, router, amountIn);
@@ -2147,6 +2154,7 @@ class Uc6Bot {
     const npm = this.slipstreamNpm;
     const keepReserveRaw = parseUnits(reserveTargetUsdc.toFixed(6), USDC_DECIMALS);
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
+    const minUsdcDeployRaw = parseUnits("1", USDC_DECIMALS);
 
     this.beginAction("topup", "idle_deploy");
     try {
@@ -2172,7 +2180,7 @@ class Uc6Bot {
       let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
 
       // If wallet is WETH-heavy and no deployable USDC remains, convert to USDC first.
-      if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
+      if (deployableUsdcRaw <= minUsdcDeployRaw && wethBalanceRaw > 0n) {
         const swapRes = await this.swapExactInputSingle({
           router,
           tokenIn: this.weth,
@@ -2193,7 +2201,7 @@ class Uc6Bot {
         return false;
       }
 
-      const swapIn = deployableUsdcRaw > 0n ? (deployableUsdcRaw + 1n) / 2n : 0n;
+      const swapIn = deployableUsdcRaw > minUsdcDeployRaw ? (deployableUsdcRaw + 1n) / 2n : 0n;
       if (swapIn > 0n) {
         const swapRes = await this.swapExactInputSingle({
           router,
@@ -2269,35 +2277,46 @@ class Uc6Bot {
 
       const token0 = snapshot.token0;
       const token1 = snapshot.token1;
-      let amount0Desired = sameAddress(token0, this.usdc) ? usdcToUse : wethToUse;
-      let amount1Desired = sameAddress(token1, this.usdc) ? usdcToUse : wethToUse;
+      // Re-read once before increaseLiquidity sizing, then keep a dust buffer.
+      const usdcBeforeIncrease = await this.readTokenBalance(this.usdc);
+      const wethBeforeIncrease = await this.readTokenBalance(this.weth);
+      const usdcSpendableNow = usdcBeforeIncrease > keepReserveRaw ? usdcBeforeIncrease - keepReserveRaw : 0n;
+      const usdcCap = usdcSpendableNow < maxDeployRaw ? usdcSpendableNow : maxDeployRaw;
+      const wethCap = wethBeforeIncrease;
+      let amount0Desired = sameAddress(token0, this.usdc) ? (usdcToUse < usdcCap ? usdcToUse : usdcCap) : (wethToUse < wethCap ? wethToUse : wethCap);
+      let amount1Desired = sameAddress(token1, this.usdc) ? (usdcToUse < usdcCap ? usdcToUse : usdcCap) : (wethToUse < wethCap ? wethToUse : wethCap);
       // Leave a tiny dust buffer to avoid STF from race/rounding issues on exact wallet amounts.
       if (amount0Desired > 10n) amount0Desired = (amount0Desired * 9990n) / 10000n;
       if (amount1Desired > 10n) amount1Desired = (amount1Desired * 9990n) / 10000n;
 
       await this.approveIfNeeded(token0, npm, amount0Desired);
       await this.approveIfNeeded(token1, npm, amount1Desired);
-      try {
-        await this.increaseLiquidityPosition({
-          npmAddress: npm,
-          tokenId,
-          amount0Desired,
-          amount1Desired,
-        });
-      } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err || "");
-        if (!(msg.includes('function "increaseLiquidity" reverted') && /\bSTF\b/.test(msg))) {
-          throw err;
+      const stfHaircuts = [10000n, 9990n, 9950n, 9900n, 9800n, 9500n, 9000n];
+      let increaseOk = false;
+      let increaseLastErr = null;
+      for (const haircut of stfHaircuts) {
+        const a0 = haircut === 10000n ? amount0Desired : (amount0Desired * haircut) / 10000n;
+        const a1 = haircut === 10000n ? amount1Desired : (amount1Desired * haircut) / 10000n;
+        if (a0 <= 0n || a1 <= 0n) continue;
+        try {
+          await this.increaseLiquidityPosition({
+            npmAddress: npm,
+            tokenId,
+            amount0Desired: a0,
+            amount1Desired: a1,
+          });
+          increaseOk = true;
+          break;
+        } catch (err) {
+          increaseLastErr = err;
+          const msg = err instanceof Error ? err.message : String(err || "");
+          if (!(msg.includes('function "increaseLiquidity" reverted') && /\bSTF\b/.test(msg))) {
+            throw err;
+          }
         }
-        // One retry with a stronger haircut if token transfer uses slightly more than expected.
-        const amount0Retry = amount0Desired > 100n ? (amount0Desired * 9950n) / 10000n : amount0Desired;
-        const amount1Retry = amount1Desired > 100n ? (amount1Desired * 9950n) / 10000n : amount1Desired;
-        await this.increaseLiquidityPosition({
-          npmAddress: npm,
-          tokenId,
-          amount0Desired: amount0Retry,
-          amount1Desired: amount1Retry,
-        });
+      }
+      if (!increaseOk) {
+        throw (increaseLastErr || new Error("increaseLiquidity failed after STF retries"));
       }
 
       this.state.pendingCompoundUsd = 0;
