@@ -1830,6 +1830,20 @@ class Uc6Bot {
     return false;
   }
 
+  isPathologicalSwapRow(sw) {
+    if (!sw || typeof sw !== "object") return false;
+    const quoteOutUsd = Number(sw.quoteOutUsd || 0);
+    const swapCostUsd = Number(sw.swapCostUsd || 0);
+    const slippage = Number(sw.slippageBpsReal);
+    const actualOutStr = String(sw.actualOut ?? "0");
+    const quoteOutStr = String(sw.quoteOut ?? "0");
+
+    if (quoteOutUsd > 1 && quoteOutStr !== "0" && actualOutStr === "0") return true;
+    if (Number.isFinite(slippage) && slippage >= 5_000) return true;
+    if (quoteOutUsd > 0 && swapCostUsd > quoteOutUsd * 1.1) return true;
+    return false;
+  }
+
   recomputeEventNet(ev) {
     const fees = Number(ev?.feesCollectedUsd || 0);
     const rewards = Number(ev?.rewardsUsd || 0);
@@ -1842,6 +1856,33 @@ class Uc6Bot {
     const ledger = Array.isArray(this.state.ledgerEvents) ? this.state.ledgerEvents : [];
     let changed = false;
     for (const ev of ledger) {
+      const swaps = Array.isArray(ev?.swaps) ? ev.swaps : [];
+      if (swaps.length > 0) {
+        let rowChanged = false;
+        let recomputedSwapCostUsd = 0;
+        for (const sw of swaps) {
+          if (this.isPathologicalSwapRow(sw)) {
+            sw.swapCostUsd = 0;
+            sw.slippageBpsReal = null;
+            sw.swapCostSanitized = true;
+            rowChanged = true;
+          }
+          const rowCost = Number(sw?.swapCostUsd || 0);
+          if (Number.isFinite(rowCost) && rowCost > 0) recomputedSwapCostUsd += rowCost;
+        }
+        if (!Number.isFinite(recomputedSwapCostUsd) || recomputedSwapCostUsd < 0) {
+          recomputedSwapCostUsd = 0;
+        }
+        if (Math.abs(Number(ev.swapCostUsd || 0) - recomputedSwapCostUsd) > 1e-9) {
+          ev.swapCostUsd = recomputedSwapCostUsd;
+          rowChanged = true;
+        }
+        if (rowChanged) {
+          ev.netUsd = this.recomputeEventNet(ev);
+          changed = true;
+        }
+      }
+
       if (this.isLegacyBogusIdleDeploySwapCost(ev) && !ev.swapCostSanitized) {
         ev.swapCostUsd = 0;
         ev.swapCostSanitized = true;
@@ -1859,7 +1900,7 @@ class Uc6Bot {
     return changed;
   }
 
-  async backfillMissingFeesFromReceipts(limit = 8) {
+  async backfillMissingFeesFromReceipts(limit = 100) {
     const ledger = Array.isArray(this.state.ledgerEvents) ? this.state.ledgerEvents : [];
     if (ledger.length === 0) return false;
     const spot = this.getSpotUsdcPerWeth();
@@ -1867,7 +1908,7 @@ class Uc6Bot {
     let repaired = 0;
     for (let i = ledger.length - 1; i >= 0 && repaired < limit; i -= 1) {
       const ev = ledger[i];
-      if (!ev || (ev.type !== "harvest" && ev.type !== "recenter")) continue;
+      if (!ev || (ev.type !== "harvest" && ev.type !== "recenter" && ev.type !== "liquidate")) continue;
       if (Number(ev.feesCollectedUsd || 0) > 0) continue;
       if (ev.feesBackfilled) continue;
       const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes.filter((h) => typeof h === "string" && h.startsWith("0x")) : [];
