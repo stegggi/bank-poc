@@ -28,6 +28,7 @@ const Q96 = 2n ** 96n;
 const UINT128_MAX = (2n ** 128n) - 1n;
 const EVENT_RING_LIMIT = 5;
 const ACCOUNTING_EVENT_LIMIT = 5000;
+const MIN_IDLE_TOPUP_USD = 1;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -282,6 +283,32 @@ const NPM_MINT_ABI_TICK_WITH_PRICE = [
     ],
     outputs: [
       { name: "tokenId", type: "uint256" },
+      { name: "liquidity", type: "uint128" },
+      { name: "amount0", type: "uint256" },
+      { name: "amount1", type: "uint256" },
+    ],
+  },
+];
+
+const NPM_INCREASE_LIQUIDITY_ABI = [
+  {
+    name: "increaseLiquidity",
+    type: "function",
+    stateMutability: "payable",
+    inputs: [
+      {
+        type: "tuple",
+        components: [
+          { name: "tokenId", type: "uint256" },
+          { name: "amount0Desired", type: "uint256" },
+          { name: "amount1Desired", type: "uint256" },
+          { name: "amount0Min", type: "uint256" },
+          { name: "amount1Min", type: "uint256" },
+          { name: "deadline", type: "uint256" },
+        ],
+      },
+    ],
+    outputs: [
       { name: "liquidity", type: "uint128" },
       { name: "amount0", type: "uint256" },
       { name: "amount1", type: "uint256" },
@@ -1120,7 +1147,7 @@ class Uc6Bot {
     const gasEth = Number(formatUnits(gasWei, 18));
     const gasUsd = gasEth * this.getSpotUsdcPerWeth();
     this.activeAction.gasUsd += gasUsd;
-    if (kind === "mint" || kind === "decrease" || kind === "collect" || kind === "burn") {
+    if (kind === "mint" || kind === "increase" || kind === "decrease" || kind === "collect" || kind === "burn") {
       this.activeAction.mintBurnUsd += gasUsd;
     }
   }
@@ -1908,6 +1935,50 @@ class Uc6Bot {
     throw wrapped;
   }
 
+  async increaseLiquidityPosition({
+    npmAddress,
+    tokenId,
+    amount0Desired,
+    amount1Desired,
+  }) {
+    await this.assertTxAllowed("increase_liquidity");
+    const deadline = BigInt(Math.floor(Date.now() / 1000) + 900);
+    const params = {
+      tokenId: BigInt(tokenId),
+      amount0Desired,
+      amount1Desired,
+      amount0Min: 0n,
+      amount1Min: 0n,
+      deadline,
+    };
+
+    const sim = await this.publicClient.simulateContract({
+      address: npmAddress,
+      abi: NPM_INCREASE_LIQUIDITY_ABI,
+      functionName: "increaseLiquidity",
+      args: [params],
+      account: this.account.address,
+    });
+    await this.assertTxAllowed("increase_liquidity_write");
+    const hash = await this.walletClient.writeContract({
+      ...sim.request,
+      account: this.account,
+    });
+    const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+    this.addTxToActiveAction("increase", hash, receipt);
+    if (receipt.status && receipt.status !== "success") {
+      throw new Error(`increaseLiquidity tx reverted on-chain hash=${hash}`);
+    }
+
+    let used0 = 0n;
+    let used1 = 0n;
+    if (Array.isArray(sim.result)) {
+      if (typeof sim.result[1] === "bigint") used0 = sim.result[1];
+      if (typeof sim.result[2] === "bigint") used1 = sim.result[2];
+    }
+    return { hash, receipt, amount0Used: used0, amount1Used: used1 };
+  }
+
   async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null }) {
     if (!tokenId) return;
     await this.assertTxAllowed("close_position");
@@ -1997,6 +2068,164 @@ class Uc6Bot {
       this.addTxToActiveAction("burn", hashBurn, recBurn);
     } catch {
       // Burn can fail if dust remains; position is still closed if liquidity is zero.
+    }
+  }
+
+  async maybeTopUpLiquidity(snapshot) {
+    const tokenId = this.state.position?.tokenId;
+    if (!tokenId) return false;
+    if (!snapshot) return false;
+    if (this.settings.venue !== "slipstream") return false;
+
+    const spot = this.getSpotUsdcPerWeth();
+    const wallet = this.state.latest?.wallet || {};
+    const usdcBalNum = Number(wallet.usdc || 0);
+    const wethBalNum = Number(wallet.weth || 0);
+    const walletTotalUsd = Number(wallet.valuesUsd?.total || 0);
+    const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(
+      walletTotalUsd + Number(this.state.latest?.lp?.usdValue || 0)
+    );
+    const deployableSignalUsd = Math.max(0, usdcBalNum - reserveTargetUsdc) + (wethBalNum * spot);
+    if (!(deployableSignalUsd > MIN_IDLE_TOPUP_USD)) return false;
+
+    const failureGate = this.getFailureCooldownGate();
+    if (!failureGate.allowed) return false;
+
+    const router = this.slipstreamRouter;
+    const npm = this.slipstreamNpm;
+    const keepReserveRaw = parseUnits(reserveTargetUsdc.toFixed(6), USDC_DECIMALS);
+    const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
+
+    this.beginAction("topup", "idle_deploy");
+    try {
+      let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+      let wethBalanceRaw = await this.readTokenBalance(this.weth);
+
+      let freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+      let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+
+      // If wallet is WETH-heavy and no deployable USDC remains, convert to USDC first.
+      if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
+        await this.swapExactInputSingle({
+          router,
+          tokenIn: this.weth,
+          tokenOut: this.usdc,
+          amountIn: wethBalanceRaw,
+          slippageBps: this.settings.slippageBps,
+          fee: snapshot.fee,
+          tickSpacing: snapshot.tickSpacing,
+          snapshot,
+        });
+        usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+        wethBalanceRaw = await this.readTokenBalance(this.weth);
+        freeUsdcRaw = usdcBalanceRaw > keepReserveRaw ? usdcBalanceRaw - keepReserveRaw : 0n;
+        deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+      }
+
+      if (deployableUsdcRaw <= 0n && wethBalanceRaw <= 0n) {
+        this.activeAction = null;
+        return false;
+      }
+
+      const swapIn = deployableUsdcRaw > 0n ? (deployableUsdcRaw + 1n) / 2n : 0n;
+      if (swapIn > 0n) {
+        await this.swapExactInputSingle({
+          router,
+          tokenIn: this.usdc,
+          tokenOut: this.weth,
+          amountIn: swapIn,
+          slippageBps: this.settings.slippageBps,
+          fee: snapshot.fee,
+          tickSpacing: snapshot.tickSpacing,
+          snapshot,
+        });
+      }
+
+      const usdcAfter = await this.readTokenBalance(this.usdc);
+      const wethAfter = await this.readTokenBalance(this.weth);
+      let usdcSpendable = usdcAfter > keepReserveRaw ? usdcAfter - keepReserveRaw : 0n;
+      let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+      let wethToUse = wethAfter;
+
+      // One-shot corrective swap if one side is empty after split.
+      if ((usdcToUse <= 0n || wethToUse <= 0n) && (usdcAfter > 0n || wethAfter > 0n)) {
+        if (wethToUse <= 0n && usdcToUse > 0n) {
+          const topUpUsdcIn = usdcToUse / 4n;
+          if (topUpUsdcIn > 0n) {
+            await this.swapExactInputSingle({
+              router,
+              tokenIn: this.usdc,
+              tokenOut: this.weth,
+              amountIn: topUpUsdcIn,
+              slippageBps: this.settings.slippageBps,
+              fee: snapshot.fee,
+              tickSpacing: snapshot.tickSpacing,
+              snapshot,
+            });
+          }
+        } else if (usdcToUse <= 0n && wethToUse > 0n) {
+          const topUpWethIn = wethToUse / 4n;
+          if (topUpWethIn > 0n) {
+            await this.swapExactInputSingle({
+              router,
+              tokenIn: this.weth,
+              tokenOut: this.usdc,
+              amountIn: topUpWethIn,
+              slippageBps: this.settings.slippageBps,
+              fee: snapshot.fee,
+              tickSpacing: snapshot.tickSpacing,
+              snapshot,
+            });
+          }
+        }
+
+        const usdcRetry = await this.readTokenBalance(this.usdc);
+        const wethRetry = await this.readTokenBalance(this.weth);
+        usdcSpendable = usdcRetry > keepReserveRaw ? usdcRetry - keepReserveRaw : 0n;
+        usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+        wethToUse = wethRetry;
+      }
+
+      if (usdcToUse <= 0n || wethToUse <= 0n) {
+        throw new Error(
+          `Top-up unable to form dual-asset inventory ${JSON.stringify({
+            reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
+            usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
+            wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
+            usdcToUse: Number(formatUnits(usdcToUse > 0n ? usdcToUse : 0n, USDC_DECIMALS)),
+            wethToUse: Number(formatUnits(wethToUse > 0n ? wethToUse : 0n, WETH_DECIMALS)),
+          })}`
+        );
+      }
+
+      const token0 = snapshot.token0;
+      const token1 = snapshot.token1;
+      const amount0Desired = sameAddress(token0, this.usdc) ? usdcToUse : wethToUse;
+      const amount1Desired = sameAddress(token1, this.usdc) ? usdcToUse : wethToUse;
+
+      await this.approveIfNeeded(token0, npm, amount0Desired);
+      await this.approveIfNeeded(token1, npm, amount1Desired);
+      await this.increaseLiquidityPosition({
+        npmAddress: npm,
+        tokenId,
+        amount0Desired,
+        amount1Desired,
+      });
+
+      this.state.pendingCompoundUsd = 0;
+      this.setDecision({
+        action: "topup",
+        reason: "idle_deploy",
+        txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
+      });
+      this.finalizeActiveAction("topup", "idle_deploy");
+      return true;
+    } catch (err) {
+      this.markRebalanceFailure(err, "idle_deploy");
+      this.finalizeActiveAction("error", "idle_deploy_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+      return false;
     }
   }
 
@@ -2562,6 +2791,10 @@ class Uc6Bot {
     }
 
     if (!effectiveTrigger.trigger) {
+      if (trigger.reason === "in_band") {
+        const toppedUp = await this.maybeTopUpLiquidity(primary);
+        if (toppedUp) return;
+      }
       const harvested = await this.maybeHarvestOnly();
       if (harvested) return;
       this.setDecision({
