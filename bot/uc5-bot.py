@@ -546,7 +546,7 @@ class TelemetryHandler(BaseHTTPRequestHandler):
 
   def _send_json(self, code: int, obj: Any) -> None:
     try:
-      body = json.dumps(obj).encode("utf-8")
+      body = json.dumps(obj, default=_json_safe).encode("utf-8")
       self.send_response(code)
       self.send_header("Content-Type", "application/json")
       self.send_header("Access-Control-Allow-Origin", "*")
@@ -1640,7 +1640,10 @@ def _to_plain_dict(obj: Any) -> Dict[str, Any]:
     return obj
   if hasattr(obj, "model_dump"):
     try:
-      out = obj.model_dump(by_alias=True)
+      try:
+        out = obj.model_dump(by_alias=True, mode="json")
+      except TypeError:
+        out = obj.model_dump(by_alias=True)
       return out if isinstance(out, dict) else {}
     except Exception:
       pass
@@ -1651,6 +1654,21 @@ def _to_plain_dict(obj: Any) -> Dict[str, Any]:
     except Exception:
       pass
   return {}
+
+
+def _json_safe(value: Any) -> Any:
+  if value is None or isinstance(value, (str, int, float, bool)):
+    return value
+  if isinstance(value, dict):
+    return {str(k): _json_safe(v) for k, v in value.items()}
+  if isinstance(value, (list, tuple)):
+    return [_json_safe(v) for v in value]
+  if hasattr(value, "value"):
+    try:
+      return _json_safe(getattr(value, "value"))
+    except Exception:
+      pass
+  return str(value)
 
 
 def _extract_best_bid_ask_from_ws_payload(payload: Any) -> Tuple[Optional[float], Optional[float]]:
@@ -1873,7 +1891,7 @@ async def fetch_fills_audit(
         "orderId": str(r.get("orderId") or r.get("order_id") or ""),
         "price": _f(r.get("price")),
         "qty": _f(r.get("filled")),
-        "side": r.get("side"),
+        "side": _json_safe(r.get("side")),
         "type": str(r.get("type") or ""),
         "isMaker": is_maker,
         "feeUsd": fee_usd,
