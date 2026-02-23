@@ -1198,7 +1198,13 @@ class Uc6Bot {
       });
     const byBand = new Map();
     for (const ev of recenterEvents) {
-      const bandHalfBps = Number(ev.closedBandHalfBps);
+      let bandHalfBps = Number(ev.closedBandHalfBpsEffective);
+      if (!(Number.isFinite(bandHalfBps) && bandHalfBps > 0)) {
+        bandHalfBps = this.estimateBandHalfBpsFromTicks(ev.closedTickLower, ev.closedTickUpper);
+      }
+      if (!(Number.isFinite(bandHalfBps) && bandHalfBps > 0)) {
+        bandHalfBps = Number(ev.closedBandHalfBps);
+      }
       const runDurationSec = Number(ev.runDurationSec);
       const lpBaseUsd = Number(ev.lpBaseUsdAtClose);
       if (!Number.isFinite(bandHalfBps) || bandHalfBps <= 0) continue;
@@ -1267,7 +1273,7 @@ class Uc6Bot {
     return bps > 0 ? bps : null;
   }
 
-  async deriveBandHalfBpsFromMintTxs(txHashes) {
+  async deriveMintBandMetaFromTxs(txHashes) {
     if (!Array.isArray(txHashes) || txHashes.length === 0) return null;
     for (const hash of txHashes) {
       if (!hash) continue;
@@ -1286,8 +1292,15 @@ class Uc6Bot {
           const params = Array.isArray(decoded.args) ? decoded.args[0] : null;
           const lower = params?.tickLower;
           const upper = params?.tickUpper;
-          const bandHalfBps = this.estimateBandHalfBpsFromTicks(lower, upper);
-          if (Number.isFinite(bandHalfBps) && bandHalfBps > 0) return bandHalfBps;
+          const bandHalfBpsEffective = this.estimateBandHalfBpsFromTicks(lower, upper);
+          return {
+            tickLower: Number.isFinite(Number(lower)) ? Number(lower) : null,
+            tickUpper: Number.isFinite(Number(upper)) ? Number(upper) : null,
+            bandHalfBpsEffective:
+              Number.isFinite(Number(bandHalfBpsEffective)) && Number(bandHalfBpsEffective) > 0
+                ? Number(bandHalfBpsEffective)
+                : null,
+          };
         } catch {
           // try next candidate ABI
         }
@@ -1308,17 +1321,35 @@ class Uc6Bot {
         return (Number.isFinite(ams) ? ams : 0) - (Number.isFinite(bms) ? bms : 0);
       });
 
+    const openedBandByRecenterIndex = [];
+    for (let i = 0; i < recenterIndexes.length; i += 1) {
+      const ev = recenterIndexes[i].ev;
+      openedBandByRecenterIndex[i] = await this.deriveMintBandMetaFromTxs(ev?.txHashes || []);
+    }
+
     for (let i = 0; i < recenterIndexes.length; i += 1) {
       const { idx } = recenterIndexes[i];
       const ev = this.state.ledgerEvents[idx];
       if (!ev || ev.type !== "recenter") continue;
 
-      const currentBand = Number(ev.closedBandHalfBps);
-      if (!(Number.isFinite(currentBand) && currentBand > 0)) {
-        const derivedBand = await this.deriveBandHalfBpsFromMintTxs(ev.txHashes || []);
-        if (Number.isFinite(derivedBand) && derivedBand > 0) {
-          ev.closedBandHalfBps = derivedBand;
-          changed = true;
+      const currentEffectiveBand = Number(ev.closedBandHalfBpsEffective);
+      if (!(Number.isFinite(currentEffectiveBand) && currentEffectiveBand > 0) && i > 0) {
+        const prevOpened = openedBandByRecenterIndex[i - 1] || null;
+        if (prevOpened) {
+          let rowChanged = false;
+          if (Number.isFinite(Number(prevOpened.tickLower)) && Number.isFinite(Number(prevOpened.tickUpper))) {
+            ev.closedTickLower = Number(prevOpened.tickLower);
+            ev.closedTickUpper = Number(prevOpened.tickUpper);
+            rowChanged = true;
+          }
+          if (Number.isFinite(Number(prevOpened.bandHalfBpsEffective)) && Number(prevOpened.bandHalfBpsEffective) > 0) {
+            ev.closedBandHalfBpsEffective = Number(prevOpened.bandHalfBpsEffective);
+            if (!(Number.isFinite(Number(ev.closedBandHalfBps)) && Number(ev.closedBandHalfBps) > 0)) {
+              ev.closedBandHalfBps = Number(prevOpened.bandHalfBpsEffective);
+            }
+            rowChanged = true;
+          }
+          if (rowChanged) changed = true;
         }
       }
 
@@ -3594,6 +3625,9 @@ class Uc6Bot {
       const hasExisting = Boolean(this.state.position?.tokenId);
       if (!hasExisting) return {};
       const closedBandHalfBps = Number(this.state.position?.bandHalfBps);
+      const closedTickLower = Number(this.state.position?.tickLower);
+      const closedTickUpper = Number(this.state.position?.tickUpper);
+      const closedBandHalfBpsEffective = this.estimateBandHalfBpsFromTicks(closedTickLower, closedTickUpper);
       const lastRebalanceMs = this.state.lastRebalanceAt ? Date.parse(this.state.lastRebalanceAt) : NaN;
       const nowMs = Date.now();
       const runDurationSec =
@@ -3601,6 +3635,12 @@ class Uc6Bot {
       const lpBaseUsdAtClose = this.estimateTrackedLpUsdValueFromLatest();
       return {
         closedBandHalfBps: Number.isFinite(closedBandHalfBps) ? closedBandHalfBps : null,
+        closedBandHalfBpsEffective:
+          Number.isFinite(Number(closedBandHalfBpsEffective)) && Number(closedBandHalfBpsEffective) > 0
+            ? Number(closedBandHalfBpsEffective)
+            : null,
+        closedTickLower: Number.isFinite(closedTickLower) ? closedTickLower : null,
+        closedTickUpper: Number.isFinite(closedTickUpper) ? closedTickUpper : null,
         runDurationSec,
         lpBaseUsdAtClose,
       };
