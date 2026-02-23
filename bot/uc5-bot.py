@@ -1465,9 +1465,6 @@ async def place_limit_post_only(
 
   p = Decimal(str(limit_price))
   q = Decimal(str(q_adj))
-  now_s = int(time.time())
-  expires_at_s = now_s + max(1, int(gtd_sec))
-  expires_at_ms = expires_at_s * 1000
   common = {
     "order_type": "LIMIT",
     "quantity": q,
@@ -1481,48 +1478,73 @@ async def place_limit_post_only(
   if close is not None:
     common["close"] = bool(close)
 
-  variants = [
-    {
-      **common,
-      "time_in_force": "GTD",
-      "post_only": True,
-      "expires_at": expires_at_s,
-    },
-    {
-      **common,
-      "time_in_force": "GTD",
-      "postOnly": True,
-      "expiresAt": expires_at_ms,
-    },
-    {
-      **common,
-      "tif": "GTD",
-      "post_only": True,
-      "expires_at": expires_at_ms,
-    },
-    {
-      **common,
-      "tif": "GTD",
-      "postOnly": True,
-      "expiresAt": expires_at_s,
-    },
-  ]
+  # Ethereal validates GTD against signedAt; give expiry extra headroom to absorb signing/network delay.
+  def _build_variants(extra_buffer_s: int = 0) -> List[Dict[str, Any]]:
+    base_gtd = max(1, int(gtd_sec))
+    now_s = int(time.time())
+    expires_at_s = now_s + base_gtd + 2 + max(0, int(extra_buffer_s))
+    expires_at_ms = expires_at_s * 1000
+    return [
+      {
+        **common,
+        "time_in_force": "GTD",
+        "post_only": True,
+        "expires_at": expires_at_s,
+      },
+      {
+        **common,
+        "time_in_force": "GTD",
+        "postOnly": True,
+        "expiresAt": expires_at_ms,
+      },
+      {
+        **common,
+        "tif": "GTD",
+        "post_only": True,
+        "expires_at": expires_at_ms,
+      },
+      {
+        **common,
+        "tif": "GTD",
+        "postOnly": True,
+        "expiresAt": expires_at_s,
+      },
+    ]
 
   try:
-    return await _try_create_order(client, variants)
+    return await _try_create_order(client, _build_variants())
   except Exception as first_error:
     err = str(first_error or "")
+    if (
+      "InvalidExpireTime" in err
+      or ("expiresAt" in err and "signedAt" in err and "greater than" in err)
+    ):
+      return await _try_create_order(client, _build_variants(extra_buffer_s=5))
     if (
       ("401" in err or "Unauthorized" in err)
       and BOT_SIGNER_ADDRESS
       and BOT_SIGNER_ADDRESS.lower() != str(sender or "").lower()
     ):
       signer_variants = []
-      for v in variants:
+      for v in _build_variants():
         cp = dict(v)
         cp["sender"] = BOT_SIGNER_ADDRESS
         signer_variants.append(cp)
-      return await _try_create_order(client, signer_variants)
+      try:
+        return await _try_create_order(client, signer_variants)
+      except Exception as signer_error:
+        signer_err = str(signer_error or "")
+        if (
+          "InvalidExpireTime" in signer_err
+          or ("expiresAt" in signer_err and "signedAt" in signer_err and "greater than" in signer_err)
+        ):
+          signer_retry_variants = []
+          for v in _build_variants(extra_buffer_s=5):
+            cp = dict(v)
+            cp["sender"] = BOT_SIGNER_ADDRESS
+            signer_retry_variants.append(cp)
+          return await _try_create_order(client, signer_retry_variants)
+        raise
     raise
 
 
