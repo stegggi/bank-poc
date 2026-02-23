@@ -9,6 +9,7 @@ import {
   createPublicClient,
   createWalletClient,
   decodeEventLog,
+  decodeFunctionData,
   erc20Abi,
   formatUnits,
   getAddress,
@@ -1187,14 +1188,20 @@ class Uc6Bot {
   }
 
   summarizeBandPerformance(events) {
+    const recenterEvents = (Array.isArray(events) ? events : [])
+      .filter((ev) => ev && ev.type === "recenter")
+      .slice()
+      .sort((a, b) => {
+        const ams = Date.parse(a.atIso || "");
+        const bms = Date.parse(b.atIso || "");
+        return (Number.isFinite(ams) ? ams : 0) - (Number.isFinite(bms) ? bms : 0);
+      });
     const byBand = new Map();
-    for (const ev of events) {
-      if (!ev || ev.type !== "recenter") continue;
+    for (const ev of recenterEvents) {
       const bandHalfBps = Number(ev.closedBandHalfBps);
       const runDurationSec = Number(ev.runDurationSec);
       const lpBaseUsd = Number(ev.lpBaseUsdAtClose);
       if (!Number.isFinite(bandHalfBps) || bandHalfBps <= 0) continue;
-      if (!Number.isFinite(runDurationSec) || runDurationSec <= 0) continue;
 
       let row = byBand.get(bandHalfBps);
       if (!row) {
@@ -1203,6 +1210,7 @@ class Uc6Bot {
           runs: 0,
           totalFeesUsd: 0,
           totalDurationSec: 0,
+          durationSamples: 0,
           feeLpRatioSum: 0,
           feeLpRatioSamples: 0,
           totalLpBaseUsd: 0,
@@ -1218,7 +1226,10 @@ class Uc6Bot {
       const net = Number(ev.netUsd || 0);
       row.runs += 1;
       row.totalFeesUsd += fees;
-      row.totalDurationSec += runDurationSec;
+      if (Number.isFinite(runDurationSec) && runDurationSec > 0) {
+        row.totalDurationSec += runDurationSec;
+        row.durationSamples += 1;
+      }
       row.totalLpBaseUsd += Number.isFinite(lpBaseUsd) && lpBaseUsd > 0 ? lpBaseUsd : 0;
       row.totalCostsUsd += gas + swap;
       row.totalNetUsd += net;
@@ -1238,11 +1249,91 @@ class Uc6Bot {
         avgFeesUsd: row.runs > 0 ? row.totalFeesUsd / row.runs : 0,
         avgFeeToLpPct:
           row.feeLpRatioSamples > 0 ? (row.feeLpRatioSum / row.feeLpRatioSamples) * 100 : null,
-        avgDurationSec: row.runs > 0 ? row.totalDurationSec / row.runs : null,
+        avgDurationSec: row.durationSamples > 0 ? row.totalDurationSec / row.durationSamples : null,
         totalDurationSec: row.totalDurationSec,
         totalCostsUsd: row.totalCostsUsd,
         totalNetUsd: row.totalNetUsd,
       }));
+  }
+
+  estimateBandHalfBpsFromTicks(tickLower, tickUpper) {
+    const lower = Number(tickLower);
+    const upper = Number(tickUpper);
+    if (!Number.isFinite(lower) || !Number.isFinite(upper) || upper <= lower) return null;
+    const halfTicks = Math.max(1, Math.round((upper - lower) / 2));
+    const priceFactor = Math.pow(1.0001, halfTicks);
+    if (!Number.isFinite(priceFactor) || priceFactor <= 1) return null;
+    const bps = Math.round((priceFactor - 1) * 10_000);
+    return bps > 0 ? bps : null;
+  }
+
+  async deriveBandHalfBpsFromMintTxs(txHashes) {
+    if (!Array.isArray(txHashes) || txHashes.length === 0) return null;
+    for (const hash of txHashes) {
+      if (!hash) continue;
+      let tx;
+      try {
+        tx = await this.publicClient.getTransaction({ hash });
+      } catch {
+        continue;
+      }
+      if (!tx?.input || tx.input === "0x") continue;
+      const candidates = [NPM_MINT_ABI_TICK_WITH_PRICE, NPM_MINT_ABI_TICK, NPM_MINT_ABI_FEE];
+      for (const abi of candidates) {
+        try {
+          const decoded = decodeFunctionData({ abi, data: tx.input });
+          if (decoded.functionName !== "mint") continue;
+          const params = Array.isArray(decoded.args) ? decoded.args[0] : null;
+          const lower = params?.tickLower;
+          const upper = params?.tickUpper;
+          const bandHalfBps = this.estimateBandHalfBpsFromTicks(lower, upper);
+          if (Number.isFinite(bandHalfBps) && bandHalfBps > 0) return bandHalfBps;
+        } catch {
+          // try next candidate ABI
+        }
+      }
+    }
+    return null;
+  }
+
+  async backfillBandMetadataForRecenters() {
+    if (!Array.isArray(this.state.ledgerEvents) || this.state.ledgerEvents.length === 0) return false;
+    let changed = false;
+    const recenterIndexes = this.state.ledgerEvents
+      .map((ev, idx) => ({ ev, idx }))
+      .filter(({ ev }) => ev && ev.type === "recenter")
+      .sort((a, b) => {
+        const ams = Date.parse(a.ev?.atIso || "");
+        const bms = Date.parse(b.ev?.atIso || "");
+        return (Number.isFinite(ams) ? ams : 0) - (Number.isFinite(bms) ? bms : 0);
+      });
+
+    for (let i = 0; i < recenterIndexes.length; i += 1) {
+      const { idx } = recenterIndexes[i];
+      const ev = this.state.ledgerEvents[idx];
+      if (!ev || ev.type !== "recenter") continue;
+
+      const currentBand = Number(ev.closedBandHalfBps);
+      if (!(Number.isFinite(currentBand) && currentBand > 0)) {
+        const derivedBand = await this.deriveBandHalfBpsFromMintTxs(ev.txHashes || []);
+        if (Number.isFinite(derivedBand) && derivedBand > 0) {
+          ev.closedBandHalfBps = derivedBand;
+          changed = true;
+        }
+      }
+
+      const currentDuration = Number(ev.runDurationSec);
+      if (!(Number.isFinite(currentDuration) && currentDuration > 0) && i > 0) {
+        const prevEv = recenterIndexes[i - 1].ev;
+        const prevMs = Date.parse(prevEv?.atIso || "");
+        const curMs = Date.parse(ev.atIso || "");
+        if (Number.isFinite(prevMs) && Number.isFinite(curMs) && curMs > prevMs) {
+          ev.runDurationSec = Math.round((curMs - prevMs) / 1000);
+          changed = true;
+        }
+      }
+    }
+    return changed;
   }
 
   parseLastErrorObject() {
@@ -2145,6 +2236,7 @@ class Uc6Bot {
       let changed = false;
       if (this.sanitizeLedgerEventsInPlace()) changed = true;
       if (await this.backfillMissingFeesFromReceipts()) changed = true;
+      if (await this.backfillBandMetadataForRecenters()) changed = true;
       return changed;
     } finally {
       this.ledgerRepairInFlight = false;
@@ -2980,6 +3072,9 @@ class Uc6Bot {
       this.state.position.tickLower = pos.tickLower;
       this.state.position.tickUpper = pos.tickUpper;
       this.state.position.centerTick = Math.round((pos.tickLower + pos.tickUpper) / 2);
+      if (!(Number.isFinite(Number(this.state.position.bandHalfBps)) && Number(this.state.position.bandHalfBps) > 0)) {
+        this.state.position.bandHalfBps = this.estimateBandHalfBpsFromTicks(pos.tickLower, pos.tickUpper);
+      }
       this.state.position.liquidity = pos.liquidity.toString();
 
       const tick = Number(this.state.latest?.primary?.tick ?? 0);
@@ -3115,6 +3210,7 @@ class Uc6Bot {
       ...this.state.position,
       venue: "slipstream",
       tokenId: String(only.tokenId),
+      bandHalfBps: this.estimateBandHalfBpsFromTicks(only.tickLower, only.tickUpper),
       tickLower: Number.isFinite(Number(only.tickLower)) ? Number(only.tickLower) : null,
       tickUpper: Number.isFinite(Number(only.tickUpper)) ? Number(only.tickUpper) : null,
       centerTick:
