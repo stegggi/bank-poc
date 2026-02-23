@@ -140,6 +140,7 @@ RUNTIME_CONFIG_PATH = os.environ.get(
 
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
+WS_STALE_RECONNECT_MS = int(os.environ.get("UC5_WS_STALE_RECONNECT_MS", "15000"))
 BOT_VERSION = "uc5-bot/1.0 (maker-chase+ws-quotes+daily-db)"
 
 if not BOT_TOKEN:
@@ -1756,6 +1757,8 @@ class WsQuoteCache:
   def set_conn(self, connected: bool) -> None:
     with self._lock:
       self.connected = bool(connected)
+      if not connected:
+        self.subscribed = False
 
   def set_error(self, err: Optional[str]) -> None:
     with self._lock:
@@ -1814,6 +1817,13 @@ async def _run_ws_book_depth_loop(
       quote_cache.set_conn(True)
       await ws_client.subscribe(stream_type="BookDepth", product_id=product_id)
       while True:
+        snap = quote_cache.snapshot()
+        last_update_ms = _f(snap.get("lastUpdateMs"))
+        if last_update_ms is not None and last_update_ms > 0:
+          age_ms = int(time.time() * 1000) - int(last_update_ms)
+          if age_ms > max(5000, int(WS_STALE_RECONNECT_MS)):
+            quote_cache.set_error(f"ws_bookdepth stale ({age_ms}ms) - reconnecting")
+            raise RuntimeError(f"WS BookDepth stale for {age_ms}ms")
         await asyncio.sleep(1.0)
     except asyncio.CancelledError:
       quote_cache.set_conn(False)
@@ -3491,8 +3501,26 @@ async def main():
           "makerOnlyEntry": True,
           "makerFirstExitWithMarketSafety": True,
           "exitMarketSafetyAfterSec": float(cfg.get("exitChaseMaxSec", 5.0)),
-          "quoteSource": "ws_bookdepth" if bool(ws_quote_cache.snapshot().get("subscribed")) else "rest",
-          "wsQuotes": ws_quote_cache.snapshot(),
+          "quoteSource": (
+            "ws_bookdepth"
+            if (
+              bool(ws_quote_cache.snapshot().get("subscribed"))
+              and (
+                ws_quote_cache.snapshot().get("lastUpdateMs") is None
+                or (int(now_ms) - int(ws_quote_cache.snapshot().get("lastUpdateMs") or 0)) <= max(5000, int(WS_STALE_RECONNECT_MS))
+              )
+            )
+            else "rest"
+          ),
+          "wsQuotes": {
+            **ws_quote_cache.snapshot(),
+            "stale": (
+              False
+              if ws_quote_cache.snapshot().get("lastUpdateMs") is None
+              else (int(now_ms) - int(ws_quote_cache.snapshot().get("lastUpdateMs") or 0)) > max(5000, int(WS_STALE_RECONNECT_MS))
+            ),
+            "staleAfterMs": max(5000, int(WS_STALE_RECONNECT_MS)),
+          },
           "lastEntryFillAudit": last_entry_fill_audit,
           "lastEntryFill": last_entry_fill_info,
           "lastExitFillAudit": last_exit_fill_audit,
