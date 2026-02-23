@@ -62,10 +62,15 @@ export const Uc5ConfigSchema = z.object({
   emergencyBreakoutMinProb: z.number().min(0.5).max(0.99).default(0.94),
   emergencyBreakoutMinMoveBps: z.number().min(1).max(1000).default(35),
   emergencyBreakoutMinAtrPercentile: z.number().min(0).max(1).default(0.85),
-  entryChaseMaxSec: z.number().min(0.5).max(30).optional().default(5),
+  entryChaseMaxSec: z.number().min(0.5).max(30).optional().default(10),
   exitChaseMaxSec: z.number().min(0.5).max(30).optional().default(5),
-  executionRepriceMs: z.number().int().min(100).max(2000).optional().default(200),
+  executionRepriceMs: z.number().int().min(100).max(2000).optional().default(350),
   makerOrderGtdSec: z.number().int().min(1).max(10).optional().default(2),
+  makerMinRestMs: z.number().int().min(100).max(5000).optional().default(700),
+  makerReplaceOnlyOnTouchMove: z.boolean().optional().default(true),
+  makerImproveOneTickOnWideSpread: z.boolean().optional().default(true),
+  makerImproveMinSpreadTicks: z.number().min(1).max(20).optional().default(3),
+  entryMinFillRatio: z.number().min(0.1).max(1).optional().default(0.5),
 
   stopLossPct: z.number().positive().max(1).nullable().optional().default(0.003),
   stopLossAtrMult: z.number().positive().max(20).nullable().optional().default(null),
@@ -155,6 +160,11 @@ export type Uc5Status = {
     exitChaseMaxSec?: number;
     executionRepriceMs?: number;
     makerOrderGtdSec?: number;
+    makerMinRestMs?: number;
+    makerReplaceOnlyOnTouchMove?: boolean;
+    makerImproveOneTickOnWideSpread?: boolean;
+    makerImproveMinSpreadTicks?: number;
+    entryMinFillRatio?: number;
     stopLossPct?: number | null;
     stopLossAtrMult?: number | null;
     takeProfitPct?: number | null;
@@ -252,5 +262,12 @@ export type Uc5Status = {
         createdAt?: number;
       }>;
     } | null;
+    entryMakerChases?: number;
+    entryMakerOpened?: number;
+    entryMakerTimeouts?: number;
+    entryMakerPartialAccepts?: number;
+    entryMakerFillRatePct?: number;
+    entryMakerPartialRatePct?: number;
+    avgEntryTimeToFirstFillMs?: number | null;
   };
 };

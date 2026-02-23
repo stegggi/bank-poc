@@ -252,10 +252,15 @@ def default_runtime_config() -> Dict[str, Any]:
     "emergencyBreakoutMinProb": 0.94,
     "emergencyBreakoutMinMoveBps": 35.0,
     "emergencyBreakoutMinAtrPercentile": 0.85,
-    "entryChaseMaxSec": 5.0,
+    "entryChaseMaxSec": 10.0,
     "exitChaseMaxSec": 5.0,
-    "executionRepriceMs": 200,
+    "executionRepriceMs": 350,
     "makerOrderGtdSec": 2,
+    "makerMinRestMs": 700,
+    "makerReplaceOnlyOnTouchMove": True,
+    "makerImproveOneTickOnWideSpread": True,
+    "makerImproveMinSpreadTicks": 3.0,
+    "entryMinFillRatio": 0.50,
     "stopLossPct": 0.003,
     "stopLossAtrMult": None,
     "takeProfitPct": 0.006,
@@ -391,10 +396,15 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     0.0,
     1.0,
   )
-  base["entryChaseMaxSec"] = clamp(_to_float(base.get("entryChaseMaxSec", 5.0), 5.0), 0.5, 30.0)
+  base["entryChaseMaxSec"] = clamp(_to_float(base.get("entryChaseMaxSec", 10.0), 10.0), 0.5, 30.0)
   base["exitChaseMaxSec"] = clamp(_to_float(base.get("exitChaseMaxSec", 5.0), 5.0), 0.5, 30.0)
-  base["executionRepriceMs"] = clamp(_to_int(base.get("executionRepriceMs", 200), 200), 100, 2000)
+  base["executionRepriceMs"] = clamp(_to_int(base.get("executionRepriceMs", 350), 350), 100, 2000)
   base["makerOrderGtdSec"] = clamp(_to_int(base.get("makerOrderGtdSec", 2), 2), 1, 10)
+  base["makerMinRestMs"] = clamp(_to_int(base.get("makerMinRestMs", 700), 700), 100, 5000)
+  base["makerReplaceOnlyOnTouchMove"] = bool(base.get("makerReplaceOnlyOnTouchMove", True))
+  base["makerImproveOneTickOnWideSpread"] = bool(base.get("makerImproveOneTickOnWideSpread", True))
+  base["makerImproveMinSpreadTicks"] = clamp(_to_float(base.get("makerImproveMinSpreadTicks", 3.0), 3.0), 1.0, 20.0)
+  base["entryMinFillRatio"] = clamp(_to_float(base.get("entryMinFillRatio", 0.50), 0.50), 0.1, 1.0)
 
   base["stopLossPct"] = _to_opt_float(base.get("stopLossPct"))
   base["stopLossAtrMult"] = _to_opt_float(base.get("stopLossAtrMult"))
@@ -1809,9 +1819,29 @@ def _maker_touch_price(
   ask: Optional[float],
   mid: Optional[float],
   tick_size: Optional[float],
+  improve_one_tick_on_wide_spread: bool = True,
+  improve_min_spread_ticks: float = 3.0,
 ) -> float:
   b = bid if bid and bid > 0 else None
   a = ask if ask and ask > 0 else None
+  tick = float(tick_size or 0.0) if tick_size else 0.0
+  if (
+    improve_one_tick_on_wide_spread
+    and tick > 0
+    and b is not None
+    and a is not None
+    and a > b
+  ):
+    spread_ticks = (a - b) / tick if tick > 0 else 0.0
+    if spread_ticks >= float(improve_min_spread_ticks):
+      if side_int == 0:
+        improved = b + tick
+        if improved < a:
+          return quantize_price_to_tick(float(improved), tick_size, side_int, aggressive=False)
+      elif side_int == 1:
+        improved = a - tick
+        if improved > b:
+          return quantize_price_to_tick(float(improved), tick_size, side_int, aggressive=False)
   if side_int == 0 and b is not None:
     return quantize_price_to_tick(float(b), tick_size, side_int, aggressive=False)
   if side_int == 1 and a is not None:
@@ -1975,6 +2005,11 @@ async def execute_maker_chase(
   expected_side: Optional[str] = None,
   reduce_only: bool = False,
   allow_market_safety: bool = False,
+  min_rest_ms: int = 700,
+  replace_only_on_touch_move: bool = True,
+  improve_one_tick_on_wide_spread: bool = True,
+  improve_min_spread_ticks: float = 3.0,
+  entry_min_fill_ratio: float = 1.0,
 ) -> Dict[str, Any]:
   start_ms = int(time.time() * 1000)
   deadline_ms = start_ms + int(max(0.2, chase_max_sec) * 1000)
@@ -1982,9 +2017,19 @@ async def execute_maker_chase(
   attempts: List[Dict[str, Any]] = []
   errors: List[str] = []
   submitted = 0
+  replace_count = 0
+  cancel_count = 0
+  keep_count = 0
   filled = 0.0
   remaining = qty
   market_safety_used = False
+  accepted_partial = False
+  first_fill_ms: Optional[int] = None
+  active_order_price: Optional[float] = None
+  active_order_submitted_ms: Optional[int] = None
+  active_quote_bid: Optional[float] = None
+  active_quote_ask: Optional[float] = None
+  last_seen_touch: Optional[Tuple[Optional[float], Optional[float]]] = None
 
   while remaining > 0 and int(time.time() * 1000) < deadline_ms:
     now_ms = int(time.time() * 1000)
@@ -2002,7 +2047,45 @@ async def execute_maker_chase(
         bid = last_bid or bid
         ask = last_ask or ask
 
-    limit_px = _maker_touch_price(order_side_int, bid, ask, last_mid, tick_size)
+    # Refresh fill progress before deciding whether to replace/cancel, so we don't throw away queue priority unnecessarily.
+    if active_order_price is not None:
+      pos_now = fetch_active_position(eth_base, sub_id, product_id)
+      o, s, sz, _, _, _ = parse_position(pos_now)
+      abs_sz = abs(float(sz)) if sz is not None else 0.0
+
+      if position_mode == "entry":
+        if o and s == expected_side:
+          filled = abs_sz
+          if first_fill_ms is None and filled > 0:
+            first_fill_ms = now_ms
+        else:
+          filled = 0.0
+        remaining = max(0.0, qty - filled)
+        if qty > 0 and filled > 0 and (filled / qty) >= float(entry_min_fill_ratio):
+          accepted_partial = True
+          remaining = 0.0
+      else:
+        remaining = abs_sz if (o and s == expected_side) else 0.0
+        filled = max(0.0, qty - remaining)
+        if first_fill_ms is None and filled > 0:
+          first_fill_ms = now_ms
+
+      if remaining <= 0:
+        break
+
+    limit_px = _maker_touch_price(
+      order_side_int,
+      bid,
+      ask,
+      last_mid,
+      tick_size,
+      improve_one_tick_on_wide_spread=improve_one_tick_on_wide_spread,
+      improve_min_spread_ticks=improve_min_spread_ticks,
+    )
+    touch_now = (bid, ask)
+    touch_moved = (last_seen_touch != touch_now)
+    last_seen_touch = touch_now
+
     attempt: Dict[str, Any] = {
       "tsMs": now_ms,
       "price": limit_px,
@@ -2010,64 +2093,98 @@ async def execute_maker_chase(
       "ask": ask,
       "quoteAgeMs": quote_age_ms,
     }
-    try:
-      await place_limit_post_only(
-        client,
-        ticker,
-        order_side_int,
-        remaining,
-        limit_px,
-        sender,
-        subaccount,
-        lot_size,
-        gtd_sec=gtd_sec,
-        reduce_only=reduce_only,
-      )
-      submitted += 1
-      last_order_submit_ms = int(time.time() * 1000)
-      attempt["submitted"] = True
-    except Exception as e:
-      err = str(e)
-      attempt["submitted"] = False
-      attempt["error"] = err
-      errors.append(err)
-      try:
-        await cancel_open_orders(client, ticker, sender, subaccount)
-      except Exception:
-        pass
-      attempts.append(attempt)
-      await asyncio.sleep(min(0.2, max(0.05, reprice_ms / 1000.0)))
-      continue
-
-    sleep_ms = min(int(reprice_ms), max(50, deadline_ms - int(time.time() * 1000)))
-    await asyncio.sleep(max(0.05, sleep_ms / 1000.0))
-    try:
-      await cancel_open_orders(client, ticker, sender, subaccount)
-    except Exception as e:
-      errors.append(f"cancel:{e}")
-
-    pos_now = fetch_active_position(eth_base, sub_id, product_id)
-    o, s, sz, _, _, _ = parse_position(pos_now)
-    abs_sz = abs(float(sz)) if sz is not None else 0.0
-
-    if position_mode == "entry":
-      if o and s == expected_side:
-        filled = abs_sz
-      else:
-        filled = 0.0
-      remaining = max(0.0, qty - filled)
+    should_submit = False
+    if active_order_price is None:
+      should_submit = True
+      attempt["action"] = "submit_new"
     else:
-      remaining = abs_sz if (o and s == expected_side) else 0.0
-      filled = max(0.0, qty - remaining)
+      age_ms = now_ms - int(active_order_submitted_ms or now_ms)
+      gtd_expiring_soon = age_ms >= max(200, int(gtd_sec * 1000) - max(120, int(reprice_ms)))
+      price_changed = abs(float(limit_px) - float(active_order_price)) > 1e-12
+      can_replace = age_ms >= int(min_rest_ms)
+      should_replace = False
+      replace_reason = None
+      if gtd_expiring_soon and can_replace:
+        should_replace = True
+        replace_reason = "gtd_refresh"
+      elif price_changed and can_replace:
+        if (not replace_only_on_touch_move) or touch_moved:
+          should_replace = True
+          replace_reason = "touch_move"
 
-    attempt["filled"] = filled
-    attempt["remaining"] = remaining
-    attempts.append(attempt)
+      if should_replace:
+        try:
+          await cancel_open_orders(client, ticker, sender, subaccount)
+          cancel_count += 1
+          replace_count += 1
+          active_order_price = None
+          active_order_submitted_ms = None
+          attempt["action"] = "replace"
+          attempt["replaceReason"] = replace_reason
+          should_submit = True
+        except Exception as e:
+          errors.append(f"cancel:{e}")
+          attempt["action"] = "cancel_error"
+          attempt["error"] = f"cancel:{e}"
+          attempts.append(attempt)
+          await asyncio.sleep(min(0.5, max(0.05, reprice_ms / 1000.0)))
+          continue
+      else:
+        keep_count += 1
+        attempt["action"] = "keep_resting"
+        attempt["activePrice"] = active_order_price
+        attempt["activeAgeMs"] = age_ms
+        attempt["touchMoved"] = touch_moved
+        attempt["filled"] = filled
+        attempt["remaining"] = remaining
+        attempts.append(attempt)
+        sleep_ms = min(int(reprice_ms), max(50, deadline_ms - int(time.time() * 1000)))
+        await asyncio.sleep(max(0.05, sleep_ms / 1000.0))
+        continue
+
+    if should_submit:
+      try:
+        await place_limit_post_only(
+          client,
+          ticker,
+          order_side_int,
+          remaining,
+          limit_px,
+          sender,
+          subaccount,
+          lot_size,
+          gtd_sec=gtd_sec,
+          reduce_only=reduce_only,
+        )
+        submitted += 1
+        last_order_submit_ms = int(time.time() * 1000)
+        active_order_price = float(limit_px)
+        active_order_submitted_ms = last_order_submit_ms
+        active_quote_bid = bid
+        active_quote_ask = ask
+        attempt["submitted"] = True
+      except Exception as e:
+        err = str(e)
+        attempt["submitted"] = False
+        attempt["error"] = err
+        errors.append(err)
+        # A post-only reject is expected sometimes; avoid unnecessary extra cancel spam.
+        attempts.append(attempt)
+        await asyncio.sleep(min(0.5, max(0.05, reprice_ms / 1000.0)))
+        continue
+
+      attempt["activePrice"] = active_order_price
+      attempt["filled"] = filled
+      attempt["remaining"] = remaining
+      attempts.append(attempt)
+      sleep_ms = min(int(reprice_ms), max(50, deadline_ms - int(time.time() * 1000)))
+      await asyncio.sleep(max(0.05, sleep_ms / 1000.0))
 
   remaining = quantize_qty_to_lot(max(0.0, remaining), lot_size)
-  if remaining > 0:
+  if active_order_price is not None or remaining > 0:
     try:
       await cancel_open_orders(client, ticker, sender, subaccount)
+      cancel_count += 1
     except Exception:
       pass
 
@@ -2099,7 +2216,17 @@ async def execute_maker_chase(
     "attempts": attempts,
     "attemptCount": len(attempts),
     "submittedCount": submitted,
+    "replaceCount": replace_count,
+    "cancelCount": cancel_count,
+    "keepCount": keep_count,
     "marketSafetyUsed": market_safety_used,
+    "acceptedPartial": accepted_partial,
+    "partialFillRatio": (float(filled) / float(qty)) if qty > 0 else 0.0,
+    "firstFillMs": first_fill_ms,
+    "timeToFirstFillMs": ((int(first_fill_ms) - int(start_ms)) if first_fill_ms is not None else None),
+    "lastWorkingPrice": active_order_price,
+    "lastWorkingQuoteBid": active_quote_bid,
+    "lastWorkingQuoteAsk": active_quote_ask,
     "timedOut": bool(remaining > 0),
     "errors": errors[-5:],
     "lastOrderSubmitMs": last_order_submit_ms,
@@ -2258,6 +2385,11 @@ async def main():
   fills_audit_last20: Optional[Dict[str, Any]] = None
   last_entry_fill_info: Optional[Dict[str, Any]] = None
   last_exit_method: Optional[str] = None
+  maker_entry_chases = 0
+  maker_entry_opened = 0
+  maker_entry_partial_accepts = 0
+  maker_entry_timeouts = 0
+  maker_entry_ttf_ms_samples: List[int] = []
 
   while True:
     started = time.time()
@@ -2627,7 +2759,7 @@ async def main():
                 last_ask=last_ask,
                 quote_cache=ws_quote_cache,
                 chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 350)),
                 gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
                 last_order_submit_ms=last_order_submit_ms,
                 order_guard_ms=int(cfg.get("orderGuardMs", 200)),
@@ -2635,6 +2767,10 @@ async def main():
                 expected_side=position_state.side,
                 reduce_only=True,
                 allow_market_safety=True,
+                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
               )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts("EXIT_RISK", exec_result)
@@ -2849,8 +2985,8 @@ async def main():
                   last_bid=last_bid,
                   last_ask=last_ask,
                   quote_cache=ws_quote_cache,
-                  chase_max_sec=float(cfg.get("entryChaseMaxSec", 5.0)),
-                  reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                  chase_max_sec=float(cfg.get("entryChaseMaxSec", 10.0)),
+                  reprice_ms=int(cfg.get("executionRepriceMs", 350)),
                   gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
                   last_order_submit_ms=last_order_submit_ms,
                   order_guard_ms=guard_ms,
@@ -2858,9 +2994,15 @@ async def main():
                   expected_side=signal.desired,
                   reduce_only=False,
                   allow_market_safety=False,
+                  min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                  replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                  improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                  improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+                  entry_min_fill_ratio=float(cfg.get("entryMinFillRatio", 0.50)),
                 )
                 last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
                 _print_chase_attempts(f"ENTRY_{signal.desired}", exec_result)
+                maker_entry_chases += 1
                 filled = float(exec_result.get("filledQty") or 0.0)
                 remain = float(exec_result.get("remainingQty") or 0.0)
                 submitted_any = int(exec_result.get("submittedCount") or 0) > 0
@@ -2888,6 +3030,8 @@ async def main():
                   pass
 
                 if opened_qty <= 0:
+                  if bool(exec_result.get("timedOut")):
+                    maker_entry_timeouts += 1
                   if submitted_any:
                     last_order_ts.append(time.time())
                   last_action = {
@@ -2910,6 +3054,18 @@ async def main():
                     },
                   }
                 else:
+                  maker_entry_opened += 1
+                  if bool(exec_result.get("acceptedPartial")):
+                    maker_entry_partial_accepts += 1
+                  ttf = exec_result.get("timeToFirstFillMs")
+                  try:
+                    ttf_i = int(ttf) if ttf is not None else None
+                  except Exception:
+                    ttf_i = None
+                  if ttf_i is not None and ttf_i >= 0:
+                    maker_entry_ttf_ms_samples.append(ttf_i)
+                    if len(maker_entry_ttf_ms_samples) > 200:
+                      maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
                   entry_px = float(last_mid)
                   if epf and epf > 0:
                     entry_px = epf
@@ -2942,6 +3098,8 @@ async def main():
                         "cooldownBypassed": emergency_breakout,
                         "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
                         "entryTimedOut": bool(exec_result.get("timedOut")),
+                        "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
+                        "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
                       }
                     ),
                     entry_ts=etsf or now_ms,
@@ -2970,6 +3128,8 @@ async def main():
                       "marketFallbackUsed": False,
                       "cooldownBypassed": emergency_breakout,
                       "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
+                      "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
+                      "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
                     },
                   }
               else:
@@ -3066,7 +3226,7 @@ async def main():
                 last_ask=last_ask,
                 quote_cache=ws_quote_cache,
                 chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 350)),
                 gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
                 last_order_submit_ms=last_order_submit_ms,
                 order_guard_ms=guard_ms,
@@ -3074,6 +3234,10 @@ async def main():
                 expected_side=position_state.side,
                 reduce_only=True,
                 allow_market_safety=True,
+                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
               )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts("EXIT_CONFIDENCE", exec_result)
@@ -3220,10 +3384,15 @@ async def main():
           "emergencyBreakoutMinProb": float(cfg.get("emergencyBreakoutMinProb", 0.94)),
           "emergencyBreakoutMinMoveBps": float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)),
           "emergencyBreakoutMinAtrPercentile": float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85)),
-          "entryChaseMaxSec": float(cfg.get("entryChaseMaxSec", 5.0)),
+          "entryChaseMaxSec": float(cfg.get("entryChaseMaxSec", 10.0)),
           "exitChaseMaxSec": float(cfg.get("exitChaseMaxSec", 5.0)),
-          "executionRepriceMs": int(cfg.get("executionRepriceMs", 200)),
+          "executionRepriceMs": int(cfg.get("executionRepriceMs", 350)),
           "makerOrderGtdSec": int(cfg.get("makerOrderGtdSec", 2)),
+          "makerMinRestMs": int(cfg.get("makerMinRestMs", 700)),
+          "makerReplaceOnlyOnTouchMove": bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+          "makerImproveOneTickOnWideSpread": bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+          "makerImproveMinSpreadTicks": float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+          "entryMinFillRatio": float(cfg.get("entryMinFillRatio", 0.50)),
           "stopLossPct": _to_opt_float(cfg.get("stopLossPct")),
           "stopLossAtrMult": _to_opt_float(cfg.get("stopLossAtrMult")),
           "takeProfitPct": _to_opt_float(cfg.get("takeProfitPct")),
@@ -3307,6 +3476,15 @@ async def main():
           "lastExitFillAudit": last_exit_fill_audit,
           "lastExitMethod": last_exit_method,
           "fillsAuditLast20": fills_audit_last20,
+          "entryMakerChases": maker_entry_chases,
+          "entryMakerOpened": maker_entry_opened,
+          "entryMakerTimeouts": maker_entry_timeouts,
+          "entryMakerPartialAccepts": maker_entry_partial_accepts,
+          "entryMakerFillRatePct": ((maker_entry_opened / maker_entry_chases) * 100.0) if maker_entry_chases else 0.0,
+          "entryMakerPartialRatePct": ((maker_entry_partial_accepts / maker_entry_opened) * 100.0) if maker_entry_opened else 0.0,
+          "avgEntryTimeToFirstFillMs": (
+            (sum(maker_entry_ttf_ms_samples) / len(maker_entry_ttf_ms_samples)) if maker_entry_ttf_ms_samples else None
+          ),
         },
         "db": {
           "dir": DB_DIR,

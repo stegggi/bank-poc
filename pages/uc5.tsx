@@ -162,10 +162,15 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     emergencyBreakoutMinProb: c.emergencyBreakoutMinProb ?? 0.94,
     emergencyBreakoutMinMoveBps: c.emergencyBreakoutMinMoveBps ?? 35,
     emergencyBreakoutMinAtrPercentile: c.emergencyBreakoutMinAtrPercentile ?? 0.85,
-    entryChaseMaxSec: c.entryChaseMaxSec ?? 5,
+    entryChaseMaxSec: c.entryChaseMaxSec ?? 10,
     exitChaseMaxSec: c.exitChaseMaxSec ?? 5,
-    executionRepriceMs: c.executionRepriceMs ?? 200,
+    executionRepriceMs: c.executionRepriceMs ?? 350,
     makerOrderGtdSec: c.makerOrderGtdSec ?? 2,
+    makerMinRestMs: c.makerMinRestMs ?? 700,
+    makerReplaceOnlyOnTouchMove: c.makerReplaceOnlyOnTouchMove ?? true,
+    makerImproveOneTickOnWideSpread: c.makerImproveOneTickOnWideSpread ?? true,
+    makerImproveMinSpreadTicks: c.makerImproveMinSpreadTicks ?? 3,
+    entryMinFillRatio: c.entryMinFillRatio ?? 0.5,
   };
 }
 
@@ -862,6 +867,30 @@ export default function Uc5Page() {
                     ? `maker ${(status.execution.fillsAuditLast20.summary.makerRatePct ?? 0).toFixed(1)}% | fees ${fmtUsd(
                         status.execution.fillsAuditLast20.summary.totalFeesUsd
                       )}`
+                    : "—"
+                }
+              />
+              <KV
+                k="Entry maker fill rate"
+                v={
+                  status?.execution?.entryMakerChases != null
+                    ? `${(status.execution.entryMakerFillRatePct ?? 0).toFixed(1)}% (${status.execution.entryMakerOpened ?? 0}/${status.execution.entryMakerChases ?? 0})`
+                    : "—"
+                }
+              />
+              <KV
+                k="Entry time to fill"
+                v={
+                  status?.execution?.avgEntryTimeToFirstFillMs != null
+                    ? `${Math.round(status.execution.avgEntryTimeToFirstFillMs)} ms`
+                    : "—"
+                }
+              />
+              <KV
+                k="Partial-fill accepts"
+                v={
+                  status?.execution?.entryMakerOpened != null
+                    ? `${status.execution.entryMakerPartialAccepts ?? 0} (${(status.execution.entryMakerPartialRatePct ?? 0).toFixed(1)}%)`
                     : "—"
                 }
               />
