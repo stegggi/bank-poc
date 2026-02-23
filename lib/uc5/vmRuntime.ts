@@ -33,8 +33,8 @@ export function defaultUc5Config(): Uc5Config {
     ingestionEnabled: true,
     tradingEnabled: true,
     killSwitch: false,
-    pollIntervalSeconds: 2,
-    ingestIntervalSec: 2,
+    pollIntervalSeconds: 1,
+    ingestIntervalSec: Number(process.env.UC5_INGEST_INTERVAL_SEC || 0.5),
     reassessIntervalSec: 8,
     decisionLoopIntervalSec: 4,
     inPositionReassessIntervalSec: 8,
@@ -51,21 +51,25 @@ export function defaultUc5Config(): Uc5Config {
     maxHoldSeconds: 7200,
     maxOrdersPerHour: 120,
     smartEntryTimeoutMs: 900,
-    orderGuardMs: 900,
+    orderGuardMs: 200,
     maxSpreadBpsForTrade: 12,
     exitSpreadInsaneBps: 28,
     feeEstimateBps: 3,
     slippageBufferBps: 4,
-    minExpectedMoveBps: 20,
-    edgeCostMultiplier: 2,
+    minExpectedMoveBps: 0,
+    edgeCostMultiplier: 0,
     entryMakerPreferred: true,
-    entryMarketFallbackEnabled: true,
+    entryMarketFallbackEnabled: false,
     entryMarketFallbackMinProb: 0.9,
-    cooldownAfterCloseSec: 30,
-    emergencyBreakoutEnabled: true,
+    cooldownAfterCloseSec: 5,
+    emergencyBreakoutEnabled: false,
     emergencyBreakoutMinProb: 0.94,
     emergencyBreakoutMinMoveBps: 35,
     emergencyBreakoutMinAtrPercentile: 0.85,
+    entryChaseMaxSec: 5,
+    exitChaseMaxSec: 5,
+    executionRepriceMs: 200,
+    makerOrderGtdSec: 2,
     stopLossPct: 0.003,
     stopLossAtrMult: null,
     takeProfitPct: 0.006,
@@ -238,6 +242,8 @@ export type VmChartResponse = {
     closeReason?: "confidence_change" | "risk_loop" | "other";
   }>;
   confidence?: Array<{ t: number; pUp: number }>;
+  partial24h?: boolean;
+  missingDays?: string[];
 };
 
 export type VmPortfolio = {

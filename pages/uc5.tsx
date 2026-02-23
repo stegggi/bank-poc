@@ -139,7 +139,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
   return {
     ...c,
     ingestionEnabled: c.ingestionEnabled ?? true,
-    ingestIntervalSec: c.ingestIntervalSec ?? c.pollIntervalSeconds ?? 2,
+    ingestIntervalSec: c.ingestIntervalSec ?? c.pollIntervalSeconds ?? 0.5,
     reassessIntervalSec: inPos,
     decisionLoopIntervalSec: c.decisionLoopIntervalSec ?? 4,
     inPositionReassessIntervalSec: inPos,
@@ -152,16 +152,20 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     maxMarginPct: c.maxMarginPct ?? 25,
     feeEstimateBps: c.feeEstimateBps ?? 3,
     slippageBufferBps: c.slippageBufferBps ?? 4,
-    minExpectedMoveBps: c.minExpectedMoveBps ?? 20,
-    edgeCostMultiplier: c.edgeCostMultiplier ?? 2,
-    entryMakerPreferred: c.entryMakerPreferred ?? true,
-    entryMarketFallbackEnabled: c.entryMarketFallbackEnabled ?? true,
+    minExpectedMoveBps: 0,
+    edgeCostMultiplier: 0,
+    entryMakerPreferred: true,
+    entryMarketFallbackEnabled: false,
     entryMarketFallbackMinProb: c.entryMarketFallbackMinProb ?? 0.9,
-    cooldownAfterCloseSec: c.cooldownAfterCloseSec ?? 30,
-    emergencyBreakoutEnabled: c.emergencyBreakoutEnabled ?? true,
+    cooldownAfterCloseSec: c.cooldownAfterCloseSec ?? 5,
+    emergencyBreakoutEnabled: false,
     emergencyBreakoutMinProb: c.emergencyBreakoutMinProb ?? 0.94,
     emergencyBreakoutMinMoveBps: c.emergencyBreakoutMinMoveBps ?? 35,
     emergencyBreakoutMinAtrPercentile: c.emergencyBreakoutMinAtrPercentile ?? 0.85,
+    entryChaseMaxSec: c.entryChaseMaxSec ?? 5,
+    exitChaseMaxSec: c.exitChaseMaxSec ?? 5,
+    executionRepriceMs: c.executionRepriceMs ?? 200,
+    makerOrderGtdSec: c.makerOrderGtdSec ?? 2,
   };
 }
 
@@ -302,8 +306,8 @@ export default function Uc5Page() {
     if (edit.predictionHorizonSeconds < 10 || edit.predictionHorizonSeconds > 259200) {
       errors.predictionHorizonSeconds = "Entry horizon must be 10 to 259200 sec";
     }
-    if (edit.ingestIntervalSec < 1 || edit.ingestIntervalSec > 60) {
-      errors.ingestIntervalSec = "Ingest interval must be 1 to 60 sec";
+    if (edit.ingestIntervalSec < 0.2 || edit.ingestIntervalSec > 60) {
+      errors.ingestIntervalSec = "Ingest interval must be 0.2 to 60 sec";
     }
     if (edit.riskLoopIntervalSec < 1 || edit.riskLoopIntervalSec > 5) {
       errors.riskLoopIntervalSec = "Risk loop interval must be 1 to 5 sec";
@@ -323,11 +327,11 @@ export default function Uc5Page() {
     if (edit.slippageBufferBps < 0 || edit.slippageBufferBps > 100) {
       errors.slippageBufferBps = "Slippage buffer must be 0 to 100 bps";
     }
-    if (edit.minExpectedMoveBps < 1 || edit.minExpectedMoveBps > 500) {
-      errors.minExpectedMoveBps = "Min expected move must be 1 to 500 bps";
+    if (edit.minExpectedMoveBps < 0 || edit.minExpectedMoveBps > 500) {
+      errors.minExpectedMoveBps = "Min expected move must be 0 to 500 bps";
     }
-    if (edit.edgeCostMultiplier < 1 || edit.edgeCostMultiplier > 5) {
-      errors.edgeCostMultiplier = "Edge multiplier must be 1.0 to 5.0";
+    if (edit.edgeCostMultiplier < 0 || edit.edgeCostMultiplier > 5) {
+      errors.edgeCostMultiplier = "Edge multiplier must be 0.0 to 5.0";
     }
     if (edit.entryMarketFallbackMinProb < 0.5 || edit.entryMarketFallbackMinProb > 0.99) {
       errors.entryMarketFallbackMinProb = "Fallback min probability must be 0.50 to 0.99";
@@ -392,9 +396,14 @@ export default function Uc5Page() {
       const payload: Uc5Config = {
         ...normalized,
         ownerAddress: cfg.ownerAddress,
-        pollIntervalSeconds: normalized.ingestIntervalSec,
+        pollIntervalSeconds: Math.max(1, Math.round(normalized.ingestIntervalSec)),
         confidenceThreshold: normalized.openConfidenceThreshold,
         reassessIntervalSec: normalized.inPositionReassessIntervalSec,
+        entryMakerPreferred: true,
+        entryMarketFallbackEnabled: false,
+        minExpectedMoveBps: 0,
+        edgeCostMultiplier: 0,
+        emergencyBreakoutEnabled: false,
       };
       const auth = await signOwnerAction("SET_CONFIG", payload);
       await readJson<{ ok: true }>("/api/uc5/config", {
@@ -821,6 +830,41 @@ export default function Uc5Page() {
               <KV k="Cooldown ends" v={fmtCountdown(trading?.countdowns?.cooldownEndsInSec)} />
               <KV k="Next entry evaluation" v={fmtCountdown(trading?.countdowns?.nextDecisionInSec)} />
               <KV k="Last action" v={String(trading?.lastAction && typeof trading.lastAction === "object" && "type" in (trading.lastAction as { type?: unknown }) ? (trading.lastAction as { type?: unknown }).type : "—")} />
+              <KV k="Maker-only entry" v={status?.execution?.makerOnlyEntry ? "ON (locked)" : "—"} />
+              <KV k="Exit safety override" v={status?.execution?.makerFirstExitWithMarketSafety ? `ON (${status.execution?.exitMarketSafetyAfterSec ?? 5}s)` : "—"} />
+              <KV
+                k="Quote feed"
+                v={
+                  status?.execution?.wsQuotes?.subscribed ? "WS BookDepth" : status?.execution?.quoteSource || "REST"
+                }
+              />
+              <KV
+                k="WS quotes"
+                v={
+                  status?.execution?.wsQuotes
+                    ? `${status.execution.wsQuotes.connected ? "connected" : "disconnected"} / ${status.execution.wsQuotes.subscribed ? "subscribed" : "not subscribed"}`
+                    : "—"
+                }
+              />
+              <KV
+                k="Last entry fill"
+                v={
+                  status?.execution?.lastEntryFill
+                    ? `${status.execution.lastEntryFill.isMaker ? "maker" : "taker"} | fee ${fmtUsd(status.execution.lastEntryFill.feeUsd)}`
+                    : "—"
+                }
+              />
+              <KV k="Last exit method" v={status?.execution?.lastExitMethod || "—"} />
+              <KV
+                k="Last 20 fills"
+                v={
+                  status?.execution?.fillsAuditLast20?.summary
+                    ? `maker ${(status.execution.fillsAuditLast20.summary.makerRatePct ?? 0).toFixed(1)}% | fees ${fmtUsd(
+                        status.execution.fillsAuditLast20.summary.totalFeesUsd
+                      )}`
+                    : "—"
+                }
+              />
               <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button
                   style={trading?.enabled ? btnWarn : btnPrimary}
@@ -969,14 +1013,14 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="ingestIntervalSec" help="Tick write cadence into SQLite." error={validation.ingestIntervalSec}>
+            <Field label="ingestIntervalSec" help="Tick write cadence into SQLite (0.2-60s, 0.5s recommended)." error={validation.ingestIntervalSec}>
               <input
                 style={input}
                 type="number"
-                min={1}
+                min={0.2}
                 max={60}
-                step={1}
-                value={edit?.ingestIntervalSec ?? 2}
+                step={0.1}
+                value={edit?.ingestIntervalSec ?? 0.5}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, ingestIntervalSec: Number(e.target.value), pollIntervalSeconds: Number(e.target.value) } : p))}
               />
@@ -1084,73 +1128,84 @@ export default function Uc5Page() {
 
             <Field
               label="minExpectedMoveBps"
-              help="Absolute minimum expected move to allow entries."
+              help="Disabled for higher trading frequency (locked to 0)."
               error={validation.minExpectedMoveBps}
             >
               <input
                 style={input}
                 type="number"
-                min={1}
+                min={0}
                 max={500}
                 step={1}
-                value={edit?.minExpectedMoveBps ?? 20}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))}
+                value={0}
+                disabled
+                onChange={() => {}}
               />
             </Field>
 
             <Field
               label="edgeCostMultiplier"
-              help="Require expected move >= multiplier × (fees+spread+slippage)."
+              help="Disabled for higher trading frequency (locked to 0)."
               error={validation.edgeCostMultiplier}
             >
               <input
                 style={input}
                 type="number"
-                min={1}
+                min={0}
                 max={5}
                 step={0.1}
-                value={edit?.edgeCostMultiplier ?? 2}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, edgeCostMultiplier: Number(e.target.value) } : p))}
+                value={0}
+                disabled
+                onChange={() => {}}
               />
             </Field>
 
             <Field
               label="entryMakerPreferred"
-              help="Try post-only maker limit first for entries."
+              help="Entry execution is locked to maker-only post-only chase."
               error={undefined}
             >
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
                 <input
                   type="checkbox"
-                  checked={Boolean(edit?.entryMakerPreferred ?? true)}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, entryMakerPreferred: e.target.checked } : p))}
+                  checked
+                  disabled
+                  onChange={() => {}}
                 />
-                Enable maker-first entries
+                Maker-only entry (locked)
               </label>
             </Field>
 
             <Field
               label="entryMarketFallbackEnabled"
-              help="Allow market fallback for strong signals after maker timeout."
+              help="Disabled to prevent taker entries."
               error={undefined}
             >
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
                 <input
                   type="checkbox"
-                  checked={Boolean(edit?.entryMarketFallbackEnabled ?? true)}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, entryMarketFallbackEnabled: e.target.checked } : p))}
+                  checked={false}
+                  disabled
+                  onChange={() => {}}
                 />
-                Enable market fallback
+                Market entry fallback OFF (locked)
+              </label>
+            </Field>
+
+            <Field
+              label="exitMakerFirstSafety"
+              help="Exit uses post-only chasing first, then market safety override after ~5s."
+              error={undefined}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input type="checkbox" checked disabled onChange={() => {}} />
+                Maker-first exit + market safety (locked)
               </label>
             </Field>
 
             <Field
               label="entryMarketFallbackMinProb"
-              help="Directional probability required to allow market fallback."
+              help="Inactive while market entry fallback is locked OFF."
               error={validation.entryMarketFallbackMinProb}
             >
               <input
@@ -1160,8 +1215,8 @@ export default function Uc5Page() {
                 max={0.99}
                 step={0.01}
                 value={edit?.entryMarketFallbackMinProb ?? 0.9}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, entryMarketFallbackMinProb: Number(e.target.value) } : p))}
+                disabled
+                onChange={() => {}}
               />
             </Field>
 
@@ -1176,7 +1231,7 @@ export default function Uc5Page() {
                 min={0}
                 max={600}
                 step={1}
-                value={edit?.cooldownAfterCloseSec ?? 30}
+                value={edit?.cooldownAfterCloseSec ?? 5}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, cooldownAfterCloseSec: Number(e.target.value) } : p))}
               />
@@ -1184,23 +1239,23 @@ export default function Uc5Page() {
 
             <Field
               label="emergencyBreakoutEnabled"
-              help="Allow bypassing cooldown on strong momentum breakouts."
+              help="Disabled by default to keep re-entry behavior simple."
               error={undefined}
             >
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
                 <input
                   type="checkbox"
-                  checked={Boolean(edit?.emergencyBreakoutEnabled ?? true)}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutEnabled: e.target.checked } : p))}
+                  checked={Boolean(edit?.emergencyBreakoutEnabled ?? false)}
+                  disabled
+                  onChange={() => {}}
                 />
-                Enable emergency breakout bypass
+                Emergency breakout bypass (inactive by default)
               </label>
             </Field>
 
             <Field
               label="emergencyBreakoutMinProb"
-              help="Min directional probability to bypass cooldown."
+              help="Inactive unless emergency breakout is enabled."
               error={validation.emergencyBreakoutMinProb}
             >
               <input
@@ -1210,14 +1265,14 @@ export default function Uc5Page() {
                 max={0.99}
                 step={0.01}
                 value={edit?.emergencyBreakoutMinProb ?? 0.94}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinProb: Number(e.target.value) } : p))}
+                disabled
+                onChange={() => {}}
               />
             </Field>
 
             <Field
               label="emergencyBreakoutMinMoveBps"
-              help="Min expected move (bps) to bypass cooldown."
+              help="Inactive unless emergency breakout is enabled."
               error={validation.emergencyBreakoutMinMoveBps}
             >
               <input
@@ -1227,14 +1282,14 @@ export default function Uc5Page() {
                 max={1000}
                 step={1}
                 value={edit?.emergencyBreakoutMinMoveBps ?? 35}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinMoveBps: Number(e.target.value) } : p))}
+                disabled
+                onChange={() => {}}
               />
             </Field>
 
             <Field
               label="emergencyBreakoutMinAtrPercentile"
-              help="Min ATR percentile (0-1) for cooldown bypass."
+              help="Inactive unless emergency breakout is enabled."
               error={validation.emergencyBreakoutMinAtrPercentile}
             >
               <input
@@ -1244,8 +1299,8 @@ export default function Uc5Page() {
                 max={1}
                 step={0.01}
                 value={edit?.emergencyBreakoutMinAtrPercentile ?? 0.85}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, emergencyBreakoutMinAtrPercentile: Number(e.target.value) } : p))}
+                disabled
+                onChange={() => {}}
               />
             </Field>
           </div>
@@ -1262,6 +1317,11 @@ export default function Uc5Page() {
             <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
               24h chart ({chart.candles.length} points). Markers: green=entry, amber=close by confidence, red=close by risk loop, gray=other close.
             </div>
+            {chart.partial24h ? (
+              <div style={{ fontSize: 12, color: "#b54708", marginBottom: 8 }}>
+                Partial 24h data (missing DB day: {(chart.missingDays || []).join(", ") || "unknown"}).
+              </div>
+            ) : null}
             {chartRows.length === 0 ? (
               <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
             ) : (

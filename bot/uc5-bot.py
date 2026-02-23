@@ -28,9 +28,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import requests
 
 try:
-  from ethereal import AsyncRESTClient
+  from ethereal import AsyncRESTClient, AsyncWSClient
 except Exception:
   from ethereal.async_rest_client import AsyncRESTClient
+  try:
+    from ethereal.async_ws_client import AsyncWSClient
+  except Exception:
+    AsyncWSClient = None  # type: ignore[assignment]
 
 from db import DailyDbManager
 from strategy import (
@@ -126,8 +130,8 @@ BOT_TOKEN = os.environ.get("UC5_BOT_TOKEN", "")
 BOT_PRIVKEY = _clean_secret(os.environ.get("UC5_BOT_SIGNER_PRIVATE_KEY", ""))
 
 DB_DIR = os.environ.get("UC5_DB_DIR", os.path.expanduser("~/uc5-runtime/db"))
-DB_MAX_GB = float(os.environ.get("UC5_DB_MAX_GB", "29"))
-DB_TARGET_GB = float(os.environ.get("UC5_DB_TARGET_GB", "28"))
+DB_MAX_GB = float(os.environ.get("UC5_DB_MAX_GB", "15"))
+DB_TARGET_GB = float(os.environ.get("UC5_DB_TARGET_GB", "14"))
 
 RUNTIME_CONFIG_PATH = os.environ.get(
   "UC5_RUNTIME_CONFIG_PATH",
@@ -136,7 +140,7 @@ RUNTIME_CONFIG_PATH = os.environ.get(
 
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
-BOT_VERSION = "uc5-bot/1.0 (multi-loop+hysteresis+daily-db)"
+BOT_VERSION = "uc5-bot/1.0 (maker-chase+ws-quotes+daily-db)"
 
 if not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_BOT_TOKEN")
@@ -196,6 +200,10 @@ def parse_resolution_seconds(raw: Optional[str]) -> int:
 # ---- Runtime config + commands ----
 def default_runtime_config() -> Dict[str, Any]:
   owner = os.environ.get("UC5_OWNER_ADDRESS", "")
+  try:
+    ingest_default = float(os.environ.get("UC5_INGEST_INTERVAL_SEC", "0.5"))
+  except Exception:
+    ingest_default = 0.5
   return {
     "version": 1,
     "ownerAddress": owner,
@@ -211,8 +219,8 @@ def default_runtime_config() -> Dict[str, Any]:
     "ingestionEnabled": True,
     "tradingEnabled": True,
     "killSwitch": False,
-    "pollIntervalSeconds": 2,
-    "ingestIntervalSec": 2,
+    "pollIntervalSeconds": 1,
+    "ingestIntervalSec": float(ingest_default),
     "predictionHorizonSeconds": 30,
     "reassessIntervalSec": 8,
     "decisionLoopIntervalSec": 4,
@@ -229,21 +237,25 @@ def default_runtime_config() -> Dict[str, Any]:
     "maxHoldSeconds": 7200,
     "maxOrdersPerHour": 120,
     "smartEntryTimeoutMs": 900,
-    "orderGuardMs": 900,
+    "orderGuardMs": 200,
     "maxSpreadBpsForTrade": 12.0,
     "exitSpreadInsaneBps": 28.0,
     "feeEstimateBps": 3.0,
     "slippageBufferBps": 4.0,
-    "minExpectedMoveBps": 20.0,
-    "edgeCostMultiplier": 2.0,
+    "minExpectedMoveBps": 0.0,
+    "edgeCostMultiplier": 0.0,
     "entryMakerPreferred": True,
-    "entryMarketFallbackEnabled": True,
+    "entryMarketFallbackEnabled": False,
     "entryMarketFallbackMinProb": 0.90,
-    "cooldownAfterCloseSec": 30,
-    "emergencyBreakoutEnabled": True,
+    "cooldownAfterCloseSec": 5,
+    "emergencyBreakoutEnabled": False,
     "emergencyBreakoutMinProb": 0.94,
     "emergencyBreakoutMinMoveBps": 35.0,
     "emergencyBreakoutMinAtrPercentile": 0.85,
+    "entryChaseMaxSec": 5.0,
+    "exitChaseMaxSec": 5.0,
+    "executionRepriceMs": 200,
+    "makerOrderGtdSec": 2,
     "stopLossPct": 0.003,
     "stopLossAtrMult": None,
     "takeProfitPct": 0.006,
@@ -306,9 +318,9 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   # Legacy interval compatibility
   if "ingestIntervalSec" not in src and "pollIntervalSeconds" in src:
     base["ingestIntervalSec"] = src.get("pollIntervalSeconds")
-  base["pollIntervalSeconds"] = _to_int(base.get("ingestIntervalSec", 2), 2)
+  base["pollIntervalSeconds"] = max(1, int(round(_to_float(base.get("ingestIntervalSec", 0.5), 0.5))))
 
-  base["ingestIntervalSec"] = clamp(_to_int(base.get("ingestIntervalSec", 2), 2), 1, 60)
+  base["ingestIntervalSec"] = clamp(_to_float(base.get("ingestIntervalSec", 0.5), 0.5), 0.2, 60.0)
   base["riskLoopIntervalSec"] = clamp(_to_int(base.get("riskLoopIntervalSec", 1), 1), 1, 5)
   base["decisionLoopIntervalSec"] = clamp(_to_int(base.get("decisionLoopIntervalSec", 4), 4), 3, 60)
 
@@ -348,22 +360,22 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
 
   base["maxOrdersPerHour"] = clamp(_to_int(base.get("maxOrdersPerHour", 120), 120), 1, 2000)
   base["smartEntryTimeoutMs"] = clamp(_to_int(base.get("smartEntryTimeoutMs", 900), 900), 200, 5000)
-  base["orderGuardMs"] = clamp(_to_int(base.get("orderGuardMs", 900), 900), 200, 5000)
+  base["orderGuardMs"] = clamp(_to_int(base.get("orderGuardMs", 200), 200), 200, 5000)
   base["maxSpreadBpsForTrade"] = clamp(_to_float(base.get("maxSpreadBpsForTrade", 12.0), 12.0), 1.0, 100.0)
   base["exitSpreadInsaneBps"] = clamp(_to_float(base.get("exitSpreadInsaneBps", 28.0), 28.0), 5.0, 300.0)
   base["feeEstimateBps"] = clamp(_to_float(base.get("feeEstimateBps", 3.0), 3.0), 0.0, 100.0)
   base["slippageBufferBps"] = clamp(_to_float(base.get("slippageBufferBps", 4.0), 4.0), 0.0, 100.0)
-  base["minExpectedMoveBps"] = clamp(_to_float(base.get("minExpectedMoveBps", 20.0), 20.0), 1.0, 500.0)
-  base["edgeCostMultiplier"] = clamp(_to_float(base.get("edgeCostMultiplier", 2.0), 2.0), 1.0, 5.0)
-  base["entryMakerPreferred"] = bool(base.get("entryMakerPreferred", True))
-  base["entryMarketFallbackEnabled"] = bool(base.get("entryMarketFallbackEnabled", True))
+  base["minExpectedMoveBps"] = clamp(_to_float(base.get("minExpectedMoveBps", 0.0), 0.0), 0.0, 500.0)
+  base["edgeCostMultiplier"] = clamp(_to_float(base.get("edgeCostMultiplier", 0.0), 0.0), 0.0, 5.0)
+  base["entryMakerPreferred"] = True
+  base["entryMarketFallbackEnabled"] = False
   base["entryMarketFallbackMinProb"] = clamp(
     _to_float(base.get("entryMarketFallbackMinProb", 0.90), 0.90),
     0.50,
     0.99,
   )
-  base["cooldownAfterCloseSec"] = clamp(_to_int(base.get("cooldownAfterCloseSec", 30), 30), 0, 600)
-  base["emergencyBreakoutEnabled"] = bool(base.get("emergencyBreakoutEnabled", True))
+  base["cooldownAfterCloseSec"] = clamp(_to_int(base.get("cooldownAfterCloseSec", 5), 5), 0, 600)
+  base["emergencyBreakoutEnabled"] = bool(base.get("emergencyBreakoutEnabled", False))
   base["emergencyBreakoutMinProb"] = clamp(
     _to_float(base.get("emergencyBreakoutMinProb", 0.94), 0.94),
     0.50,
@@ -379,6 +391,10 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
     0.0,
     1.0,
   )
+  base["entryChaseMaxSec"] = clamp(_to_float(base.get("entryChaseMaxSec", 5.0), 5.0), 0.5, 30.0)
+  base["exitChaseMaxSec"] = clamp(_to_float(base.get("exitChaseMaxSec", 5.0), 5.0), 0.5, 30.0)
+  base["executionRepriceMs"] = clamp(_to_int(base.get("executionRepriceMs", 200), 200), 100, 2000)
+  base["makerOrderGtdSec"] = clamp(_to_int(base.get("makerOrderGtdSec", 2), 2), 1, 10)
 
   base["stopLossPct"] = _to_opt_float(base.get("stopLossPct"))
   base["stopLossAtrMult"] = _to_opt_float(base.get("stopLossAtrMult"))
@@ -577,7 +593,7 @@ class TelemetryHandler(BaseHTTPRequestHandler):
           "updatedAt": int(time.time() * 1000),
           "enabled": bool(cfg.get("ingestionEnabled", True)),
           "running": bool(s.get("bot", {}).get("alive", False)),
-          "ingestIntervalSec": int(cfg.get("ingestIntervalSec", 2)),
+          "ingestIntervalSec": float(cfg.get("ingestIntervalSec", 0.5)),
           **stats,
         },
       )
@@ -594,6 +610,8 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       min_hold_until = agent.get("minHoldUntil")
       next_reassess_at = agent.get("nextReassessAt")
       max_hold_until = agent.get("maxHoldUntil")
+      trading_status = s.get("trading") if isinstance(s.get("trading"), dict) else {}
+      cooldown_until = trading_status.get("cooldownUntil")
       next_entry_eval = None
       if not pos_open:
         last_decision = agent.get("lastDecisionAt")
@@ -615,11 +633,13 @@ class TelemetryHandler(BaseHTTPRequestHandler):
           "initialHoldEndsAt": min_hold_until,
           "nextReassessAt": next_reassess_at,
           "maxHoldEndsAt": max_hold_until,
+          "cooldownUntil": cooldown_until,
           "nextDecisionAt": next_entry_eval,
           "countdowns": {
             "initialHoldEndsInSec": to_countdown_sec(min_hold_until, now_ms),
             "nextReassessInSec": to_countdown_sec(next_reassess_at, now_ms),
             "maxHoldEndsInSec": to_countdown_sec(max_hold_until, now_ms),
+            "cooldownEndsInSec": to_countdown_sec(cooldown_until if not pos_open else None, now_ms),
             "nextDecisionInSec": to_countdown_sec(next_entry_eval, now_ms),
           },
           "lastAction": s.get("lastAction"),
@@ -1425,6 +1445,9 @@ async def place_limit_post_only(
   sender: str,
   subaccount: str,
   lot_size: Optional[float] = None,
+  gtd_sec: int = 2,
+  reduce_only: bool = False,
+  close: Optional[bool] = None,
 ):
   q_adj = quantize_qty_to_lot(qty, lot_size)
   if q_adj <= 0:
@@ -1432,49 +1455,46 @@ async def place_limit_post_only(
 
   p = Decimal(str(limit_price))
   q = Decimal(str(q_adj))
+  now_s = int(time.time())
+  expires_at_s = now_s + max(1, int(gtd_sec))
+  expires_at_ms = expires_at_s * 1000
+  common = {
+    "order_type": "LIMIT",
+    "quantity": q,
+    "side": side_int,
+    "price": p,
+    "ticker": ticker,
+    "sender": sender,
+    "subaccount": subaccount,
+    "reduce_only": bool(reduce_only),
+  }
+  if close is not None:
+    common["close"] = bool(close)
 
   variants = [
     {
-      "order_type": "LIMIT",
-      "quantity": q,
-      "side": side_int,
-      "price": p,
-      "ticker": ticker,
-      "sender": sender,
-      "subaccount": subaccount,
-      "time_in_force": "GTC",
+      **common,
+      "time_in_force": "GTD",
       "post_only": True,
+      "expires_at": expires_at_s,
     },
     {
-      "order_type": "LIMIT",
-      "quantity": q,
-      "side": side_int,
-      "price": p,
-      "ticker": ticker,
-      "sender": sender,
-      "subaccount": subaccount,
-      "tif": "GTC",
-      "post_only": True,
-    },
-    {
-      "order_type": "LIMIT",
-      "quantity": q,
-      "side": side_int,
-      "price": p,
-      "ticker": ticker,
-      "sender": sender,
-      "subaccount": subaccount,
+      **common,
+      "time_in_force": "GTD",
       "postOnly": True,
+      "expiresAt": expires_at_ms,
     },
     {
-      "order_type": "LIMIT",
-      "quantity": q,
-      "side": side_int,
-      "price": p,
-      "ticker": ticker,
-      "sender": sender,
-      "subaccount": subaccount,
-      "time_in_force": "POST_ONLY",
+      **common,
+      "tif": "GTD",
+      "post_only": True,
+      "expires_at": expires_at_ms,
+    },
+    {
+      **common,
+      "tif": "GTD",
+      "postOnly": True,
+      "expiresAt": expires_at_s,
     },
   ]
 
@@ -1601,6 +1621,473 @@ def _realized_pnl(side: Optional[str], entry_price: Optional[float], exit_price:
   return None
 
 
+def _ws_base_url_from_api(eth_base: str) -> str:
+  raw = str(os.environ.get("UC5_ETHEREAL_WS_BASE", "")).strip()
+  if raw:
+    return raw
+  s = str(eth_base or "https://api.ethereal.trade").strip()
+  if s.startswith("https://"):
+    s = "wss://" + s[len("https://") :]
+  elif s.startswith("http://"):
+    s = "ws://" + s[len("http://") :]
+  if "://api." in s:
+    s = s.replace("://api.", "://ws.", 1)
+  return s
+
+
+def _to_plain_dict(obj: Any) -> Dict[str, Any]:
+  if isinstance(obj, dict):
+    return obj
+  if hasattr(obj, "model_dump"):
+    try:
+      out = obj.model_dump(by_alias=True)
+      return out if isinstance(out, dict) else {}
+    except Exception:
+      pass
+  if hasattr(obj, "dict"):
+    try:
+      out = obj.dict()
+      return out if isinstance(out, dict) else {}
+    except Exception:
+      pass
+  return {}
+
+
+def _extract_best_bid_ask_from_ws_payload(payload: Any) -> Tuple[Optional[float], Optional[float]]:
+  if not isinstance(payload, dict):
+    return (None, None)
+
+  direct_bid = _f(payload.get("bestBidPrice") or payload.get("bestBid") or payload.get("bid"))
+  direct_ask = _f(payload.get("bestAskPrice") or payload.get("bestAsk") or payload.get("ask"))
+  if direct_bid and direct_ask:
+    return (direct_bid, direct_ask)
+
+  def _first_price(levels: Any) -> Optional[float]:
+    if not isinstance(levels, list) or not levels:
+      return None
+    top = levels[0]
+    if isinstance(top, dict):
+      return _f(top.get("price") or top.get("p"))
+    if isinstance(top, (list, tuple)) and top:
+      return _f(top[0])
+    return None
+
+  for key in ("book", "data", "payload"):
+    inner = payload.get(key)
+    if isinstance(inner, dict):
+      b, a = _extract_best_bid_ask_from_ws_payload(inner)
+      if b or a:
+        return (b, a)
+
+  bids = payload.get("bids")
+  asks = payload.get("asks")
+  if isinstance(bids, list) or isinstance(asks, list):
+    return (_first_price(bids), _first_price(asks))
+
+  return (None, None)
+
+
+class WsQuoteCache:
+  def __init__(self) -> None:
+    self._lock = threading.Lock()
+    self.best_bid: Optional[float] = None
+    self.best_ask: Optional[float] = None
+    self.last_update_ms: Optional[int] = None
+    self.connected = False
+    self.subscribed = False
+    self.last_error: Optional[str] = None
+    self.product_id: str = ""
+
+  def set_product(self, product_id: str) -> None:
+    with self._lock:
+      self.product_id = str(product_id or "")
+      self.subscribed = False
+
+  def set_conn(self, connected: bool) -> None:
+    with self._lock:
+      self.connected = bool(connected)
+
+  def set_error(self, err: Optional[str]) -> None:
+    with self._lock:
+      self.last_error = str(err) if err else None
+
+  def update_book(self, payload: Any) -> None:
+    bid, ask = _extract_best_bid_ask_from_ws_payload(payload)
+    if bid is None and ask is None:
+      return
+    now_ms = int(time.time() * 1000)
+    with self._lock:
+      if bid is not None and bid > 0:
+        self.best_bid = bid
+      if ask is not None and ask > 0:
+        self.best_ask = ask
+      self.last_update_ms = now_ms
+      self.subscribed = True
+
+  def snapshot(self) -> Dict[str, Any]:
+    with self._lock:
+      return {
+        "bestBid": self.best_bid,
+        "bestAsk": self.best_ask,
+        "lastUpdateMs": self.last_update_ms,
+        "connected": self.connected,
+        "subscribed": self.subscribed,
+        "lastError": self.last_error,
+        "productId": self.product_id,
+      }
+
+
+async def _run_ws_book_depth_loop(
+  eth_base: str,
+  product_id: str,
+  quote_cache: WsQuoteCache,
+) -> None:
+  if AsyncWSClient is None:
+    quote_cache.set_error("AsyncWSClient unavailable in ethereal SDK")
+    while True:
+      await asyncio.sleep(5)
+
+  ws_base = _ws_base_url_from_api(eth_base)
+  quote_cache.set_product(product_id)
+
+  while True:
+    ws_client = None
+    try:
+      quote_cache.set_error(None)
+      ws_client = AsyncWSClient({"base_url": ws_base, "verbose": False})
+
+      async def _on_book(data: Dict[str, Any]) -> None:
+        quote_cache.update_book(data)
+
+      ws_client.callbacks["BookDepth"] = [_on_book]
+      await ws_client.open(namespaces=["/v1/stream"])
+      quote_cache.set_conn(True)
+      await ws_client.subscribe(stream_type="BookDepth", product_id=product_id)
+      while True:
+        await asyncio.sleep(1.0)
+    except asyncio.CancelledError:
+      quote_cache.set_conn(False)
+      if ws_client is not None:
+        try:
+          await ws_client.close()
+        except Exception:
+          pass
+      raise
+    except Exception as e:
+      quote_cache.set_conn(False)
+      quote_cache.set_error(str(e))
+      await asyncio.sleep(2.0)
+    finally:
+      if ws_client is not None:
+        try:
+          await ws_client.close()
+        except Exception:
+          pass
+
+
+def _maker_touch_price(
+  side_int: int,
+  bid: Optional[float],
+  ask: Optional[float],
+  mid: Optional[float],
+  tick_size: Optional[float],
+) -> float:
+  b = bid if bid and bid > 0 else None
+  a = ask if ask and ask > 0 else None
+  if side_int == 0 and b is not None:
+    return quantize_price_to_tick(float(b), tick_size, side_int, aggressive=False)
+  if side_int == 1 and a is not None:
+    return quantize_price_to_tick(float(a), tick_size, side_int, aggressive=False)
+  m = float(mid or 0.0)
+  if m <= 0:
+    raise RuntimeError("No valid quote for maker touch price")
+  return _calc_limit_price(side_int, m, b, a, tick_size=tick_size, aggressive=False)
+
+
+async def fetch_fills_audit(
+  client: AsyncRESTClient,
+  subaccount_id: str,
+  product_id: str,
+  limit: int = 20,
+  created_after_ms: Optional[int] = None,
+) -> Dict[str, Any]:
+  rows: List[Dict[str, Any]] = []
+  if not subaccount_id:
+    return {"fills": [], "summary": {"count": 0, "makerRatePct": 0.0, "totalFeesUsd": 0.0}}
+
+  variants: List[Dict[str, Any]] = [
+    {
+      "subaccount_id": subaccount_id,
+      "product_ids": [product_id] if product_id else None,
+      "limit": int(limit),
+      "order": "desc",
+      "order_by": "createdAt",
+      "created_after": created_after_ms,
+    },
+    {
+      "subaccountId": subaccount_id,
+      "productIds": [product_id] if product_id else None,
+      "limit": int(limit),
+      "order": "desc",
+      "orderBy": "createdAt",
+      "createdAfter": created_after_ms,
+    },
+  ]
+
+  last_err: Optional[str] = None
+  for kwargs in variants:
+    kwargs = {k: v for k, v in kwargs.items() if v is not None}
+    try:
+      raw = await client.list_fills(**kwargs)
+      rows = [_to_plain_dict(x) for x in (raw or [])]
+      break
+    except TypeError as e:
+      last_err = str(e)
+      continue
+    except Exception as e:
+      last_err = str(e)
+      continue
+  if rows is None:
+    rows = []
+
+  rows = [r for r in rows if isinstance(r, dict)]
+  if product_id:
+    rows = [r for r in rows if str(r.get("productId") or r.get("product_id") or "") == str(product_id)]
+  if created_after_ms is not None:
+    rows = [r for r in rows if int(float(r.get("createdAt") or r.get("created_at") or 0)) >= int(created_after_ms)]
+  rows.sort(key=lambda r: int(float(r.get("createdAt") or r.get("created_at") or 0)), reverse=True)
+  rows = rows[: max(1, int(limit))]
+
+  normalized: List[Dict[str, Any]] = []
+  maker_count = 0
+  total_fees = 0.0
+  for r in rows:
+    is_maker = bool(r.get("isMaker") if "isMaker" in r else r.get("is_maker"))
+    fee_usd = _f(r.get("feeUsd") if "feeUsd" in r else r.get("fee_usd")) or 0.0
+    total_fees += fee_usd
+    if is_maker:
+      maker_count += 1
+    normalized.append(
+      {
+        "id": str(r.get("id") or ""),
+        "orderId": str(r.get("orderId") or r.get("order_id") or ""),
+        "price": _f(r.get("price")),
+        "qty": _f(r.get("filled")),
+        "side": r.get("side"),
+        "type": str(r.get("type") or ""),
+        "isMaker": is_maker,
+        "feeUsd": fee_usd,
+        "createdAt": int(float(r.get("createdAt") or r.get("created_at") or 0)),
+      }
+    )
+
+  count = len(normalized)
+  summary = {
+    "count": count,
+    "makerCount": maker_count,
+    "makerRatePct": ((maker_count / count) * 100.0) if count else 0.0,
+    "totalFeesUsd": total_fees,
+    "error": last_err if (last_err and not normalized) else None,
+  }
+  return {"fills": normalized, "summary": summary}
+
+
+def _print_maker_audit(label: str, audit: Dict[str, Any]) -> None:
+  try:
+    summary = audit.get("summary") if isinstance(audit, dict) else {}
+    fills = audit.get("fills") if isinstance(audit, dict) else []
+    print(
+      f"[MAKER_AUDIT] {label} count={int(summary.get('count') or 0)} "
+      f"makerRatePct={float(summary.get('makerRatePct') or 0.0):.1f} "
+      f"feesUsd={float(summary.get('totalFeesUsd') or 0.0):.6f}"
+    )
+    for f in list(fills or [])[:5]:
+      print(
+        "[MAKER_AUDIT_FILL] "
+        f"label={label} ts={int(f.get('createdAt') or 0)} side={f.get('side')} "
+        f"type={f.get('type')} px={f.get('price')} qty={f.get('qty')} "
+        f"isMaker={bool(f.get('isMaker'))} feeUsd={float(f.get('feeUsd') or 0.0):.6f}"
+      )
+  except Exception:
+    pass
+
+
+def _print_chase_attempts(label: str, result: Dict[str, Any]) -> None:
+  try:
+    print(
+      f"[EXEC_CHASE] {label} attempts={int(result.get('attemptCount') or 0)} "
+      f"submitted={int(result.get('submittedCount') or 0)} filled={float(result.get('filledQty') or 0.0):.8f} "
+      f"remaining={float(result.get('remainingQty') or 0.0):.8f} "
+      f"timedOut={bool(result.get('timedOut'))} marketSafety={bool(result.get('marketSafetyUsed'))}"
+    )
+    for a in list(result.get("attempts") or [])[:30]:
+      print(
+        "[EXEC_CHASE_ATTEMPT] "
+        f"label={label} ts={int(a.get('tsMs') or 0)} bid={a.get('bid')} ask={a.get('ask')} "
+        f"px={a.get('price')} submitted={bool(a.get('submitted'))} "
+        f"filled={a.get('filled')} remaining={a.get('remaining')} err={a.get('error')}"
+      )
+  except Exception:
+    pass
+
+
+async def execute_maker_chase(
+  *,
+  client: AsyncRESTClient,
+  eth_base: str,
+  sub_id: str,
+  product_id: str,
+  ticker: str,
+  sender: str,
+  subaccount: str,
+  order_side_int: int,
+  target_qty: float,
+  lot_size: Optional[float],
+  tick_size: Optional[float],
+  last_mid: Optional[float],
+  last_bid: Optional[float],
+  last_ask: Optional[float],
+  quote_cache: Optional[WsQuoteCache],
+  chase_max_sec: float,
+  reprice_ms: int,
+  gtd_sec: int,
+  last_order_submit_ms: int,
+  order_guard_ms: int,
+  position_mode: str,
+  expected_side: Optional[str] = None,
+  reduce_only: bool = False,
+  allow_market_safety: bool = False,
+) -> Dict[str, Any]:
+  start_ms = int(time.time() * 1000)
+  deadline_ms = start_ms + int(max(0.2, chase_max_sec) * 1000)
+  qty = quantize_qty_to_lot(target_qty, lot_size)
+  attempts: List[Dict[str, Any]] = []
+  errors: List[str] = []
+  submitted = 0
+  filled = 0.0
+  remaining = qty
+  market_safety_used = False
+
+  while remaining > 0 and int(time.time() * 1000) < deadline_ms:
+    now_ms = int(time.time() * 1000)
+    if not _order_guard_ok(now_ms, last_order_submit_ms, max(100, int(order_guard_ms))):
+      await asyncio.sleep(0.05)
+      continue
+
+    ws_snap = quote_cache.snapshot() if quote_cache is not None else {}
+    bid = _f(ws_snap.get("bestBid")) or last_bid
+    ask = _f(ws_snap.get("bestAsk")) or last_ask
+    quote_age_ms = None
+    if ws_snap.get("lastUpdateMs"):
+      quote_age_ms = max(0, now_ms - int(ws_snap.get("lastUpdateMs")))
+      if quote_age_ms > 4000:
+        bid = last_bid or bid
+        ask = last_ask or ask
+
+    limit_px = _maker_touch_price(order_side_int, bid, ask, last_mid, tick_size)
+    attempt: Dict[str, Any] = {
+      "tsMs": now_ms,
+      "price": limit_px,
+      "bid": bid,
+      "ask": ask,
+      "quoteAgeMs": quote_age_ms,
+    }
+    try:
+      await place_limit_post_only(
+        client,
+        ticker,
+        order_side_int,
+        remaining,
+        limit_px,
+        sender,
+        subaccount,
+        lot_size,
+        gtd_sec=gtd_sec,
+        reduce_only=reduce_only,
+      )
+      submitted += 1
+      last_order_submit_ms = int(time.time() * 1000)
+      attempt["submitted"] = True
+    except Exception as e:
+      err = str(e)
+      attempt["submitted"] = False
+      attempt["error"] = err
+      errors.append(err)
+      try:
+        await cancel_open_orders(client, ticker, sender, subaccount)
+      except Exception:
+        pass
+      attempts.append(attempt)
+      await asyncio.sleep(min(0.2, max(0.05, reprice_ms / 1000.0)))
+      continue
+
+    sleep_ms = min(int(reprice_ms), max(50, deadline_ms - int(time.time() * 1000)))
+    await asyncio.sleep(max(0.05, sleep_ms / 1000.0))
+    try:
+      await cancel_open_orders(client, ticker, sender, subaccount)
+    except Exception as e:
+      errors.append(f"cancel:{e}")
+
+    pos_now = fetch_active_position(eth_base, sub_id, product_id)
+    o, s, sz, _, _, _ = parse_position(pos_now)
+    abs_sz = abs(float(sz)) if sz is not None else 0.0
+
+    if position_mode == "entry":
+      if o and s == expected_side:
+        filled = abs_sz
+      else:
+        filled = 0.0
+      remaining = max(0.0, qty - filled)
+    else:
+      remaining = abs_sz if (o and s == expected_side) else 0.0
+      filled = max(0.0, qty - remaining)
+
+    attempt["filled"] = filled
+    attempt["remaining"] = remaining
+    attempts.append(attempt)
+
+  remaining = quantize_qty_to_lot(max(0.0, remaining), lot_size)
+  if remaining > 0:
+    try:
+      await cancel_open_orders(client, ticker, sender, subaccount)
+    except Exception:
+      pass
+
+  if remaining > 0 and allow_market_safety:
+    await place_market(client, ticker, order_side_int, remaining, sender, subaccount, lot_size)
+    await cancel_open_orders(client, ticker, sender, subaccount)
+    market_safety_used = True
+    last_order_submit_ms = int(time.time() * 1000)
+    submitted += 1
+    pos_now = fetch_active_position(eth_base, sub_id, product_id)
+    o, s, sz, _, _, _ = parse_position(pos_now)
+    abs_sz = abs(float(sz)) if sz is not None else 0.0
+    if position_mode == "entry":
+      if o and s == expected_side:
+        filled = abs_sz
+      else:
+        filled = 0.0
+      remaining = max(0.0, qty - filled)
+    else:
+      remaining = abs_sz if (o and s == expected_side) else 0.0
+      filled = max(0.0, qty - remaining)
+
+  return {
+    "startMs": start_ms,
+    "endMs": int(time.time() * 1000),
+    "targetQty": qty,
+    "filledQty": quantize_qty_to_lot(max(0.0, filled), lot_size),
+    "remainingQty": quantize_qty_to_lot(max(0.0, remaining), lot_size),
+    "attempts": attempts,
+    "attemptCount": len(attempts),
+    "submittedCount": submitted,
+    "marketSafetyUsed": market_safety_used,
+    "timedOut": bool(remaining > 0),
+    "errors": errors[-5:],
+    "lastOrderSubmitMs": last_order_submit_ms,
+  }
+
+
 async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[str, Any]:
   eth_base = cfg["etherealApiBase"]
   payload = cmd["payload"]
@@ -1713,6 +2200,8 @@ async def main():
     raise SystemExit("Missing env UC5_BOT_SIGNER_PRIVATE_KEY (bot signer private key).")
 
   client: Optional[AsyncRESTClient] = None
+  ws_quote_cache = WsQuoteCache()
+  ws_quote_task: Optional[asyncio.Task] = None
   cached_product_id = ""
   cached_lot_size = 0.00001
   cached_tick_size = 1.0
@@ -1746,6 +2235,11 @@ async def main():
   current_trade_entry_price: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
+  last_entry_fill_audit: Optional[Dict[str, Any]] = None
+  last_exit_fill_audit: Optional[Dict[str, Any]] = None
+  fills_audit_last20: Optional[Dict[str, Any]] = None
+  last_entry_fill_info: Optional[Dict[str, Any]] = None
+  last_exit_method: Optional[str] = None
 
   while True:
     started = time.time()
@@ -1771,6 +2265,18 @@ async def main():
         product_row = fetch_product_row(eth_base, ticker, product_id)
         cached_lot_size = extract_lot_size(product_row, fallback=0.00001)
         cached_tick_size = extract_tick_size(product_row, fallback=1.0)
+        if ws_quote_task is not None:
+          ws_quote_task.cancel()
+          try:
+            await ws_quote_task
+          except asyncio.CancelledError:
+            pass
+          except Exception:
+            pass
+          ws_quote_task = None
+        ws_quote_cache = WsQuoteCache()
+        if AsyncWSClient is not None:
+          ws_quote_task = asyncio.create_task(_run_ws_book_depth_loop(eth_base, product_id, ws_quote_cache))
         cached_product_id = product_id
 
       owner_addr_raw = str(cfg.get("ownerAddress") or "")
@@ -1799,11 +2305,14 @@ async def main():
         missing_trade_ctx.append("subaccountName")
 
       # Ingest loop (1-2s default)
-      ingest_interval = int(cfg.get("ingestIntervalSec", 2))
+      ingest_interval = float(cfg.get("ingestIntervalSec", 0.5))
       if now_ms >= next_ingest_ms:
+        ws_snap = ws_quote_cache.snapshot()
         mp = fetch_market_price(eth_base, product_id)
-        best_bid = _f(mp.get("bestBidPrice") or mp.get("bestBid"))
-        best_ask = _f(mp.get("bestAskPrice") or mp.get("bestAsk"))
+        rest_bid = _f(mp.get("bestBidPrice") or mp.get("bestBid"))
+        rest_ask = _f(mp.get("bestAskPrice") or mp.get("bestAsk"))
+        best_bid = _f(ws_snap.get("bestBid")) or rest_bid
+        best_ask = _f(ws_snap.get("bestAsk")) or rest_ask
         oracle = _f(mp.get("oraclePrice") or mp.get("oracle") or mp.get("price"))
         mid = None
         if best_bid and best_ask:
@@ -1837,7 +2346,7 @@ async def main():
             spread=spread_bps,
           )
 
-        next_ingest_ms = now_ms + ingest_interval * 1000
+        next_ingest_ms = now_ms + int(max(0.2, ingest_interval) * 1000)
 
       # Keep per-loop position snapshot fresh for risk + commands + status
       was_open = bool(position_state.open)
@@ -1973,7 +2482,7 @@ async def main():
             side = position_state.side
             qty = abs(position_state.qty)
             if side and qty > 0:
-              if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 900))):
+              if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
                 await asyncio.sleep(0.2)
               exit_side_int = _exit_side_int(side)
               await place_market(client, ticker, exit_side_int, qty, owner_addr, subaccount_name, cached_lot_size)
@@ -2028,7 +2537,7 @@ async def main():
         if trading_enabled is False and position_state.open and has_trade_account_ctx and signer_active:
           cerr = await ensure_client_ready()
           if not cerr and client is not None and position_state.side and position_state.qty > 0:
-            if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 900))):
+            if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
               await asyncio.sleep(0.2)
             exit_side_int = _exit_side_int(position_state.side)
             await place_market(client, ticker, exit_side_int, position_state.qty, owner_addr, subaccount_name, cached_lot_size)
@@ -2074,7 +2583,7 @@ async def main():
           if risk_result.should_exit and position_state.side and position_state.qty > 0:
             cerr = await ensure_client_ready()
             if not cerr and client is not None:
-              if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 900))):
+              if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
                 await asyncio.sleep(0.2)
 
               spread_bps = (
@@ -2082,45 +2591,49 @@ async def main():
                 if (last_ask and last_bid and last_mid and last_mid > 0)
                 else 999.0
               )
-
-              timeout_ms = int(cfg.get("smartEntryTimeoutMs", 900))
-              remain = position_state.qty
-
               exit_side_int = _exit_side_int(position_state.side)
-              if spread_bps > float(cfg.get("exitSpreadInsaneBps", 28.0)) and last_bid and last_ask:
-                try:
-                  limit_px = _calc_limit_price(
-                    exit_side_int,
-                    float(last_mid),
-                    last_bid,
-                    last_ask,
-                    tick_size=cached_tick_size,
-                    aggressive=True,
-                  )
-                  await place_limit_ioc(
-                    client,
-                    ticker,
-                    exit_side_int,
-                    remain,
-                    limit_px,
-                    owner_addr,
-                    subaccount_name,
-                    cached_lot_size,
-                  )
-                  await asyncio.sleep(timeout_ms / 1000.0)
-                  await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-                  pos_now = fetch_active_position(eth_base, sub_id, product_id)
-                  o, _, sz, _, _, _ = parse_position(pos_now)
-                  remain = abs(sz) if o else 0.0
-                except Exception:
-                  remain = position_state.qty
-
-              remain = quantize_qty_to_lot(remain, cached_lot_size)
-              if remain > 0:
-                await place_market(client, ticker, exit_side_int, remain, owner_addr, subaccount_name, cached_lot_size)
-                await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-
-              last_order_submit_ms = int(time.time() * 1000)
+              exec_result = await execute_maker_chase(
+                client=client,
+                eth_base=eth_base,
+                sub_id=sub_id,
+                product_id=product_id,
+                ticker=ticker,
+                sender=owner_addr,
+                subaccount=subaccount_name,
+                order_side_int=exit_side_int,
+                target_qty=position_state.qty,
+                lot_size=cached_lot_size,
+                tick_size=cached_tick_size,
+                last_mid=last_mid,
+                last_bid=last_bid,
+                last_ask=last_ask,
+                quote_cache=ws_quote_cache,
+                chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
+                last_order_submit_ms=last_order_submit_ms,
+                order_guard_ms=int(cfg.get("orderGuardMs", 200)),
+                position_mode="exit",
+                expected_side=position_state.side,
+                reduce_only=True,
+                allow_market_safety=True,
+              )
+              last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
+              _print_chase_attempts("EXIT_RISK", exec_result)
+              try:
+                last_exit_fill_audit = await fetch_fills_audit(
+                  client,
+                  sub_id,
+                  product_id,
+                  limit=20,
+                  created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
+                )
+                fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
+                _print_maker_audit("EXIT_RISK", last_exit_fill_audit or {})
+                _print_maker_audit("LAST20", fills_audit_last20 or {})
+              except Exception:
+                pass
+              last_exit_method = "market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"
               px = float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
               DB_MANAGER.insert_trade_event(
@@ -2132,7 +2645,13 @@ async def main():
                 price=px,
                 pnl=pnl,
                 tag="risk_exit",
-                reason_json=json.dumps({"reason": risk_result.reason, "rule": risk_result.rule}),
+                reason_json=json.dumps(
+                  {
+                    "reason": risk_result.reason,
+                    "rule": risk_result.rule,
+                    "exitMethod": ("market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"),
+                  }
+                ),
                 entry_ts=current_trade_entry_ts,
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
@@ -2142,7 +2661,16 @@ async def main():
               last_action = {
                 "type": "RISK_EXIT",
                 "ok": True,
-                "info": {"reason": risk_result.reason, "rule": risk_result.rule},
+                "info": {
+                  "reason": risk_result.reason,
+                  "rule": risk_result.rule,
+                  "execution": {
+                    "attempts": int(exec_result.get("attemptCount") or 0),
+                    "timedOut": bool(exec_result.get("timedOut")),
+                    "marketSafetyUsed": bool(exec_result.get("marketSafetyUsed")),
+                    "spreadBps": spread_bps,
+                  },
+                },
               }
             else:
               last_action = {
@@ -2208,11 +2736,13 @@ async def main():
           expected_move_bps = _estimate_expected_move_bps(signal, int(cfg.get("predictionHorizonSeconds", 30)))
           fee_bps = float(cfg.get("feeEstimateBps", 3.0))
           slippage_bps = float(cfg.get("slippageBufferBps", 4.0))
-          edge_mult = float(cfg.get("edgeCostMultiplier", 2.0))
-          min_expected_move_bps = float(cfg.get("minExpectedMoveBps", 20.0))
+          edge_mult = float(cfg.get("edgeCostMultiplier", 0.0))
+          min_expected_move_bps = float(cfg.get("minExpectedMoveBps", 0.0))
           cost_bps = max(0.0, fee_bps) + max(0.0, float(signal.spread_bps)) + max(0.0, slippage_bps)
-          required_move_bps = max(min_expected_move_bps, edge_mult * cost_bps)
-          cooldown_after_close_sec = int(cfg.get("cooldownAfterCloseSec", 30))
+          required_move_bps = 0.0
+          if edge_mult > 0 or min_expected_move_bps > 0:
+            required_move_bps = max(max(0.0, min_expected_move_bps), max(0.0, edge_mult) * cost_bps)
+          cooldown_after_close_sec = int(cfg.get("cooldownAfterCloseSec", 5))
           cooldown_until_ms = (
             (int(last_close_ts_ms) + cooldown_after_close_sec * 1000)
             if (last_close_ts_ms and cooldown_after_close_sec > 0)
@@ -2223,7 +2753,7 @@ async def main():
           emergency_breakout = False
           if in_cooldown:
             emergency_breakout = (
-              bool(cfg.get("emergencyBreakoutEnabled", True))
+              bool(cfg.get("emergencyBreakoutEnabled", False))
               and signal.regime == "momentum"
               and directional_prob >= float(cfg.get("emergencyBreakoutMinProb", 0.94))
               and signal.atr_pctile >= float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85))
@@ -2242,7 +2772,7 @@ async def main():
                 "directionalProb": directional_prob,
               },
             }
-          elif expected_move_bps < required_move_bps:
+          elif required_move_bps > 0 and expected_move_bps < required_move_bps:
             last_action = {
               "type": "EDGE_FILTER_BLOCKED",
               "ok": True,
@@ -2280,88 +2810,64 @@ async def main():
             if qty > 0:
               cerr = await ensure_client_ready()
               if not cerr and client is not None:
-                guard_ms = int(cfg.get("orderGuardMs", 900))
+                guard_ms = int(cfg.get("orderGuardMs", 200))
                 if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
                   await asyncio.sleep(0.2)
 
                 side_int = _side_to_int(signal.desired)
-                timeout_ms = int(cfg.get("smartEntryTimeoutMs", 900))
-                prefer_maker = bool(cfg.get("entryMakerPreferred", True))
-                allow_market_fallback = bool(cfg.get("entryMarketFallbackEnabled", True))
-                fallback_min_prob = clamp(float(cfg.get("entryMarketFallbackMinProb", 0.90)), 0.50, 0.99)
-
-                filled = 0.0
-                maker_err = ""
+                exec_result = await execute_maker_chase(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=side_int,
+                  target_qty=qty,
+                  lot_size=cached_lot_size,
+                  tick_size=cached_tick_size,
+                  last_mid=last_mid,
+                  last_bid=last_bid,
+                  last_ask=last_ask,
+                  quote_cache=ws_quote_cache,
+                  chase_max_sec=float(cfg.get("entryChaseMaxSec", 5.0)),
+                  reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                  gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
+                  last_order_submit_ms=last_order_submit_ms,
+                  order_guard_ms=guard_ms,
+                  position_mode="entry",
+                  expected_side=signal.desired,
+                  reduce_only=False,
+                  allow_market_safety=False,
+                )
+                last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
+                _print_chase_attempts(f"ENTRY_{signal.desired}", exec_result)
+                filled = float(exec_result.get("filledQty") or 0.0)
+                remain = float(exec_result.get("remainingQty") or 0.0)
+                submitted_any = int(exec_result.get("submittedCount") or 0) > 0
+                maker_err = "; ".join([str(x) for x in (exec_result.get("errors") or []) if x])[:500]
                 used_market_fallback = False
-                submitted_any = False
-
-                try:
-                  if prefer_maker:
-                    limit_px = _calc_limit_price(
-                      side_int,
-                      float(last_mid),
-                      last_bid,
-                      last_ask,
-                      tick_size=cached_tick_size,
-                      aggressive=False,
-                    )
-                    await place_limit_post_only(
-                      client,
-                      ticker,
-                      side_int,
-                      qty,
-                      limit_px,
-                      owner_addr,
-                      subaccount_name,
-                      cached_lot_size,
-                    )
-                  else:
-                    limit_px = _calc_limit_price(
-                      side_int,
-                      float(last_mid),
-                      last_bid,
-                      last_ask,
-                      tick_size=cached_tick_size,
-                      aggressive=True,
-                    )
-                    await place_limit_ioc(
-                      client,
-                      ticker,
-                      side_int,
-                      qty,
-                      limit_px,
-                      owner_addr,
-                      subaccount_name,
-                      cached_lot_size,
-                    )
-                  submitted_any = True
-                  last_order_submit_ms = int(time.time() * 1000)
-                  await asyncio.sleep(timeout_ms / 1000.0)
-                  await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-
-                  pos_after = fetch_active_position(eth_base, sub_id, product_id)
-                  o_after, s_after, sz_after, _, _, _ = parse_position(pos_after)
-                  if o_after and s_after == signal.desired:
-                    filled = abs(float(sz_after))
-                except Exception as e:
-                  maker_err = str(e)
-                  try:
-                    await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-                  except Exception:
-                    pass
-
-                remain = max(0.0, qty - filled)
-                remain = quantize_qty_to_lot(remain, cached_lot_size)
-                if remain > 0 and allow_market_fallback and directional_prob >= fallback_min_prob:
-                  await place_market(client, ticker, side_int, remain, owner_addr, subaccount_name, cached_lot_size)
-                  await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-                  submitted_any = True
-                  used_market_fallback = True
-                  last_order_submit_ms = int(time.time() * 1000)
 
                 pos_final = fetch_active_position(eth_base, sub_id, product_id)
                 of, sf, szf, _, epf, etsf = parse_position(pos_final)
                 opened_qty = abs(float(szf)) if of and sf == signal.desired else 0.0
+                try:
+                  last_entry_fill_audit = await fetch_fills_audit(
+                    client,
+                    sub_id,
+                    product_id,
+                    limit=20,
+                    created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
+                  )
+                  fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
+                  _print_maker_audit("ENTRY", last_entry_fill_audit or {})
+                  _print_maker_audit("LAST20", fills_audit_last20 or {})
+                  fills_list = (last_entry_fill_audit or {}).get("fills") if isinstance(last_entry_fill_audit, dict) else []
+                  if isinstance(fills_list, list) and fills_list and isinstance(fills_list[0], dict):
+                    last_entry_fill_info = fills_list[0]
+                except Exception:
+                  pass
 
                 if opened_qty <= 0:
                   if submitted_any:
@@ -2374,14 +2880,15 @@ async def main():
                       "qty": qty,
                       "filled": filled,
                       "remain": remain,
-                      "preferMaker": prefer_maker,
-                      "marketFallbackAllowed": allow_market_fallback,
-                      "marketFallbackUsed": used_market_fallback,
+                      "preferMaker": True,
+                      "marketFallbackAllowed": False,
+                      "marketFallbackUsed": False,
                       "directionalProb": directional_prob,
-                      "fallbackMinProb": fallback_min_prob,
+                      "fallbackMinProb": None,
                       "makerError": maker_err or None,
                       "expectedMoveBps": expected_move_bps,
                       "requiredMoveBps": required_move_bps,
+                      "chaseAttempts": int(exec_result.get("attemptCount") or 0),
                     },
                   }
                 else:
@@ -2390,11 +2897,7 @@ async def main():
                     entry_px = epf
 
                   entry_mode = "maker"
-                  if used_market_fallback:
-                    entry_mode = "maker_plus_market"
-                  elif filled <= 0 and not prefer_maker:
-                    entry_mode = "ioc"
-                  elif opened_qty > filled > 0:
+                  if opened_qty > filled > 0:
                     entry_mode = "maker_partial"
 
                   DB_MANAGER.insert_trade_event(
@@ -2417,8 +2920,10 @@ async def main():
                         "costBps": cost_bps,
                         "entryMode": entry_mode,
                         "makerFilledQty": filled,
-                        "marketFallbackUsed": used_market_fallback,
+                        "marketFallbackUsed": False,
                         "cooldownBypassed": emergency_breakout,
+                        "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
+                        "entryTimedOut": bool(exec_result.get("timedOut")),
                       }
                     ),
                     entry_ts=etsf or now_ms,
@@ -2444,8 +2949,9 @@ async def main():
                       "requiredMoveBps": required_move_bps,
                       "costBps": cost_bps,
                       "makerFilledQty": filled,
-                      "marketFallbackUsed": used_market_fallback,
+                      "marketFallbackUsed": False,
                       "cooldownBypassed": emergency_breakout,
+                      "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
                     },
                   }
               else:
@@ -2520,15 +3026,54 @@ async def main():
           if held_sec >= int(cfg.get("minHoldSeconds", 5)):
             cerr = await ensure_client_ready()
             if not cerr and client is not None:
-              guard_ms = int(cfg.get("orderGuardMs", 900))
+              guard_ms = int(cfg.get("orderGuardMs", 200))
               if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
                 await asyncio.sleep(0.2)
 
               exit_side_int = _exit_side_int(position_state.side)
-              await place_market(client, ticker, exit_side_int, position_state.qty, owner_addr, subaccount_name, cached_lot_size)
-              await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
-              last_order_submit_ms = int(time.time() * 1000)
+              exec_result = await execute_maker_chase(
+                client=client,
+                eth_base=eth_base,
+                sub_id=sub_id,
+                product_id=product_id,
+                ticker=ticker,
+                sender=owner_addr,
+                subaccount=subaccount_name,
+                order_side_int=exit_side_int,
+                target_qty=position_state.qty,
+                lot_size=cached_lot_size,
+                tick_size=cached_tick_size,
+                last_mid=last_mid,
+                last_bid=last_bid,
+                last_ask=last_ask,
+                quote_cache=ws_quote_cache,
+                chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
+                last_order_submit_ms=last_order_submit_ms,
+                order_guard_ms=guard_ms,
+                position_mode="exit",
+                expected_side=position_state.side,
+                reduce_only=True,
+                allow_market_safety=True,
+              )
+              last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
+              _print_chase_attempts("EXIT_CONFIDENCE", exec_result)
               last_order_ts.append(time.time())
+              try:
+                last_exit_fill_audit = await fetch_fills_audit(
+                  client,
+                  sub_id,
+                  product_id,
+                  limit=20,
+                  created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
+                )
+                fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
+                _print_maker_audit("EXIT_CONFIDENCE", last_exit_fill_audit or {})
+                _print_maker_audit("LAST20", fills_audit_last20 or {})
+              except Exception:
+                pass
+              last_exit_method = "market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"
 
               px = float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
@@ -2547,6 +3092,7 @@ async def main():
                     "p_up": signal.p_up,
                     "closeThreshold": close_thr,
                     "regime": signal.regime,
+                    "exitMethod": ("market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"),
                   }
                 ),
                 entry_ts=current_trade_entry_ts,
@@ -2558,7 +3104,15 @@ async def main():
               last_action = {
                 "type": "CLOSE_CONFIDENCE",
                 "ok": True,
-                "info": {"pUp": signal.p_up, "closeThreshold": close_thr},
+                "info": {
+                  "pUp": signal.p_up,
+                  "closeThreshold": close_thr,
+                  "execution": {
+                    "attempts": int(exec_result.get("attemptCount") or 0),
+                    "timedOut": bool(exec_result.get("timedOut")),
+                    "marketSafetyUsed": bool(exec_result.get("marketSafetyUsed")),
+                  },
+                },
               }
             else:
               last_action = {
@@ -2603,8 +3157,8 @@ async def main():
         else None
       )
       cooldown_until = (
-        int(last_close_ts_ms) + int(cfg.get("cooldownAfterCloseSec", 30)) * 1000
-        if (last_close_ts_ms and int(cfg.get("cooldownAfterCloseSec", 30)) > 0)
+        int(last_close_ts_ms) + int(cfg.get("cooldownAfterCloseSec", 5)) * 1000
+        if (last_close_ts_ms and int(cfg.get("cooldownAfterCloseSec", 5)) > 0)
         else None
       )
 
@@ -2621,7 +3175,7 @@ async def main():
         "runtime": {
           "ingestionEnabled": ingest_enabled,
           "tradingEnabled": trading_enabled,
-          "ingestIntervalSec": int(cfg.get("ingestIntervalSec", 2)),
+          "ingestIntervalSec": float(cfg.get("ingestIntervalSec", 0.5)),
           "riskLoopIntervalSec": int(cfg.get("riskLoopIntervalSec", 1)),
           "decisionLoopIntervalSec": int(cfg.get("decisionLoopIntervalSec", 4)),
           "inPositionReassessIntervalSec": int(cfg.get("inPositionReassessIntervalSec", 8)),
@@ -2638,16 +3192,20 @@ async def main():
           "closeConfidenceThreshold": float(cfg.get("closeConfidenceThreshold", 0.55)),
           "feeEstimateBps": float(cfg.get("feeEstimateBps", 3.0)),
           "slippageBufferBps": float(cfg.get("slippageBufferBps", 4.0)),
-          "minExpectedMoveBps": float(cfg.get("minExpectedMoveBps", 20.0)),
-          "edgeCostMultiplier": float(cfg.get("edgeCostMultiplier", 2.0)),
-          "entryMakerPreferred": bool(cfg.get("entryMakerPreferred", True)),
-          "entryMarketFallbackEnabled": bool(cfg.get("entryMarketFallbackEnabled", True)),
+          "minExpectedMoveBps": float(cfg.get("minExpectedMoveBps", 0.0)),
+          "edgeCostMultiplier": float(cfg.get("edgeCostMultiplier", 0.0)),
+          "entryMakerPreferred": True,
+          "entryMarketFallbackEnabled": False,
           "entryMarketFallbackMinProb": float(cfg.get("entryMarketFallbackMinProb", 0.90)),
-          "cooldownAfterCloseSec": int(cfg.get("cooldownAfterCloseSec", 30)),
-          "emergencyBreakoutEnabled": bool(cfg.get("emergencyBreakoutEnabled", True)),
+          "cooldownAfterCloseSec": int(cfg.get("cooldownAfterCloseSec", 5)),
+          "emergencyBreakoutEnabled": bool(cfg.get("emergencyBreakoutEnabled", False)),
           "emergencyBreakoutMinProb": float(cfg.get("emergencyBreakoutMinProb", 0.94)),
           "emergencyBreakoutMinMoveBps": float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)),
           "emergencyBreakoutMinAtrPercentile": float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85)),
+          "entryChaseMaxSec": float(cfg.get("entryChaseMaxSec", 5.0)),
+          "exitChaseMaxSec": float(cfg.get("exitChaseMaxSec", 5.0)),
+          "executionRepriceMs": int(cfg.get("executionRepriceMs", 200)),
+          "makerOrderGtdSec": int(cfg.get("makerOrderGtdSec", 2)),
           "stopLossPct": _to_opt_float(cfg.get("stopLossPct")),
           "stopLossAtrMult": _to_opt_float(cfg.get("stopLossAtrMult")),
           "takeProfitPct": _to_opt_float(cfg.get("takeProfitPct")),
@@ -2659,8 +3217,8 @@ async def main():
           "ticker": ticker,
           "price": last_mid,
           "oraclePrice": last_oracle,
-          "bestBid": last_bid,
-          "bestAsk": last_ask,
+          "bestBid": (_f(ws_quote_cache.snapshot().get("bestBid")) or last_bid),
+          "bestAsk": (_f(ws_quote_cache.snapshot().get("bestAsk")) or last_ask),
         },
         "account": {
           "owner": owner_addr_raw,
@@ -2719,6 +3277,18 @@ async def main():
           "running": bool(ingest_enabled),
           "lastTickAt": last_tick_ts_ms,
           "ticksCount": DB_MANAGER.query_ingestion_stats().get("ticksCollected", 0),
+        },
+        "execution": {
+          "makerOnlyEntry": True,
+          "makerFirstExitWithMarketSafety": True,
+          "exitMarketSafetyAfterSec": float(cfg.get("exitChaseMaxSec", 5.0)),
+          "quoteSource": "ws_bookdepth" if bool(ws_quote_cache.snapshot().get("subscribed")) else "rest",
+          "wsQuotes": ws_quote_cache.snapshot(),
+          "lastEntryFillAudit": last_entry_fill_audit,
+          "lastEntryFill": last_entry_fill_info,
+          "lastExitFillAudit": last_exit_fill_audit,
+          "lastExitMethod": last_exit_method,
+          "fillsAuditLast20": fills_audit_last20,
         },
         "db": {
           "dir": DB_DIR,

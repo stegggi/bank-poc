@@ -22,7 +22,7 @@ export const Uc5ConfigSchema = z.object({
   ingestionEnabled: z.boolean().default(true),
   tradingEnabled: z.boolean().default(true),
   killSwitch: z.boolean().default(false), // legacy compat
-  ingestIntervalSec: z.number().int().min(1).max(60).default(2),
+  ingestIntervalSec: z.number().min(0.2).max(60).default(0.5),
   reassessIntervalSec: z.number().int().min(5).max(86400).default(8), // legacy alias
   decisionLoopIntervalSec: z.number().int().min(3).max(60).default(4),
   inPositionReassessIntervalSec: z.number().int().min(5).max(300).default(8),
@@ -30,7 +30,7 @@ export const Uc5ConfigSchema = z.object({
   metricsLoopIntervalSec: z.number().int().min(30).max(300).default(45),
 
   // legacy compat
-  pollIntervalSeconds: z.number().int().min(2).max(60).default(2),
+  pollIntervalSeconds: z.number().int().min(1).max(60).default(1),
   predictionHorizonSeconds: z.number().int().min(10).max(259200).default(30),
 
   // Risk & behavior
@@ -47,21 +47,25 @@ export const Uc5ConfigSchema = z.object({
   // Execution guardrails (simple)
   maxOrdersPerHour: z.number().int().min(1).max(2000).default(120),
   smartEntryTimeoutMs: z.number().int().min(200).max(5000).default(900),
-  orderGuardMs: z.number().int().min(200).max(5000).default(900),
+  orderGuardMs: z.number().int().min(200).max(5000).default(200),
   maxSpreadBpsForTrade: z.number().min(1).max(100).default(12),
   exitSpreadInsaneBps: z.number().min(5).max(300).default(28),
   feeEstimateBps: z.number().min(0).max(100).default(3),
   slippageBufferBps: z.number().min(0).max(100).default(4),
-  minExpectedMoveBps: z.number().min(1).max(500).default(20),
-  edgeCostMultiplier: z.number().min(1).max(5).default(2),
+  minExpectedMoveBps: z.number().min(0).max(500).default(0),
+  edgeCostMultiplier: z.number().min(0).max(5).default(0),
   entryMakerPreferred: z.boolean().default(true),
-  entryMarketFallbackEnabled: z.boolean().default(true),
+  entryMarketFallbackEnabled: z.boolean().default(false),
   entryMarketFallbackMinProb: z.number().min(0.5).max(0.99).default(0.9),
-  cooldownAfterCloseSec: z.number().int().min(0).max(600).default(30),
-  emergencyBreakoutEnabled: z.boolean().default(true),
+  cooldownAfterCloseSec: z.number().int().min(0).max(600).default(5),
+  emergencyBreakoutEnabled: z.boolean().default(false),
   emergencyBreakoutMinProb: z.number().min(0.5).max(0.99).default(0.94),
   emergencyBreakoutMinMoveBps: z.number().min(1).max(1000).default(35),
   emergencyBreakoutMinAtrPercentile: z.number().min(0).max(1).default(0.85),
+  entryChaseMaxSec: z.number().min(0.5).max(30).optional().default(5),
+  exitChaseMaxSec: z.number().min(0.5).max(30).optional().default(5),
+  executionRepriceMs: z.number().int().min(100).max(2000).optional().default(200),
+  makerOrderGtdSec: z.number().int().min(1).max(10).optional().default(2),
 
   stopLossPct: z.number().positive().max(1).nullable().optional().default(0.003),
   stopLossAtrMult: z.number().positive().max(20).nullable().optional().default(null),
@@ -147,6 +151,10 @@ export type Uc5Status = {
     emergencyBreakoutMinProb?: number;
     emergencyBreakoutMinMoveBps?: number;
     emergencyBreakoutMinAtrPercentile?: number;
+    entryChaseMaxSec?: number;
+    exitChaseMaxSec?: number;
+    executionRepriceMs?: number;
+    makerOrderGtdSec?: number;
     stopLossPct?: number | null;
     stopLossAtrMult?: number | null;
     takeProfitPct?: number | null;
@@ -202,5 +210,47 @@ export type Uc5Status = {
     type?: string;
     ok?: boolean;
     info?: unknown;
+  };
+  execution?: {
+    makerOnlyEntry?: boolean;
+    makerFirstExitWithMarketSafety?: boolean;
+    exitMarketSafetyAfterSec?: number;
+    quoteSource?: string;
+    wsQuotes?: {
+      bestBid?: number | null;
+      bestAsk?: number | null;
+      lastUpdateMs?: number | null;
+      connected?: boolean;
+      subscribed?: boolean;
+      lastError?: string | null;
+      productId?: string;
+    };
+    lastEntryFill?: {
+      isMaker?: boolean;
+      feeUsd?: number;
+      type?: string;
+      price?: number;
+      qty?: number;
+      createdAt?: number;
+    } | null;
+    lastEntryFillAudit?: unknown;
+    lastExitFillAudit?: unknown;
+    lastExitMethod?: "maker" | "market_safety" | string | null;
+    fillsAuditLast20?: {
+      summary?: {
+        count?: number;
+        makerCount?: number;
+        makerRatePct?: number;
+        totalFeesUsd?: number;
+      };
+      fills?: Array<{
+        isMaker?: boolean;
+        feeUsd?: number;
+        type?: string;
+        price?: number;
+        qty?: number;
+        createdAt?: number;
+      }>;
+    } | null;
   };
 };

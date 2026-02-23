@@ -180,8 +180,8 @@ class DailyDbManager:
   def __init__(
     self,
     db_dir: str,
-    max_gb: float = 29.0,
-    target_gb: float = 28.0,
+    max_gb: float = 15.0,
+    target_gb: float = 14.0,
     retention_interval_sec: int = 300,
   ):
     self.db_dir = os.path.abspath(os.path.expanduser(db_dir))
@@ -220,15 +220,12 @@ class DailyDbManager:
         return
 
       today = _utc_day_key()
+      yesterday = _utc_day_key(int((time.time() - 86400) * 1000))
       base_files = self._list_daily_db_files()
       base_files.sort(key=lambda x: x[0])
 
-      for day_key, base_path in base_files:
-        if total <= self.target_bytes:
-          break
-        if day_key == today:
-          continue
-
+      def _delete_day(day_key: str, base_path: str) -> None:
+        nonlocal total
         for path in (base_path, f"{base_path}-wal", f"{base_path}-shm"):
           try:
             os.remove(path)
@@ -236,15 +233,30 @@ class DailyDbManager:
             pass
           except Exception:
             pass
-
         conn = self._conns.pop(day_key, None)
         if conn is not None:
           try:
             conn.close()
           except Exception:
             pass
-
         total = self.folder_size_bytes()
+
+      # Pass 1: preserve today and yesterday if possible.
+      for day_key, base_path in base_files:
+        if total <= self.target_bytes:
+          break
+        if day_key in (today, yesterday):
+          continue
+        _delete_day(day_key, base_path)
+
+      # Pass 2: if still over cap, yesterday may be removed as a last resort.
+      if total > self.target_bytes:
+        for day_key, base_path in base_files:
+          if total <= self.target_bytes:
+            break
+          if day_key == today:
+            continue
+          _delete_day(day_key, base_path)
 
   def folder_size_bytes(self) -> int:
     total = 0
@@ -684,10 +696,19 @@ class DailyDbManager:
 
     markers.sort(key=lambda x: int(x["t"]))
     confidence.sort(key=lambda x: int(x["t"]))
+    wanted_days = set(self._days_for_range(from_ms, now_ms))
+    present_days = {
+      day_key
+      for day_key in wanted_days
+      if os.path.exists(self.path_for_day(day_key))
+    }
+    partial_24h = len(present_days) < len(wanted_days)
     return {
       "candles": candles[-1440:],
       "markers": markers[-500:],
       "confidence": _downsample_series(confidence, 3000),
+      "partial24h": partial_24h,
+      "missingDays": sorted(list(wanted_days - present_days)),
     }
 
   def query_trades_summary(self) -> Dict[str, Any]:
