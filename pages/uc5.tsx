@@ -1354,8 +1354,8 @@ export default function Uc5Page() {
             {chartRows.length === 0 ? (
               <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
             ) : (
-              <div style={{ width: "100%", height: MARKET_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <div style={{ width: "100%", minWidth: 0, height: MARKET_CHART_HEIGHT, minHeight: MARKET_CHART_HEIGHT }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={MARKET_CHART_HEIGHT}>
                   <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
                     <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
                     <XAxis
@@ -1395,8 +1395,8 @@ export default function Uc5Page() {
             {confidenceRows.length === 0 ? (
               <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No confidence data yet.</div>
             ) : (
-              <div style={{ width: "100%", height: CONFIDENCE_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%">
+              <div style={{ width: "100%", minWidth: 0, height: CONFIDENCE_CHART_HEIGHT, minHeight: CONFIDENCE_CHART_HEIGHT }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={CONFIDENCE_CHART_HEIGHT}>
                   <ComposedChart data={confidenceRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
                     <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
                     <XAxis
@@ -1580,10 +1580,10 @@ const hero: CSSProperties = {
   flexWrap: "wrap",
 };
 const sectionTitle: CSSProperties = { margin: "0 0 10px", fontSize: 22 };
-const grid2: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" };
-const grid3: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" };
+const grid2: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", minWidth: 0 };
+const grid3: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", minWidth: 0 };
 const grid4: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" };
-const card: CSSProperties = { border: "1px solid #e6e8eb", borderRadius: 14, padding: 14, background: "#fff" };
+const card: CSSProperties = { border: "1px solid #e6e8eb", borderRadius: 14, padding: 14, background: "#fff", minWidth: 0 };
 const completeCard: CSSProperties = { border: "1px solid #d1fadf", background: "#ecfdf3", color: "#067647", borderRadius: 12, padding: 12, fontWeight: 700 };
 const fieldCard: CSSProperties = { border: "1px solid #e6e8eb", borderRadius: 12, padding: 12, background: "#fff" };
 const cardTitle: CSSProperties = { fontSize: 14, fontWeight: 900, marginBottom: 8 };
