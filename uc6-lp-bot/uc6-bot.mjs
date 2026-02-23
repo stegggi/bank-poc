@@ -125,6 +125,23 @@ const SLOT0_ABI_V6 = [
 
 const NPM_POSITION_ABI = [
   {
+    name: "balanceOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    name: "tokenOfOwnerByIndex",
+    type: "function",
+    stateMutability: "view",
+    inputs: [
+      { name: "owner", type: "address" },
+      { name: "index", type: "uint256" },
+    ],
+    outputs: [{ type: "uint256" }],
+  },
+  {
     name: "positions",
     type: "function",
     stateMutability: "view",
@@ -594,6 +611,7 @@ function defaultState(accountAddress) {
       fallback: null,
       wallet: null,
       collectableNow: { usdc: 0, weth: 0, usd: 0, isEstimated: true },
+      positionInventory: null,
     },
     events: [],
     ledgerEvents: [],
@@ -2708,6 +2726,14 @@ class Uc6Bot {
 
   getRebalanceGate() {
     this.ensureDailyCounter();
+    const activeSlipstreamPositions = Number(this.state.latest?.positionInventory?.activeCount || 0);
+    if (activeSlipstreamPositions > 1) {
+      return {
+        allowed: false,
+        reason: `multiple_active_positions ${activeSlipstreamPositions}`,
+        remainingSec: null,
+      };
+    }
 
     const now = Date.now();
     const lastMs = this.state.lastRebalanceAt ? Date.parse(this.state.lastRebalanceAt) : 0;
@@ -2866,6 +2892,128 @@ class Uc6Bot {
       }
       this.setLastError(err);
     }
+  }
+
+  async refreshOwnedSlipstreamPositionInventory() {
+    const snapshot = this.state.latest?.primary || null;
+    const sqrtPriceX96Raw = snapshot?.sqrtPriceX96 ? BigInt(snapshot.sqrtPriceX96) : null;
+    const currentTick = Number(snapshot?.tick ?? 0);
+    const inventory = {
+      ownerNftCount: 0,
+      activeCount: 0,
+      totalUsdValue: 0,
+      active: [],
+    };
+
+    try {
+      const ownedRaw = await this.publicClient.readContract({
+        address: this.slipstreamNpm,
+        abi: NPM_POSITION_ABI,
+        functionName: "balanceOf",
+        args: [this.account.address],
+      });
+      const owned = Number(ownedRaw || 0n);
+      inventory.ownerNftCount = Number.isFinite(owned) ? owned : 0;
+
+      const scanCount = Math.min(inventory.ownerNftCount, 200);
+      for (let i = 0; i < scanCount; i += 1) {
+        let tokenIdRaw;
+        try {
+          tokenIdRaw = await this.publicClient.readContract({
+            address: this.slipstreamNpm,
+            abi: NPM_POSITION_ABI,
+            functionName: "tokenOfOwnerByIndex",
+            args: [this.account.address, BigInt(i)],
+          });
+        } catch {
+          continue;
+        }
+
+        let posRaw;
+        try {
+          posRaw = await this.publicClient.readContract({
+            address: this.slipstreamNpm,
+            abi: NPM_POSITION_ABI,
+            functionName: "positions",
+            args: [BigInt(tokenIdRaw)],
+          });
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err || "");
+          if (msg.includes('function "positions" reverted') && /\bID\b/.test(msg)) continue;
+          continue;
+        }
+
+        const pos = this.parsePositionResult(posRaw);
+        if (!pos || pos.liquidity <= 0n) continue;
+
+        let usdValue = 0;
+        let inRange = null;
+        if (sqrtPriceX96Raw && Number.isFinite(currentTick)) {
+          try {
+            const amounts = this.lpAmountsFromLiquidity(
+              pos.liquidity,
+              pos.tickLower,
+              pos.tickUpper,
+              sqrtPriceX96Raw,
+              pos.token0,
+              pos.token1
+            );
+            const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
+            const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+            usdValue = usdc + weth * this.getSpotUsdcPerWeth();
+            inRange = currentTick > pos.tickLower && currentTick < pos.tickUpper;
+          } catch {
+            usdValue = 0;
+            inRange = null;
+          }
+        }
+
+        inventory.active.push({
+          tokenId: tokenIdRaw.toString(),
+          tickLower: pos.tickLower,
+          tickUpper: pos.tickUpper,
+          liquidity: pos.liquidity.toString(),
+          usdValue,
+          inRange,
+        });
+      }
+
+      inventory.active.sort((a, b) => Number(b.usdValue || 0) - Number(a.usdValue || 0));
+      inventory.activeCount = inventory.active.length;
+      inventory.totalUsdValue = inventory.active.reduce((sum, p) => sum + Number(p.usdValue || 0), 0);
+      this.state.latest.positionInventory = inventory;
+    } catch (err) {
+      this.setLastError(err);
+      this.state.latest.positionInventory = this.state.latest.positionInventory || inventory;
+    }
+  }
+
+  enforceSinglePositionInvariant() {
+    const inventory = this.state.latest?.positionInventory;
+    if (!inventory || !Array.isArray(inventory.active)) return;
+    const activeCount = Number(inventory.activeCount || 0);
+    if (activeCount !== 1) return;
+    const only = inventory.active[0];
+    if (!only?.tokenId) return;
+
+    const trackedTokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
+    if (trackedTokenId === String(only.tokenId)) return;
+
+    // Auto-adopt the single active on-chain position to prevent accidental second mints
+    // when local state lost the tokenId during prior reconcile/mint race conditions.
+    this.state.position = {
+      ...this.state.position,
+      venue: "slipstream",
+      tokenId: String(only.tokenId),
+      tickLower: Number.isFinite(Number(only.tickLower)) ? Number(only.tickLower) : null,
+      tickUpper: Number.isFinite(Number(only.tickUpper)) ? Number(only.tickUpper) : null,
+      centerTick:
+        Number.isFinite(Number(only.tickLower)) && Number.isFinite(Number(only.tickUpper))
+          ? Math.round((Number(only.tickLower) + Number(only.tickUpper)) / 2)
+          : null,
+      liquidity: only.liquidity != null ? String(only.liquidity) : null,
+      inRange: typeof only.inRange === "boolean" ? only.inRange : this.state.position?.inRange ?? null,
+    };
   }
 
   async maybeHarvestOnly() {
@@ -3163,6 +3311,17 @@ class Uc6Bot {
       : recoveryRetry
         ? { ...trigger, trigger: true, reason: "recovery_retry" }
       : trigger;
+    const activeSlipstreamPositions = Number(this.state.latest?.positionInventory?.activeCount || 0);
+    if (activeSlipstreamPositions > 1) {
+      const reason = `multiple_active_positions ${activeSlipstreamPositions}`;
+      this.setDecision({
+        action: "monitor",
+        reason,
+        gate: { allowed: false, reason, remainingSec: null },
+      });
+      this.pushEvent({ type: "blocked", reason });
+      return;
+    }
 
     if (this.settings.killSwitch) {
       this.setDecision({
@@ -3249,6 +3408,8 @@ class Uc6Bot {
     await this.loadSettings(false);
     const snapshots = await this.refreshSnapshots();
     await this.reconcilePositionFromChain();
+    await this.refreshOwnedSlipstreamPositionInventory();
+    this.enforceSinglePositionInvariant();
     try {
       await this.repairLedgerAccounting();
     } catch (err) {
@@ -3329,10 +3490,15 @@ class Uc6Bot {
     };
 
     const distance = this.distanceToEdge(pos, Number(activePool?.tick ?? 0));
-    const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(walletValueUsd + lpUsdValue);
+    const positionInventory = latest.positionInventory || null;
+    const aggregatedLpUsdValue =
+      positionInventory && Number(positionInventory.activeCount || 0) > 0
+        ? Number(positionInventory.totalUsdValue || 0)
+        : lpUsdValue;
+    const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(walletValueUsd + aggregatedLpUsdValue);
     const reserveTargetUsd = reserveTargetUsdc;
-    const portfolioTotalUsd = walletValueUsd + lpUsdValue;
-    const deployedPct = portfolioTotalUsd > 0 ? (lpUsdValue / portfolioTotalUsd) * 100 : 0;
+    const portfolioTotalUsd = walletValueUsd + aggregatedLpUsdValue;
+    const deployedPct = portfolioTotalUsd > 0 ? (aggregatedLpUsdValue / portfolioTotalUsd) * 100 : 0;
 
     const now = Date.now();
     const todayStart = Date.parse(`${utcDayKey()}T00:00:00.000Z`);
@@ -3348,12 +3514,12 @@ class Uc6Bot {
     const statsAll = this.summarizeEvents(eventsAll);
 
     const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
-    const avgCapitalToday = lpUsdValue > 0 ? lpUsdValue : 1;
-    const avgCapital7d = lpUsdValue > 0 ? lpUsdValue : 1;
-    const avgCapital30d = lpUsdValue > 0 ? lpUsdValue : 1;
-    const aprToday = lpUsdValue > 0 ? (todayStats.netUsd / avgCapitalToday) * 365 : null;
-    const apr7d = lpUsdValue > 0 ? (stats7d.netUsd / avgCapital7d) * 365 : null;
-    const apr30d = events30d.length > 0 && lpUsdValue > 0 ? (stats30d.netUsd / avgCapital30d) * 365 : null;
+    const avgCapitalToday = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
+    const avgCapital7d = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
+    const avgCapital30d = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
+    const aprToday = aggregatedLpUsdValue > 0 ? (todayStats.netUsd / avgCapitalToday) * 365 : null;
+    const apr7d = aggregatedLpUsdValue > 0 ? (stats7d.netUsd / avgCapital7d) * 365 : null;
+    const apr30d = events30d.length > 0 && aggregatedLpUsdValue > 0 ? (stats30d.netUsd / avgCapital30d) * 365 : null;
     const churnRatioToday = Number.isFinite(todayStats.churnRatio) ? todayStats.churnRatio : null;
     const rangeStats = this.state.rangeStats || {};
     const inRangeEligibleMs = Number(rangeStats.inRangeMs || 0);
@@ -3441,7 +3607,7 @@ class Uc6Bot {
         },
         allocationUsd: {
           idle: walletValueUsd,
-          lpDeployed: lpUsdValue,
+          lpDeployed: aggregatedLpUsdValue,
           reserveTarget: reserveTargetUsd,
         },
         deployedPct,
@@ -3490,6 +3656,14 @@ class Uc6Bot {
         cooldownRemainingSec: gate.remainingSec,
         forceRebalanceRequestedAtIso: this.state.forceRebalanceRequestedAt || null,
         forceRebalanceRecoveryPending: Boolean(this.state.forceRebalanceRecoveryPending),
+        positionInventory: positionInventory
+          ? {
+              ownerNftCount: Number(positionInventory.ownerNftCount || 0),
+              activeCount: Number(positionInventory.activeCount || 0),
+              totalUsdValue: Number(positionInventory.totalUsdValue || 0),
+              active: Array.isArray(positionInventory.active) ? positionInventory.active.slice(0, 20) : [],
+            }
+          : null,
         lastDecision: this.state.lastDecision,
         lastError: this.parseLastErrorObject(),
       },

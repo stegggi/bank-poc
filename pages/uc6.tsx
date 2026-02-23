@@ -173,6 +173,19 @@ type Uc6Status = {
     };
     lastRebalanceAtIso?: string | null;
     cooldownRemainingSec?: number | null;
+    positionInventory?: {
+      ownerNftCount?: number;
+      activeCount?: number;
+      totalUsdValue?: number;
+      active?: Array<{
+        tokenId?: string;
+        tickLower?: number;
+        tickUpper?: number;
+        liquidity?: string;
+        usdValue?: number;
+        inRange?: boolean | null;
+      }>;
+    } | null;
     lastDecision?: Record<string, unknown> | null;
     lastError?: { atIso?: string | null; message?: string } | null;
   };
@@ -642,6 +655,9 @@ export default function Uc6Page() {
   const bandPct = n(status?.settings?.bandHalfBps, 0) / 100;
   const edgeDistPct = n(status?.position?.distanceToEdge?.pct, 0) * 100;
   const churnRatio = status?.ops?.churnRatioToday;
+  const activeLpCount = Number(status?.ops?.positionInventory?.activeCount || 0);
+  const hasMultipleActive = activeLpCount > 1;
+  const aggregateLpUsd = n(status?.ops?.positionInventory?.totalUsdValue, 0);
 
   return (
     <>
@@ -685,6 +701,11 @@ export default function Uc6Page() {
 
           {!!notice && <p style={{ ...styles.alert, ...styles.alertOk }}>{notice}</p>}
           {!!error && <p style={{ ...styles.alert, ...styles.alertErr }}>{error}</p>}
+          {hasMultipleActive && (
+            <p style={{ ...styles.alert, ...styles.alertErr }}>
+              Multiple active Slipstream positions detected ({activeLpCount}). Bot trading is blocked until positions are consolidated.
+            </p>
+          )}
         </section>
 
         <section style={styles.cardGrid}>
@@ -699,6 +720,8 @@ export default function Uc6Page() {
               <Metric label="Tick" value={String(status?.market?.tick?.current ?? "—")} />
               <Metric label="Tick Spacing" value={String(status?.market?.tick?.spacing ?? "—")} />
               <Metric label="Token Id" value={String(status?.position?.tokenId ?? "—")} mono />
+              <Metric label="Active LP NFTs" value={String(activeLpCount || 0)} />
+              <Metric label="Total LP (All NFTs)" value={fmtUsd(aggregateLpUsd)} />
               <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
               <Metric label="Band Width" value={`±${fmtPct(bandPct)}`} />
               <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
