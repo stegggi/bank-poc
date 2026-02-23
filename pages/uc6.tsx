@@ -28,6 +28,7 @@ type Uc6DraftSettings = {
   slippageBps: number;
   pollIntervalMs: number;
   maxDeployUsdc: number;
+  maxInitialMintUsdc: number;
   minTopUpUsd: number;
   reserveMinUsdc: number;
   reservePct: number; // percentage in UI
@@ -50,6 +51,7 @@ type OwnerPayload = {
   slippageBps: number;
   pollIntervalMs: number;
   maxDeployUsdc: number;
+  maxInitialMintUsdc: number;
   minTopUpUsd: number;
   reserveMinUsdc: number;
   reservePct: number;
@@ -89,6 +91,7 @@ type Uc6Status = {
     slippageBps?: number;
     pollIntervalMs?: number;
     maxDeployUsdc?: number;
+    maxInitialMintUsdc?: number;
     minTopUpUsd?: number;
     reservePolicy?: {
       minUsdc?: number;
@@ -222,6 +225,7 @@ function defaultDraft(): Uc6DraftSettings {
     slippageBps: 30,
     pollIntervalMs: 2000,
     maxDeployUsdc: 50_000,
+    maxInitialMintUsdc: 50,
     minTopUpUsd: 20,
     reserveMinUsdc: 25,
     reservePct: 0,
@@ -260,6 +264,7 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     slippageBps: n(settings.slippageBps, d.slippageBps),
     pollIntervalMs: n(settings.pollIntervalMs, d.pollIntervalMs),
     maxDeployUsdc: n(settings.maxDeployUsdc, d.maxDeployUsdc),
+    maxInitialMintUsdc: n(settings.maxInitialMintUsdc, d.maxInitialMintUsdc),
     minTopUpUsd: n(settings.minTopUpUsd, d.minTopUpUsd),
     reserveMinUsdc: reserveMin,
     reservePct: reservePctRatio * 100,
@@ -284,6 +289,7 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
     slippageBps: draft.slippageBps,
     pollIntervalMs: draft.pollIntervalMs,
     maxDeployUsdc: draft.maxDeployUsdc,
+    maxInitialMintUsdc: draft.maxInitialMintUsdc,
     minTopUpUsd: draft.minTopUpUsd,
     reserveMinUsdc: draft.reserveMinUsdc,
     reservePct: Math.max(0, draft.reservePct) / 100,
@@ -891,6 +897,11 @@ export default function Uc6Page() {
               <NumberField label="slippageBps" value={draft.slippageBps} onChange={(v) => updateNumber("slippageBps", v)} />
               <NumberField label="pollIntervalMs" value={draft.pollIntervalMs} onChange={(v) => updateNumber("pollIntervalMs", v)} />
               <NumberField label="maxDeployUsdc" value={draft.maxDeployUsdc} onChange={(v) => updateNumber("maxDeployUsdc", v)} />
+              <NumberField
+                label="maxInitialMintUsdc"
+                value={draft.maxInitialMintUsdc}
+                onChange={(v) => updateNumber("maxInitialMintUsdc", v)}
+              />
               <NumberField label="minTopUpUsd" value={draft.minTopUpUsd} onChange={(v) => updateNumber("minTopUpUsd", v)} />
 
               <NumberField label="reserveMinUsdc" value={draft.reserveMinUsdc} onChange={(v) => updateNumber("reserveMinUsdc", v)} />

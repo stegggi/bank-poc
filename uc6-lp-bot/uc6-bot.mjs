@@ -478,6 +478,7 @@ const DEFAULT_SETTINGS = {
   slippageBps: 30,
   pollIntervalMs: 2000,
   maxDeployUsdc: 50_000,
+  maxInitialMintUsdc: 50,
   minTopUpUsd: 20,
   reserveMinUsdc: 25,
   reservePct: 0,
@@ -558,6 +559,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     slippageBps: clamp(Math.round(toNumber(src.slippageBps, baseSettings.slippageBps)), 1, 2_000),
     pollIntervalMs: clamp(Math.round(toNumber(src.pollIntervalMs, baseSettings.pollIntervalMs)), 500, 60_000),
     maxDeployUsdc: clamp(toNumber(src.maxDeployUsdc, baseSettings.maxDeployUsdc), 0, 5_000_000),
+    maxInitialMintUsdc: clamp(
+      toNumber(src.maxInitialMintUsdc, baseSettings.maxInitialMintUsdc),
+      0,
+      5_000_000
+    ),
     minTopUpUsd: clamp(toNumber(src.minTopUpUsd, baseSettings.minTopUpUsd), 0, 1_000_000),
     reserveMinUsdc,
     reservePct,
@@ -1671,105 +1677,125 @@ class Uc6Bot {
     );
     const estimatedOut = this.priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot);
     const quotedOutForMin = quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : estimatedOut;
-    const amountOutMinimum = this.minOutFromEstimate(quotedOutForMin, slippageBps);
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
-    const candidates = [
+    const candidatesBase = [
       {
         abi: ROUTER_ABI_FEE,
-        params: {
+        paramsBase: {
           tokenIn,
           tokenOut,
           fee: Math.max(1, fee || 3000),
           recipient: this.account.address,
           deadline,
           amountIn,
-          amountOutMinimum,
+          amountOutMinimum: 0n,
           sqrtPriceLimitX96: 0n,
         },
       },
       {
         abi: ROUTER_ABI_TICK,
-        params: {
+        paramsBase: {
           tokenIn,
           tokenOut,
           tickSpacing: tickSpacing || 1,
           recipient: this.account.address,
           deadline,
           amountIn,
-          amountOutMinimum,
+          amountOutMinimum: 0n,
           sqrtPriceLimitX96: 0n,
         },
       },
     ];
 
-    let lastErr = null;
-    for (const c of candidates) {
-      try {
-        const sim = await this.publicClient.simulateContract({
-          address: router,
-          abi: c.abi,
-          functionName: "exactInputSingle",
-          args: [c.params],
-          account: this.account.address,
-        });
-        const routerQuoteOut = this.parseAmountOutFromQuoteResult(sim.result);
-        const quoteOut =
-          quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : routerQuoteOut > BigInt(0) ? routerQuoteOut : estimatedOut;
-        const quoteSource =
-          quoterQuote.amountOut > BigInt(0) ? quoterQuote.source : routerQuoteOut > BigInt(0) ? "router_sim" : "price_estimate";
+    const retrySlippageBps = Math.max(Number(slippageBps || 0), 500);
+    const slippageAttempts = [Number(slippageBps || 0)];
+    if (retrySlippageBps > slippageAttempts[0]) slippageAttempts.push(retrySlippageBps);
 
-        await this.assertTxAllowed("swap_write");
-        const hash = await this.walletClient.writeContract({
-          ...sim.request,
-          account: this.account,
-        });
-        const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
-        this.addTxToActiveAction("swap", hash, receipt);
-        if (receipt.status && receipt.status !== "success") {
-          throw new Error(`Swap tx reverted on-chain hash=${hash}`);
+    let lastErr = null;
+    for (let slippageAttemptIndex = 0; slippageAttemptIndex < slippageAttempts.length; slippageAttemptIndex += 1) {
+      const slippageBpsUsed = slippageAttempts[slippageAttemptIndex];
+      const amountOutMinimum = this.minOutFromEstimate(quotedOutForMin, slippageBpsUsed);
+      let sawTooLittleReceived = false;
+
+      for (const c of candidatesBase) {
+        const params = { ...c.paramsBase, amountOutMinimum };
+        try {
+          const sim = await this.publicClient.simulateContract({
+            address: router,
+            abi: c.abi,
+            functionName: "exactInputSingle",
+            args: [params],
+            account: this.account.address,
+          });
+          const routerQuoteOut = this.parseAmountOutFromQuoteResult(sim.result);
+          const quoteOut =
+            quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : routerQuoteOut > BigInt(0) ? routerQuoteOut : estimatedOut;
+          const quoteSource =
+            quoterQuote.amountOut > BigInt(0) ? quoterQuote.source : routerQuoteOut > BigInt(0) ? "router_sim" : "price_estimate";
+
+          await this.assertTxAllowed("swap_write");
+          const hash = await this.walletClient.writeContract({
+            ...sim.request,
+            account: this.account,
+          });
+          const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
+          this.addTxToActiveAction("swap", hash, receipt);
+          if (receipt.status && receipt.status !== "success") {
+            throw new Error(`Swap tx reverted on-chain hash=${hash}`);
+          }
+          const inDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenIn);
+          const outDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenOut);
+          const postInBalance = await this.readTokenBalance(tokenIn);
+          const postOutBalance = await this.readTokenBalance(tokenOut);
+          const actualOutByBalance = postOutBalance > preOutBalance ? postOutBalance - preOutBalance : BigInt(0);
+          const actualInByBalance = preInBalance > postInBalance ? preInBalance - postInBalance : BigInt(0);
+          const actualOut = outDelta.inflow > 0n ? outDelta.inflow : actualOutByBalance;
+          const actualIn = inDelta.outflow > 0n ? inDelta.outflow : actualInByBalance;
+          const quoteGap = quoteOut > actualOut ? quoteOut - actualOut : BigInt(0);
+          const spot = this.getSpotUsdcPerWeth();
+          const quoteOutUsd = this.usdValueForTokenOutDelta(tokenOut, quoteOut, spot);
+          const actualOutUsd = this.usdValueForTokenOutDelta(tokenOut, actualOut, spot);
+          const swapCostUsd = this.usdValueForTokenOutDelta(tokenOut, quoteGap, spot);
+          const slippageBpsReal =
+            quoteOut > BigInt(0)
+              ? (Number(quoteOut - actualOut) / Number(quoteOut)) * 10_000
+              : null;
+          this.addSwapMetricsToActiveAction({
+            tokenIn,
+            tokenOut,
+            quoteSource,
+            quoteOut,
+            actualOut,
+            actualIn,
+            quoteOutUsd,
+            actualOutUsd,
+            swapCostUsd: Math.max(0, swapCostUsd),
+            slippageBpsReal,
+            isEstimated: false,
+          });
+          return {
+            tokenIn,
+            tokenOut,
+            actualIn,
+            actualOut,
+            quoteOut,
+            quoteSource,
+            slippageBpsReal,
+            slippageBpsUsed,
+          };
+        } catch (err) {
+          lastErr = err;
+          const msg = err instanceof Error ? err.message : String(err || "");
+          if (msg.includes("Too little received")) {
+            sawTooLittleReceived = true;
+          }
         }
-        const inDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenIn);
-        const outDelta = this.extractWalletErc20DeltaFromReceipt(receipt, tokenOut);
-        const postInBalance = await this.readTokenBalance(tokenIn);
-        const postOutBalance = await this.readTokenBalance(tokenOut);
-        const actualOutByBalance = postOutBalance > preOutBalance ? postOutBalance - preOutBalance : BigInt(0);
-        const actualInByBalance = preInBalance > postInBalance ? preInBalance - postInBalance : BigInt(0);
-        const actualOut = outDelta.inflow > 0n ? outDelta.inflow : actualOutByBalance;
-        const actualIn = inDelta.outflow > 0n ? inDelta.outflow : actualInByBalance;
-        const quoteGap = quoteOut > actualOut ? quoteOut - actualOut : BigInt(0);
-        const spot = this.getSpotUsdcPerWeth();
-        const quoteOutUsd = this.usdValueForTokenOutDelta(tokenOut, quoteOut, spot);
-        const actualOutUsd = this.usdValueForTokenOutDelta(tokenOut, actualOut, spot);
-        const swapCostUsd = this.usdValueForTokenOutDelta(tokenOut, quoteGap, spot);
-        const slippageBpsReal =
-          quoteOut > BigInt(0)
-            ? (Number(quoteOut - actualOut) / Number(quoteOut)) * 10_000
-            : null;
-        this.addSwapMetricsToActiveAction({
-          tokenIn,
-          tokenOut,
-          quoteSource,
-          quoteOut,
-          actualOut,
-          actualIn,
-          quoteOutUsd,
-          actualOutUsd,
-          swapCostUsd: Math.max(0, swapCostUsd),
-          slippageBpsReal,
-          isEstimated: false,
-        });
-        return {
-          tokenIn,
-          tokenOut,
-          actualIn,
-          actualOut,
-          quoteOut,
-          quoteSource,
-          slippageBpsReal,
-        };
-      } catch (err) {
-        lastErr = err;
+      }
+
+      const hasRetry = slippageAttemptIndex + 1 < slippageAttempts.length;
+      if (!(hasRetry && sawTooLittleReceived)) {
+        break;
       }
     }
 
@@ -2404,7 +2430,7 @@ class Uc6Bot {
     const npm = this.slipstreamNpm;
     const keepReserveRaw = parseUnits(reserveTargetUsdc.toFixed(6), USDC_DECIMALS);
     const keepReserveTopUpRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
-    const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
+    const maxInitialMintRaw = parseUnits(this.settings.maxInitialMintUsdc.toFixed(6), USDC_DECIMALS);
     const minUsdcDeployRaw = parseUnits("1", USDC_DECIMALS);
 
     this.beginAction("topup", "idle_deploy");
@@ -3098,7 +3124,7 @@ class Uc6Bot {
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
 
     let freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
-    let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+    let deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
     if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
       // If wallet drifted to WETH while no position exists, restore deployable USDC once.
       await this.swapExactInputSingle({
@@ -3114,14 +3140,14 @@ class Uc6Bot {
       usdcBalanceRaw = await this.readTokenBalance(this.usdc);
       wethBalanceRaw = await this.readTokenBalance(this.weth);
       freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
-      deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+      deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
     }
     if (deployableUsdcRaw <= 0n) {
       throw new Error(
         `No deployable USDC after reserve and maxDeploy limits ${JSON.stringify({
           reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
           reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
-          maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
+          maxInitialMintUsdc: Number(this.settings.maxInitialMintUsdc || 0),
           usdcBalance: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
           wethBalance: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
           freeUsdc: Number(formatUnits(freeUsdcRaw, USDC_DECIMALS)),
@@ -3148,7 +3174,7 @@ class Uc6Bot {
     const wethAfter = await this.readTokenBalance(this.weth);
 
     let usdcSpendable = usdcAfter > keepReserveRebalanceRaw ? usdcAfter - keepReserveRebalanceRaw : 0n;
-    let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+    let usdcToUse = usdcSpendable < maxInitialMintRaw ? usdcSpendable : maxInitialMintRaw;
     let wethToUse = wethAfter;
 
     // Recovery path: if one side is unexpectedly empty, do a one-shot top-up swap.
@@ -3186,7 +3212,7 @@ class Uc6Bot {
       const usdcRetry = await this.readTokenBalance(this.usdc);
       const wethRetry = await this.readTokenBalance(this.weth);
       usdcSpendable = usdcRetry > keepReserveRebalanceRaw ? usdcRetry - keepReserveRebalanceRaw : 0n;
-      usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
+      usdcToUse = usdcSpendable < maxInitialMintRaw ? usdcSpendable : maxInitialMintRaw;
       wethToUse = wethRetry;
     }
 
@@ -3194,7 +3220,7 @@ class Uc6Bot {
       const diag = {
         reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
         reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
-        maxDeployUsdc: Number(this.settings.maxDeployUsdc || 0),
+        maxInitialMintUsdc: Number(this.settings.maxInitialMintUsdc || 0),
         usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
         wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
         usdcSpendable: Number(formatUnits(usdcSpendable, USDC_DECIMALS)),
@@ -3561,6 +3587,7 @@ class Uc6Bot {
         slippageBps: this.settings.slippageBps,
         pollIntervalMs: this.settings.pollIntervalMs,
         maxDeployUsdc: this.settings.maxDeployUsdc,
+        maxInitialMintUsdc: this.settings.maxInitialMintUsdc,
         minTopUpUsd: this.settings.minTopUpUsd,
         reservePolicy: {
           minUsdc: this.settings.reserveMinUsdc,
