@@ -2430,7 +2430,7 @@ class Uc6Bot {
     const npm = this.slipstreamNpm;
     const keepReserveRaw = parseUnits(reserveTargetUsdc.toFixed(6), USDC_DECIMALS);
     const keepReserveTopUpRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
-    const maxInitialMintRaw = parseUnits(this.settings.maxInitialMintUsdc.toFixed(6), USDC_DECIMALS);
+    const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
     const minUsdcDeployRaw = parseUnits("1", USDC_DECIMALS);
 
     this.beginAction("topup", "idle_deploy");
@@ -3121,7 +3121,7 @@ class Uc6Bot {
     const effectiveReserveUsdc = this.getEffectiveReserveTargetUsdc(totalValueUsd);
     const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(6), USDC_DECIMALS);
     const keepReserveRebalanceRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
-    const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
+    const maxInitialMintRaw = parseUnits(this.settings.maxInitialMintUsdc.toFixed(6), USDC_DECIMALS);
 
     let freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
     let deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
