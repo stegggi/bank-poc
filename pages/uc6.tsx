@@ -163,6 +163,20 @@ type Uc6Status = {
     apr7d?: number | null;
     apr30d?: number | null;
   };
+  analytics?: {
+    bandPerformance?: Array<{
+      bandHalfBps?: number;
+      bandHalfPct?: number;
+      runs?: number;
+      totalFeesUsd?: number;
+      avgFeesUsd?: number;
+      avgFeeToLpPct?: number | null;
+      avgDurationSec?: number | null;
+      totalDurationSec?: number;
+      totalCostsUsd?: number;
+      totalNetUsd?: number;
+    }>;
+  };
   ops?: {
     rebalancesToday?: number;
     rebalances24h?: number;
@@ -346,6 +360,20 @@ function fmtUsd(v: number | null | undefined): string {
 function fmtPct(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(v)) return "—";
   return `${fmtNum(v, digits)}%`;
+}
+
+function fmtDurationCompact(seconds: number | null | undefined): string {
+  if (seconds == null || Number.isNaN(seconds)) return "—";
+  const s = Math.max(0, Math.round(Number(seconds)));
+  if (s < 60) return `${s}s`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const remM = m % 60;
+  if (h < 24) return remM === 0 ? `${h}h` : `${h}h ${remM}m`;
+  const d = Math.floor(h / 24);
+  const remH = h % 24;
+  return remH === 0 ? `${d}d` : `${d}d ${remH}h`;
 }
 
 function getEthereum(): EthereumProvider | undefined {
@@ -664,6 +692,15 @@ export default function Uc6Page() {
   const activeLpCount = Number(status?.ops?.positionInventory?.activeCount || 0);
   const hasMultipleActive = activeLpCount > 1;
   const aggregateLpUsd = n(status?.ops?.positionInventory?.totalUsdValue, 0);
+  const bandPerformanceRows = (status?.analytics?.bandPerformance || []).map((row) => [
+    `±${fmtPct(row.bandHalfPct)}`,
+    String(Math.round(n(row.runs, 0))),
+    fmtUsd(row.totalFeesUsd),
+    fmtUsd(row.avgFeesUsd),
+    fmtPct(row.avgFeeToLpPct),
+    fmtDurationCompact(row.avgDurationSec),
+    fmtUsd(row.totalNetUsd),
+  ]);
 
   return (
     <>
@@ -820,6 +857,17 @@ export default function Uc6Page() {
               Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
               {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
             </div>
+            <div style={{ ...styles.note, marginTop: 10 }}>
+              Band performance (completed runs only; one row per `bandHalfBps` used at the time of recenter).
+            </div>
+            <SimpleTable
+              headers={["Band", "Runs", "Fees Total", "Fees Avg", "Avg Fees / LP", "Avg Time To Rebalance", "Net Total"]}
+              rows={
+                bandPerformanceRows.length > 0
+                  ? bandPerformanceRows
+                  : [["—", "0", "—", "—", "—", "—", "—"]]
+              }
+            />
           </Card>
 
           <Card title="Rebalance & Activity">

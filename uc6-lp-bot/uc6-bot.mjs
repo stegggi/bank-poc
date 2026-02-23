@@ -606,6 +606,7 @@ function defaultState(accountAddress) {
     position: {
       venue: "slipstream",
       tokenId: null,
+      bandHalfBps: null,
       tickLower: null,
       tickUpper: null,
       centerTick: null,
@@ -1159,6 +1160,89 @@ class Uc6Bot {
       rebalances,
       churnRatio: feesUsd > 0 ? totalCostsUsd / feesUsd : totalCostsUsd > 0 ? Number.POSITIVE_INFINITY : 0,
     };
+  }
+
+  estimateTrackedLpUsdValueFromLatest() {
+    const latest = this.state.latest || {};
+    const activePool = latest.primary || latest.fallback || null;
+    const pos = this.state.position || {};
+    const tickLower = Number(pos.tickLower);
+    const tickUpper = Number(pos.tickUpper);
+    const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
+    const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
+    if (!(hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96)) return 0;
+    const token0 = activePool?.token0 || this.weth;
+    const token1 = activePool?.token1 || this.usdc;
+    const amounts = this.lpAmountsFromLiquidity(
+      liquidityRaw,
+      tickLower,
+      tickUpper,
+      BigInt(activePool.sqrtPriceX96),
+      token0,
+      token1
+    );
+    const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
+    const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+    return usdc + weth * this.getSpotUsdcPerWeth();
+  }
+
+  summarizeBandPerformance(events) {
+    const byBand = new Map();
+    for (const ev of events) {
+      if (!ev || ev.type !== "recenter") continue;
+      const bandHalfBps = Number(ev.closedBandHalfBps);
+      const runDurationSec = Number(ev.runDurationSec);
+      const lpBaseUsd = Number(ev.lpBaseUsdAtClose);
+      if (!Number.isFinite(bandHalfBps) || bandHalfBps <= 0) continue;
+      if (!Number.isFinite(runDurationSec) || runDurationSec <= 0) continue;
+
+      let row = byBand.get(bandHalfBps);
+      if (!row) {
+        row = {
+          bandHalfBps,
+          runs: 0,
+          totalFeesUsd: 0,
+          totalDurationSec: 0,
+          feeLpRatioSum: 0,
+          feeLpRatioSamples: 0,
+          totalLpBaseUsd: 0,
+          totalCostsUsd: 0,
+          totalNetUsd: 0,
+        };
+        byBand.set(bandHalfBps, row);
+      }
+
+      const fees = Number(ev.feesCollectedUsd || 0);
+      const gas = Number(ev.gasUsd || 0);
+      const swap = Number(ev.swapCostUsd || 0);
+      const net = Number(ev.netUsd || 0);
+      row.runs += 1;
+      row.totalFeesUsd += fees;
+      row.totalDurationSec += runDurationSec;
+      row.totalLpBaseUsd += Number.isFinite(lpBaseUsd) && lpBaseUsd > 0 ? lpBaseUsd : 0;
+      row.totalCostsUsd += gas + swap;
+      row.totalNetUsd += net;
+      if (Number.isFinite(lpBaseUsd) && lpBaseUsd > 0) {
+        row.feeLpRatioSum += fees / lpBaseUsd;
+        row.feeLpRatioSamples += 1;
+      }
+    }
+
+    return Array.from(byBand.values())
+      .sort((a, b) => a.bandHalfBps - b.bandHalfBps)
+      .map((row) => ({
+        bandHalfBps: row.bandHalfBps,
+        bandHalfPct: row.bandHalfBps / 100,
+        runs: row.runs,
+        totalFeesUsd: row.totalFeesUsd,
+        avgFeesUsd: row.runs > 0 ? row.totalFeesUsd / row.runs : 0,
+        avgFeeToLpPct:
+          row.feeLpRatioSamples > 0 ? (row.feeLpRatioSum / row.feeLpRatioSamples) * 100 : null,
+        avgDurationSec: row.runs > 0 ? row.totalDurationSec / row.runs : null,
+        totalDurationSec: row.totalDurationSec,
+        totalCostsUsd: row.totalCostsUsd,
+        totalNetUsd: row.totalNetUsd,
+      }));
   }
 
   parseLastErrorObject() {
@@ -3097,6 +3181,7 @@ class Uc6Bot {
       this.state.position = {
         ...this.state.position,
         tokenId: null,
+        bandHalfBps: null,
         liquidity: null,
         inRange: null,
       };
@@ -3312,6 +3397,7 @@ class Uc6Bot {
     this.state.position = {
       venue: "slipstream",
       tokenId: minted.tokenId,
+      bandHalfBps: this.settings.bandHalfBps,
       tickLower: minted.tickLower,
       tickUpper: minted.tickUpper,
       centerTick: minted.centerTick,
@@ -3408,6 +3494,21 @@ class Uc6Bot {
 
     if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
     if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
+    const preRecenterMeta = (() => {
+      const hasExisting = Boolean(this.state.position?.tokenId);
+      if (!hasExisting) return {};
+      const closedBandHalfBps = Number(this.state.position?.bandHalfBps);
+      const lastRebalanceMs = this.state.lastRebalanceAt ? Date.parse(this.state.lastRebalanceAt) : NaN;
+      const nowMs = Date.now();
+      const runDurationSec =
+        Number.isFinite(lastRebalanceMs) && nowMs > lastRebalanceMs ? Math.round((nowMs - lastRebalanceMs) / 1000) : null;
+      const lpBaseUsdAtClose = this.estimateTrackedLpUsdValueFromLatest();
+      return {
+        closedBandHalfBps: Number.isFinite(closedBandHalfBps) ? closedBandHalfBps : null,
+        runDurationSec,
+        lpBaseUsdAtClose,
+      };
+    })();
     this.beginAction("recenter", effectiveTrigger.reason);
     try {
       await this.rebalanceSlipstream(primary);
@@ -3415,7 +3516,10 @@ class Uc6Bot {
         throw new Error("Rebalance finished without an active LP position (tokenId missing)");
       }
       this.markRebalanceSuccess(effectiveTrigger.reason, "slipstream");
-      this.finalizeActiveAction("recenter", effectiveTrigger.reason, forceRebalance ? { requestedAt: forceRequestedAt } : {});
+      this.finalizeActiveAction("recenter", effectiveTrigger.reason, {
+        ...preRecenterMeta,
+        ...(forceRebalance ? { requestedAt: forceRequestedAt } : {}),
+      });
     } catch (err) {
       if (forceRebalance && !this.state.position?.tokenId) {
         // Force-rebalance can close first and then fail on re-open; allow one quick retry.
@@ -3538,6 +3642,7 @@ class Uc6Bot {
     const stats7d = this.summarizeEvents(events7d);
     const stats30d = this.summarizeEvents(events30d);
     const statsAll = this.summarizeEvents(eventsAll);
+    const bandPerformance = this.summarizeBandPerformance(eventsAll);
 
     const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
     const avgCapitalToday = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
@@ -3667,6 +3772,9 @@ class Uc6Bot {
         aprToday,
         apr7d,
         apr30d,
+      },
+      analytics: {
+        bandPerformance,
       },
       ops: {
         rebalancesToday: this.state.rebalancesToday,
