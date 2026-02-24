@@ -3306,29 +3306,58 @@ class Uc6Bot {
 
       await this.approveIfNeeded(token0, npm, amount0Desired);
       await this.approveIfNeeded(token1, npm, amount1Desired);
-      const stfHaircuts = [10000n, 9990n, 9950n, 9900n, 9800n, 9500n, 9000n];
+      const isIncreaseLiquidityStfError = (err) => {
+        const msg = err instanceof Error ? err.message : String(err || "");
+        return msg.includes('function "increaseLiquidity" reverted') && /\bSTF\b/.test(msg);
+      };
+      // Try harder inside a single top-up cycle before giving up. This reduces the
+      // common pattern: swap succeeds -> increase fails (STF) -> next loop swaps again.
+      const stfHaircutRounds = [
+        [10000n, 9990n, 9950n, 9900n, 9800n, 9500n, 9000n],
+        [8500n, 8000n, 7500n, 7000n, 6500n, 6000n, 5500n, 5000n, 4500n, 4000n, 3500n, 3000n, 2500n, 2000n, 1500n, 1000n],
+      ];
       let increaseOk = false;
       let increaseLastErr = null;
-      for (const haircut of stfHaircuts) {
-        const a0 = haircut === 10000n ? amount0Desired : (amount0Desired * haircut) / 10000n;
-        const a1 = haircut === 10000n ? amount1Desired : (amount1Desired * haircut) / 10000n;
-        if (a0 <= 0n || a1 <= 0n) continue;
-        try {
-          await this.increaseLiquidityPosition({
-            npmAddress: npm,
-            tokenId,
-            amount0Desired: a0,
-            amount1Desired: a1,
-          });
-          increaseOk = true;
-          break;
-        } catch (err) {
-          increaseLastErr = err;
-          const msg = err instanceof Error ? err.message : String(err || "");
-          if (!(msg.includes('function "increaseLiquidity" reverted') && /\bSTF\b/.test(msg))) {
-            throw err;
+      let roundAmount0Desired = amount0Desired;
+      let roundAmount1Desired = amount1Desired;
+      for (let roundIdx = 0; roundIdx < stfHaircutRounds.length && !increaseOk; roundIdx += 1) {
+        const haircuts = stfHaircutRounds[roundIdx];
+        for (const haircut of haircuts) {
+          const a0 = haircut === 10000n ? roundAmount0Desired : (roundAmount0Desired * haircut) / 10000n;
+          const a1 = haircut === 10000n ? roundAmount1Desired : (roundAmount1Desired * haircut) / 10000n;
+          if (a0 <= 0n || a1 <= 0n) continue;
+          try {
+            await this.increaseLiquidityPosition({
+              npmAddress: npm,
+              tokenId,
+              amount0Desired: a0,
+              amount1Desired: a1,
+            });
+            increaseOk = true;
+            break;
+          } catch (err) {
+            increaseLastErr = err;
+            if (!isIncreaseLiquidityStfError(err)) {
+              throw err;
+            }
           }
         }
+        if (increaseOk) break;
+        if (!isIncreaseLiquidityStfError(increaseLastErr)) break;
+        if (roundIdx + 1 >= stfHaircutRounds.length) break;
+
+        // Re-read once and re-size from actual balances (no new swap) before the deeper
+        // haircut ladder. This often turns "error -> next-loop topup" into one cycle.
+        const usdcRetryBalance = await this.readTokenBalance(this.usdc);
+        const wethRetryBalance = await this.readTokenBalance(this.weth);
+        const usdcRetrySpendable = usdcRetryBalance > keepReserveTopUpRaw ? usdcRetryBalance - keepReserveTopUpRaw : 0n;
+        const usdcRetryCap = usdcRetrySpendable < maxDeployRaw ? usdcRetrySpendable : maxDeployRaw;
+        const wethRetryCap = wethRetryBalance;
+        roundAmount0Desired = sameAddress(token0, this.usdc) ? usdcRetryCap : wethRetryCap;
+        roundAmount1Desired = sameAddress(token1, this.usdc) ? usdcRetryCap : wethRetryCap;
+        // Stronger base haircut for the second round; the ladder continues from there.
+        if (roundAmount0Desired > 10n) roundAmount0Desired = (roundAmount0Desired * 9900n) / 10000n;
+        if (roundAmount1Desired > 10n) roundAmount1Desired = (roundAmount1Desired * 9900n) / 10000n;
       }
       if (!increaseOk) {
         throw (increaseLastErr || new Error("increaseLiquidity failed after STF retries"));
