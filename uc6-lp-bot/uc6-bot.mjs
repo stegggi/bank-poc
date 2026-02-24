@@ -34,6 +34,12 @@ const USDC_RESERVE_GUARD_RAW = BigInt(250000); // 0.25 USDC safety buffer above 
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
+  httpAnkrUrl: process.env.UC6_HTTP_ANKR_URL || "",
+  httpAlchemyUrl: process.env.UC6_HTTP_ALCHEMY_URL || "",
+  httpPublicUrl: process.env.UC6_HTTP_PUBLIC_URL || "https://mainnet.base.org",
+  wsAnkrUrl: process.env.UC6_WS_ANKR_URL || "",
+  wsPublicUrl: process.env.UC6_WS_PUBLIC_URL || "wss://mainnet.base.org",
+  wsAlchemyUrl: process.env.UC6_WS_ALCHEMY_URL || "",
   privateKey: process.env.UC6_PRIVATE_KEY || "",
   adminToken: process.env.UC6_ADMIN_TOKEN || "",
   ownerAddress: process.env.UC6_OWNER_ADDRESS || "",
@@ -478,6 +484,13 @@ const DEFAULT_SETTINGS = {
   maxRebalancesPerDay: 20,
   slippageBps: 30,
   pollIntervalMs: 2000,
+  wsEnabled: true,
+  slot0RefreshEverySec: 12,
+  balancesRefreshEverySec: 60,
+  positionRefreshEverySec: 60,
+  inventoryRefreshEverySec: 300,
+  collectableRefreshEverySec: 1800,
+  dashboardRecommendedPollMs: 12000,
   maxDeployUsdc: 50_000,
   maxInitialMintUsdc: 50,
   minTopUpUsd: 20,
@@ -559,6 +572,37 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     maxRebalancesPerDay: clamp(Math.round(toNumber(src.maxRebalancesPerDay, baseSettings.maxRebalancesPerDay)), 1, 500),
     slippageBps: clamp(Math.round(toNumber(src.slippageBps, baseSettings.slippageBps)), 1, 2_000),
     pollIntervalMs: clamp(Math.round(toNumber(src.pollIntervalMs, baseSettings.pollIntervalMs)), 500, 60_000),
+    wsEnabled: toBool(src.wsEnabled, baseSettings.wsEnabled),
+    slot0RefreshEverySec: clamp(
+      Math.round(toNumber(src.slot0RefreshEverySec, baseSettings.slot0RefreshEverySec)),
+      2,
+      3600
+    ),
+    balancesRefreshEverySec: clamp(
+      Math.round(toNumber(src.balancesRefreshEverySec, baseSettings.balancesRefreshEverySec)),
+      2,
+      3600
+    ),
+    positionRefreshEverySec: clamp(
+      Math.round(toNumber(src.positionRefreshEverySec, baseSettings.positionRefreshEverySec)),
+      2,
+      3600
+    ),
+    inventoryRefreshEverySec: clamp(
+      Math.round(toNumber(src.inventoryRefreshEverySec, baseSettings.inventoryRefreshEverySec)),
+      5,
+      86400
+    ),
+    collectableRefreshEverySec: clamp(
+      Math.round(toNumber(src.collectableRefreshEverySec, baseSettings.collectableRefreshEverySec)),
+      10,
+      86400
+    ),
+    dashboardRecommendedPollMs: clamp(
+      Math.round(toNumber(src.dashboardRecommendedPollMs, baseSettings.dashboardRecommendedPollMs)),
+      1000,
+      60000
+    ),
     maxDeployUsdc: clamp(toNumber(src.maxDeployUsdc, baseSettings.maxDeployUsdc), 0, 5_000_000),
     maxInitialMintUsdc: clamp(
       toNumber(src.maxInitialMintUsdc, baseSettings.maxInitialMintUsdc),
@@ -620,6 +664,7 @@ function defaultState(accountAddress) {
       wallet: null,
       collectableNow: { usdc: 0, weth: 0, usd: 0, isEstimated: true },
       positionInventory: null,
+      refresh: {},
     },
     events: [],
     ledgerEvents: [],
@@ -831,9 +876,260 @@ class SimpleRateLimiter {
   }
 }
 
+function isRpc429Error(err) {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return msg.includes("Status: 429") || /Too Many Requests/i.test(msg);
+}
+
+function withTimeout(promise, ms, label = "rpc call") {
+  if (!ms || ms <= 0) return promise;
+  let timer = null;
+  const timeoutPromise = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+  });
+  return Promise.race([promise, timeoutPromise]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
+class HttpProviderPool {
+  constructor({ account, chain, providers }) {
+    this.account = account;
+    this.chain = chain;
+    this.providers = providers
+      .filter((p) => p && p.url)
+      .map((p, idx) => ({
+        name: p.name,
+        url: p.url,
+        priority: idx,
+        publicClient: createPublicClient({ chain, transport: viemHttp(p.url, { timeout: 12_000 }) }),
+        walletClient: createWalletClient({ account, chain, transport: viemHttp(p.url, { timeout: 20_000 }) }),
+        failCount: 0,
+        successStreak: 0,
+        cooldownUntilMs: 0,
+        lastError: null,
+        last429AtIso: null,
+      }));
+    this.activeIndex = 0;
+    this.failThreshold = 2;
+    this.cooldownMs = 120_000;
+    this.promoteSuccessThreshold = 5;
+  }
+
+  hasProviders() {
+    return Array.isArray(this.providers) && this.providers.length > 0;
+  }
+
+  getActive() {
+    if (!this.hasProviders()) return null;
+    return this.providers[this.activeIndex] || this.providers[0];
+  }
+
+  snapshotStatus() {
+    const now = Date.now();
+    const active = this.getActive();
+    return {
+      active: active ? active.name : null,
+      providers: this.providers.map((p) => ({
+        name: p.name,
+        active: active ? p.name === active.name : false,
+        cooldownRemainingSec: p.cooldownUntilMs > now ? Math.ceil((p.cooldownUntilMs - now) / 1000) : 0,
+        failCount: p.failCount,
+        successStreak: p.successStreak,
+        lastError: p.lastError,
+        last429AtIso: p.last429AtIso,
+      })),
+    };
+  }
+
+  markSuccess(provider) {
+    if (!provider) return;
+    provider.failCount = 0;
+    provider.successStreak += 1;
+    provider.lastError = null;
+    if (provider.priority === 0) return;
+    const primary = this.providers[0];
+    if (provider.successStreak >= this.promoteSuccessThreshold && primary && primary.cooldownUntilMs <= Date.now()) {
+      this.activeIndex = 0;
+    }
+  }
+
+  markFailure(provider, err) {
+    if (!provider) return;
+    provider.failCount += 1;
+    provider.successStreak = 0;
+    provider.lastError = err instanceof Error ? err.message : String(err || "unknown");
+    if (isRpc429Error(err)) provider.last429AtIso = nowIso();
+    if (provider.failCount >= this.failThreshold) {
+      provider.cooldownUntilMs = Date.now() + this.cooldownMs;
+    }
+  }
+
+  chooseIndexes() {
+    const count = this.providers.length;
+    const now = Date.now();
+    const out = [];
+    for (let offset = 0; offset < count; offset += 1) {
+      const idx = (this.activeIndex + offset) % count;
+      const p = this.providers[idx];
+      if (p.cooldownUntilMs > now && offset !== count - 1) continue;
+      out.push(idx);
+    }
+    if (out.length === 0 && count > 0) out.push(this.activeIndex);
+    return out;
+  }
+
+  async invoke(kind, fn, { timeoutMs = 8_000, retries = 1 } = {}) {
+    if (!this.hasProviders()) throw new Error("No HTTP RPC providers configured");
+    let lastErr = null;
+    const indexes = this.chooseIndexes();
+    for (const idx of indexes) {
+      const provider = this.providers[idx];
+      const attempts = Math.max(1, retries);
+      for (let i = 0; i < attempts; i += 1) {
+        try {
+          const res = await withTimeout(fn(provider), timeoutMs, `${kind} via ${provider.name}`);
+          this.activeIndex = idx;
+          this.markSuccess(provider);
+          return res;
+        } catch (err) {
+          lastErr = err;
+          this.markFailure(provider, err);
+          if (i + 1 < attempts) {
+            await sleep(150 + Math.floor(Math.random() * 250));
+          }
+        }
+      }
+    }
+    throw lastErr || new Error(`${kind} failed on all HTTP providers`);
+  }
+}
+
+class WsHeadWatcher {
+  constructor(providers = []) {
+    this.providers = providers.filter((p) => p && p.url);
+    this.activeIndex = 0;
+    this.ws = null;
+    this.connected = false;
+    this.subscriptionId = null;
+    this.nextId = 1;
+    this.reconnectTimer = null;
+    this.stop = false;
+    this.lastHeadBlock = null;
+    this.lastHeadAtIso = null;
+    this.headSeen = false;
+    this.lastError = null;
+  }
+
+  status() {
+    const active = this.providers[this.activeIndex] || null;
+    return {
+      enabled: this.providers.length > 0,
+      connected: this.connected,
+      active: active?.name || null,
+      lastHeadBlock: this.lastHeadBlock,
+      lastHeadAtIso: this.lastHeadAtIso,
+      lastError: this.lastError,
+    };
+  }
+
+  consumeHeadSeen() {
+    const seen = this.headSeen;
+    this.headSeen = false;
+    return seen;
+  }
+
+  async start() {
+    this.stop = false;
+    if (this.providers.length === 0) return;
+    this.connect();
+  }
+
+  async shutdown() {
+    this.stop = true;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = null;
+    try {
+      this.ws?.close?.();
+    } catch {}
+    this.ws = null;
+    this.connected = false;
+    this.subscriptionId = null;
+  }
+
+  scheduleReconnect(delayMs = 2000) {
+    if (this.stop) return;
+    if (this.reconnectTimer) clearTimeout(this.reconnectTimer);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
+      this.activeIndex = this.providers.length > 0 ? (this.activeIndex + 1) % this.providers.length : 0;
+      this.connect();
+    }, delayMs);
+  }
+
+  connect() {
+    if (this.stop || this.providers.length === 0) return;
+    const provider = this.providers[this.activeIndex];
+    if (typeof WebSocket !== "function") {
+      this.lastError = "WebSocket API not available in runtime";
+      return;
+    }
+    try {
+      this.ws = new WebSocket(provider.url);
+    } catch (err) {
+      this.lastError = err instanceof Error ? err.message : String(err || "ws connect failed");
+      this.scheduleReconnect(3000);
+      return;
+    }
+    const ws = this.ws;
+    ws.onopen = () => {
+      this.connected = true;
+      this.lastError = null;
+      const req = {
+        jsonrpc: "2.0",
+        id: this.nextId++,
+        method: "eth_subscribe",
+        params: ["newHeads"],
+      };
+      ws.send(JSON.stringify(req));
+    };
+    ws.onmessage = (ev) => {
+      try {
+        const msg = JSON.parse(typeof ev.data === "string" ? ev.data : "");
+        if (msg?.id && typeof msg.result === "string") {
+          this.subscriptionId = msg.result;
+          return;
+        }
+        if (msg?.method === "eth_subscription" && msg?.params?.subscription === this.subscriptionId) {
+          const head = msg.params.result || {};
+          const blockHex = head.number;
+          if (typeof blockHex === "string") {
+            const n = Number.parseInt(blockHex, 16);
+            if (Number.isFinite(n)) this.lastHeadBlock = n;
+          }
+          this.lastHeadAtIso = nowIso();
+          this.headSeen = true;
+        }
+      } catch (err) {
+        this.lastError = err instanceof Error ? err.message : String(err || "ws message parse error");
+      }
+    };
+    ws.onerror = () => {
+      this.lastError = `ws error (${provider.name})`;
+    };
+    ws.onclose = () => {
+      this.connected = false;
+      this.subscriptionId = null;
+      if (this.ws === ws) this.ws = null;
+      this.scheduleReconnect(3000);
+    };
+  }
+}
+
 class Uc6Bot {
   constructor() {
-    if (!ENV.rpcUrl) throw new Error("Missing UC6_RPC_URL");
+    const httpPrimaryUrl = ENV.httpAnkrUrl || ENV.rpcUrl || ENV.httpAlchemyUrl || ENV.httpPublicUrl;
+    if (!httpPrimaryUrl) throw new Error("Missing UC6 HTTP RPC URL (UC6_HTTP_ANKR_URL or UC6_RPC_URL)");
     if (!ENV.privateKey) throw new Error("Missing UC6_PRIVATE_KEY");
     if (!ENV.adminToken) throw new Error("Missing UC6_ADMIN_TOKEN");
     if (!ENV.ownerAddress) throw new Error("Missing UC6_OWNER_ADDRESS");
@@ -852,15 +1148,40 @@ class Uc6Bot {
 
     const pk = ENV.privateKey.startsWith("0x") ? ENV.privateKey : `0x${ENV.privateKey}`;
     this.account = privateKeyToAccount(pk);
-    this.publicClient = createPublicClient({
-      chain: base,
-      transport: viemHttp(ENV.rpcUrl, { timeout: 12_000 }),
-    });
-    this.walletClient = createWalletClient({
+    this.httpPool = new HttpProviderPool({
       account: this.account,
       chain: base,
-      transport: viemHttp(ENV.rpcUrl, { timeout: 20_000 }),
+      providers: [
+        { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
+        { name: "alchemy_http", url: ENV.httpAlchemyUrl || ENV.rpcUrl || "" },
+        { name: "base_public_http", url: ENV.httpPublicUrl || "" },
+      ],
     });
+    this.publicClient = {
+      readContract: (args) => this.httpPool.invoke("readContract", (p) => p.publicClient.readContract(args), { timeoutMs: 8_000, retries: 2 }),
+      simulateContract: (args) =>
+        this.httpPool.invoke("simulateContract", (p) => p.publicClient.simulateContract(args), { timeoutMs: 12_000, retries: 2 }),
+      getBalance: (args) => this.httpPool.invoke("getBalance", (p) => p.publicClient.getBalance(args), { timeoutMs: 8_000, retries: 2 }),
+      getTransaction: (args) =>
+        this.httpPool.invoke("getTransaction", (p) => p.publicClient.getTransaction(args), { timeoutMs: 8_000, retries: 2 }),
+      getTransactionReceipt: (args) =>
+        this.httpPool.invoke("getTransactionReceipt", (p) => p.publicClient.getTransactionReceipt(args), { timeoutMs: 8_000, retries: 2 }),
+      waitForTransactionReceipt: (args) =>
+        this.httpPool.invoke(
+          "waitForTransactionReceipt",
+          (p) => p.publicClient.waitForTransactionReceipt(args),
+          { timeoutMs: 45_000, retries: 1 }
+        ),
+      getChainId: () => this.httpPool.invoke("getChainId", (p) => p.publicClient.getChainId(), { timeoutMs: 5_000, retries: 1 }),
+    };
+    this.walletClient = {
+      writeContract: (args) =>
+        this.httpPool.invoke("writeContract", (p) => p.walletClient.writeContract(args), { timeoutMs: 20_000, retries: 1 }),
+    };
+    this.wsHeadWatcher = new WsHeadWatcher([
+      { name: "base_public_ws", url: ENV.wsPublicUrl || "" },
+      { name: "alchemy_ws", url: ENV.wsAlchemyUrl || "" },
+    ]);
 
     this.settings = { ...DEFAULT_SETTINGS };
     this.state = defaultState(this.account.address);
@@ -873,6 +1194,15 @@ class Uc6Bot {
     this.ownerNonceUsed = new Map();
     this.ownerRateLimiter = new SimpleRateLimiter(20, 60_000);
     this.server = null;
+    this.poolMetaCache = new Map();
+    this.refreshClock = {
+      slot0Ms: 0,
+      balancesMs: 0,
+      positionMs: 0,
+      inventoryMs: 0,
+      collectableMs: 0,
+      heavyMs: 0,
+    };
   }
 
   async init() {
@@ -892,7 +1222,8 @@ class Uc6Bot {
     }
 
     try {
-      await this.refreshSnapshots();
+      if (this.settings.wsEnabled) await this.wsHeadWatcher.start();
+      await this.refreshSnapshots({ forceSlot0: true, forceBalances: true, headSeen: true });
       await this.reconcilePositionFromChain();
     } catch (err) {
       this.setLastError(err);
@@ -970,6 +1301,28 @@ class Uc6Bot {
   async persistState() {
     this.state.updatedAt = nowIso();
     await writeJsonAtomic(STATE_PATH, this.state);
+  }
+
+  ensureLatestRefreshMeta() {
+    if (!this.state.latest) this.state.latest = {};
+    if (!this.state.latest.refresh || typeof this.state.latest.refresh !== "object") {
+      this.state.latest.refresh = {};
+    }
+    return this.state.latest.refresh;
+  }
+
+  markRefreshStamp(clockKey, latestField) {
+    const ts = Date.now();
+    this.refreshClock[clockKey] = ts;
+    this.ensureLatestRefreshMeta()[latestField] = nowIso();
+  }
+
+  isTtlDue(clockKey, everySec, { force = false } = {}) {
+    if (force) return true;
+    const ttlMs = Math.max(1, Number(everySec || 0)) * 1000;
+    const last = Number(this.refreshClock[clockKey] || 0);
+    if (!last) return true;
+    return Date.now() - last >= ttlMs;
   }
 
   resetRangeStatsSampler(nowMs = Date.now()) {
@@ -1524,23 +1877,36 @@ class Uc6Bot {
     return { allowed: true, reason: "ok", remainingSec: 0, until: untilIso };
   }
 
-  async getPoolSnapshot(poolAddress, venue) {
-    const [slot0, token0, token1, tickSpacing, fee] = await Promise.all([
-      this.readSlot0(poolAddress),
-      this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "token0" }),
-      this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "token1" }),
-      this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "tickSpacing" }),
-      this.publicClient
-        .readContract({ address: poolAddress, abi: POOL_ABI, functionName: "fee" })
-        .catch(() => 3000),
+  async getPoolMetaCached(poolAddress) {
+    const key = getAddress(poolAddress);
+    const cached = this.poolMetaCache.get(key);
+    if (cached) return cached;
+    const [token0, token1, tickSpacing, fee] = await Promise.all([
+      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token0" }),
+      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token1" }),
+      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "tickSpacing" }),
+      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "fee" }).catch(() => 3000),
     ]);
+    const meta = {
+      token0: getAddress(token0),
+      token1: getAddress(token1),
+      tickSpacing: Number(tickSpacing),
+      fee: Number(fee),
+      cachedAtIso: nowIso(),
+    };
+    this.poolMetaCache.set(key, meta);
+    return meta;
+  }
+
+  async getPoolSnapshot(poolAddress, venue) {
+    const [slot0, meta] = await Promise.all([this.readSlot0(poolAddress), this.getPoolMetaCached(poolAddress)]);
 
     const sqrtPriceX96 = slot0.sqrtPriceX96 ?? slot0[0];
     const tick = Number(slot0.tick ?? slot0[1]);
-    const token0Addr = getAddress(token0);
-    const token1Addr = getAddress(token1);
-    const spacing = Number(tickSpacing);
-    const feeTier = Number(fee);
+    const token0Addr = meta.token0;
+    const token1Addr = meta.token1;
+    const spacing = Number(meta.tickSpacing);
+    const feeTier = Number(meta.fee);
 
     const priceUsdcPerWeth = this.toUsdcPerWethPrice(sqrtPriceX96, token0Addr, token1Addr);
 
@@ -1599,22 +1965,33 @@ class Uc6Bot {
     return null;
   }
 
-  async refreshSnapshots() {
-    const [primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw] = await Promise.all([
+  async refreshSnapshots(options = {}) {
+    return this.refreshSnapshotsSelective(options);
+  }
+
+  async refreshPoolSnapshotsLight() {
+    const [primary, fallback] = await Promise.all([
       this.getPoolSnapshot(this.slipstreamPool, "slipstream"),
       this.getPoolSnapshot(this.uniswapPool, "uniswapv3").catch(() => null),
+    ]);
+    this.state.latest.primary = primary;
+    this.state.latest.fallback = fallback;
+    this.markRefreshStamp("slot0Ms", "slot0AtIso");
+    return { primary, fallback };
+  }
+
+  async refreshWalletBalancesHeavy() {
+    const [usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw] = await Promise.all([
       this.readTokenBalance(this.usdc),
       this.readTokenBalance(this.weth),
       this.publicClient.getBalance({ address: this.account.address }),
     ]);
-
+    const primary = this.state.latest?.primary || null;
+    const fallback = this.state.latest?.fallback || null;
     const spot = this.toNumberOrZero(primary?.priceUsdcPerWeth) || this.toNumberOrZero(fallback?.priceUsdcPerWeth);
     const usdcValue = Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS));
     const wethValue = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)) * spot;
     const ethValue = Number(formatUnits(ethBalanceRaw, 18)) * spot;
-
-    this.state.latest.primary = primary;
-    this.state.latest.fallback = fallback;
     this.state.latest.wallet = {
       usdc: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
       weth: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
@@ -1627,8 +2004,80 @@ class Uc6Bot {
       },
       updatedAt: nowIso(),
     };
+    this.markRefreshStamp("balancesMs", "balancesAtIso");
+    return { usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
+  }
 
+  async refreshSnapshotsSelective({ forceSlot0 = false, forceBalances = false, headSeen = false } = {}) {
+    const now = Date.now();
+    const slot0TtlMs = Math.max(1, Number(this.settings.slot0RefreshEverySec || 12)) * 1000;
+    const needSlot0 =
+      forceSlot0 ||
+      !this.state.latest?.primary ||
+      (now - this.refreshClock.slot0Ms >= slot0TtlMs &&
+        (!this.settings.wsEnabled || headSeen || now - this.refreshClock.slot0Ms >= slot0TtlMs * 3));
+    const needBalances =
+      forceBalances ||
+      !this.state.latest?.wallet ||
+      now - this.refreshClock.balancesMs >= Number(this.settings.balancesRefreshEverySec || 60) * 1000;
+
+    let primary = this.state.latest?.primary || null;
+    let fallback = this.state.latest?.fallback || null;
+    let usdcBalanceRaw = null;
+    let wethBalanceRaw = null;
+    let ethBalanceRaw = null;
+
+    if (needSlot0) {
+      const out = await this.refreshPoolSnapshotsLight();
+      primary = out.primary;
+      fallback = out.fallback;
+    }
+    if (needBalances) {
+      const out = await this.refreshWalletBalancesHeavy();
+      usdcBalanceRaw = out.usdcBalanceRaw;
+      wethBalanceRaw = out.wethBalanceRaw;
+      ethBalanceRaw = out.ethBalanceRaw;
+    }
     return { primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
+  }
+
+  async refreshCollectableNowMaybe({ force = false } = {}) {
+    const tokenId = this.state.position?.tokenId;
+    if (!tokenId) {
+      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+      this.markRefreshStamp("collectableMs", "collectableAtIso");
+      return this.state.latest.collectableNow;
+    }
+    if (!this.isTtlDue("collectableMs", this.settings.collectableRefreshEverySec, { force })) {
+      return this.state.latest?.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    }
+    try {
+      this.state.latest.collectableNow = await this.collectableNowSnapshot();
+    } catch {
+      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    } finally {
+      this.markRefreshStamp("collectableMs", "collectableAtIso");
+    }
+    return this.state.latest.collectableNow;
+  }
+
+  async maybeRefreshPositionFromChain({ force = false } = {}) {
+    if (!this.state.position?.tokenId) return;
+    if (!this.isTtlDue("positionMs", this.settings.positionRefreshEverySec, { force })) return;
+    try {
+      await this.reconcilePositionFromChain();
+    } finally {
+      this.markRefreshStamp("positionMs", "positionAtIso");
+    }
+  }
+
+  async maybeRefreshPositionInventory({ force = false } = {}) {
+    if (!this.isTtlDue("inventoryMs", this.settings.inventoryRefreshEverySec, { force })) return;
+    try {
+      await this.refreshOwnedSlipstreamPositionInventory();
+    } finally {
+      this.markRefreshStamp("inventoryMs", "inventoryAtIso");
+    }
   }
 
   toNumberOrZero(v) {
@@ -3257,6 +3706,7 @@ class Uc6Bot {
     if (this.settings.compoundMode !== "threshold_harvest") return false;
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return false;
+    await this.refreshCollectableNowMaybe({ force: false });
     const collectable = this.state.latest?.collectableNow;
     const collectableUsd = Number(collectable?.usd || 0);
     if (collectableUsd < Number(this.settings.harvestThresholdUsd || 0)) return false;
@@ -3550,6 +4000,10 @@ class Uc6Bot {
       : recoveryRetry
         ? { ...trigger, trigger: true, reason: "recovery_retry" }
       : trigger;
+    if (effectiveTrigger.trigger && effectiveTrigger.reason === "no_position" && (forceRebalance || recoveryRetry || gate.allowed)) {
+      await this.maybeRefreshPositionInventory({ force: true });
+      this.enforceSinglePositionInvariant();
+    }
     const activeSlipstreamPositions = Number(this.state.latest?.positionInventory?.activeCount || 0);
     if (activeSlipstreamPositions > 1) {
       const reason = `multiple_active_positions ${activeSlipstreamPositions}`;
@@ -3672,20 +4126,17 @@ class Uc6Bot {
   async loopOnce() {
     this.ensureDailyCounter();
     await this.loadSettings(false);
-    const snapshots = await this.refreshSnapshots();
-    await this.reconcilePositionFromChain();
-    await this.refreshOwnedSlipstreamPositionInventory();
+    const headSeen = this.settings.wsEnabled ? this.wsHeadWatcher.consumeHeadSeen() : false;
+    const snapshots = await this.refreshSnapshots({ headSeen });
+    await this.maybeRefreshPositionFromChain();
+    await this.maybeRefreshPositionInventory();
     this.enforceSinglePositionInvariant();
     try {
       await this.repairLedgerAccounting();
     } catch (err) {
       this.setLastError(err);
     }
-    try {
-      this.state.latest.collectableNow = await this.collectableNowSnapshot();
-    } catch {
-      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
-    }
+    await this.refreshCollectableNowMaybe();
 
     const tokenId = this.state.position?.tokenId;
     if (tokenId && this.state.position?.tickLower != null && this.state.position?.tickUpper != null) {
@@ -3827,6 +4278,13 @@ class Uc6Bot {
         maxRebalancesPerDay: this.settings.maxRebalancesPerDay,
         slippageBps: this.settings.slippageBps,
         pollIntervalMs: this.settings.pollIntervalMs,
+        wsEnabled: this.settings.wsEnabled,
+        slot0RefreshEverySec: this.settings.slot0RefreshEverySec,
+        balancesRefreshEverySec: this.settings.balancesRefreshEverySec,
+        positionRefreshEverySec: this.settings.positionRefreshEverySec,
+        inventoryRefreshEverySec: this.settings.inventoryRefreshEverySec,
+        collectableRefreshEverySec: this.settings.collectableRefreshEverySec,
+        dashboardRecommendedPollMs: this.settings.dashboardRecommendedPollMs,
         maxDeployUsdc: this.settings.maxDeployUsdc,
         maxInitialMintUsdc: this.settings.maxInitialMintUsdc,
         minTopUpUsd: this.settings.minTopUpUsd,
@@ -3912,6 +4370,11 @@ class Uc6Bot {
       analytics: {
         bandPerformance,
       },
+      providers: {
+        http: this.httpPool.snapshotStatus(),
+        ws: this.wsHeadWatcher.status(),
+      },
+      refresh: latest.refresh || {},
       ops: {
         rebalancesToday: this.state.rebalancesToday,
         rebalances24h: stats24h.rebalances,
@@ -4251,6 +4714,7 @@ class Uc6Bot {
 
   async stop() {
     this.stopRequested = true;
+    await this.wsHeadWatcher.shutdown().catch(() => {});
     if (this.server) {
       await new Promise((resolve) => this.server.close(() => resolve()));
     }

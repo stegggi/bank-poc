@@ -5,7 +5,7 @@ import NavBar from "../components/NavBar";
 const BASE_CHAIN_ID_HEX = "0x2105";
 const BASE_CHAIN_ID_DEC = 8453;
 const OWNER_ADDRESS = String(process.env.NEXT_PUBLIC_UC6_OWNER_ADDRESS || "");
-const STATUS_POLL_MS = 3_000;
+const DEFAULT_STATUS_POLL_MS = 12_000;
 
 type EthereumProvider = Eip1193Provider & {
   request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -27,6 +27,13 @@ type Uc6DraftSettings = {
   maxRebalancesPerDay: number;
   slippageBps: number;
   pollIntervalMs: number;
+  wsEnabled: boolean;
+  slot0RefreshEverySec: number;
+  balancesRefreshEverySec: number;
+  positionRefreshEverySec: number;
+  inventoryRefreshEverySec: number;
+  collectableRefreshEverySec: number;
+  dashboardRecommendedPollMs: number;
   maxDeployUsdc: number;
   maxInitialMintUsdc: number;
   minTopUpUsd: number;
@@ -50,6 +57,13 @@ type OwnerPayload = {
   maxRebalancesPerDay: number;
   slippageBps: number;
   pollIntervalMs: number;
+  wsEnabled: boolean;
+  slot0RefreshEverySec: number;
+  balancesRefreshEverySec: number;
+  positionRefreshEverySec: number;
+  inventoryRefreshEverySec: number;
+  collectableRefreshEverySec: number;
+  dashboardRecommendedPollMs: number;
   maxDeployUsdc: number;
   maxInitialMintUsdc: number;
   minTopUpUsd: number;
@@ -90,6 +104,13 @@ type Uc6Status = {
     maxRebalancesPerDay?: number;
     slippageBps?: number;
     pollIntervalMs?: number;
+    wsEnabled?: boolean;
+    slot0RefreshEverySec?: number;
+    balancesRefreshEverySec?: number;
+    positionRefreshEverySec?: number;
+    inventoryRefreshEverySec?: number;
+    collectableRefreshEverySec?: number;
+    dashboardRecommendedPollMs?: number;
     maxDeployUsdc?: number;
     maxInitialMintUsdc?: number;
     minTopUpUsd?: number;
@@ -177,6 +198,35 @@ type Uc6Status = {
       totalNetUsd?: number;
     }>;
   };
+  providers?: {
+    http?: {
+      active?: string | null;
+      providers?: Array<{
+        name?: string;
+        active?: boolean;
+        cooldownRemainingSec?: number;
+        failCount?: number;
+        successStreak?: number;
+        lastError?: string | null;
+        last429AtIso?: string | null;
+      }>;
+    };
+    ws?: {
+      enabled?: boolean;
+      connected?: boolean;
+      active?: string | null;
+      lastHeadBlock?: number | null;
+      lastHeadAtIso?: string | null;
+      lastError?: string | null;
+    };
+  };
+  refresh?: {
+    slot0AtIso?: string;
+    balancesAtIso?: string;
+    positionAtIso?: string;
+    inventoryAtIso?: string;
+    collectableAtIso?: string;
+  };
   ops?: {
     rebalancesToday?: number;
     rebalances24h?: number;
@@ -238,6 +288,13 @@ function defaultDraft(): Uc6DraftSettings {
     maxRebalancesPerDay: 20,
     slippageBps: 30,
     pollIntervalMs: 2000,
+    wsEnabled: true,
+    slot0RefreshEverySec: 12,
+    balancesRefreshEverySec: 60,
+    positionRefreshEverySec: 60,
+    inventoryRefreshEverySec: 300,
+    collectableRefreshEverySec: 1800,
+    dashboardRecommendedPollMs: 12000,
     maxDeployUsdc: 50_000,
     maxInitialMintUsdc: 50,
     minTopUpUsd: 20,
@@ -277,6 +334,13 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     maxRebalancesPerDay: n(settings.maxRebalancesPerDay, d.maxRebalancesPerDay),
     slippageBps: n(settings.slippageBps, d.slippageBps),
     pollIntervalMs: n(settings.pollIntervalMs, d.pollIntervalMs),
+    wsEnabled: Boolean(settings.wsEnabled ?? d.wsEnabled),
+    slot0RefreshEverySec: n(settings.slot0RefreshEverySec, d.slot0RefreshEverySec),
+    balancesRefreshEverySec: n(settings.balancesRefreshEverySec, d.balancesRefreshEverySec),
+    positionRefreshEverySec: n(settings.positionRefreshEverySec, d.positionRefreshEverySec),
+    inventoryRefreshEverySec: n(settings.inventoryRefreshEverySec, d.inventoryRefreshEverySec),
+    collectableRefreshEverySec: n(settings.collectableRefreshEverySec, d.collectableRefreshEverySec),
+    dashboardRecommendedPollMs: n(settings.dashboardRecommendedPollMs, d.dashboardRecommendedPollMs),
     maxDeployUsdc: n(settings.maxDeployUsdc, d.maxDeployUsdc),
     maxInitialMintUsdc: n(settings.maxInitialMintUsdc, d.maxInitialMintUsdc),
     minTopUpUsd: n(settings.minTopUpUsd, d.minTopUpUsd),
@@ -302,6 +366,13 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
     maxRebalancesPerDay: draft.maxRebalancesPerDay,
     slippageBps: draft.slippageBps,
     pollIntervalMs: draft.pollIntervalMs,
+    wsEnabled: draft.wsEnabled,
+    slot0RefreshEverySec: draft.slot0RefreshEverySec,
+    balancesRefreshEverySec: draft.balancesRefreshEverySec,
+    positionRefreshEverySec: draft.positionRefreshEverySec,
+    inventoryRefreshEverySec: draft.inventoryRefreshEverySec,
+    collectableRefreshEverySec: draft.collectableRefreshEverySec,
+    dashboardRecommendedPollMs: draft.dashboardRecommendedPollMs,
     maxDeployUsdc: draft.maxDeployUsdc,
     maxInitialMintUsdc: draft.maxInitialMintUsdc,
     minTopUpUsd: draft.minTopUpUsd,
@@ -409,6 +480,11 @@ export default function Uc6Page() {
     return walletAddress.toLowerCase() === OWNER_ADDRESS.toLowerCase();
   }, [walletAddress]);
 
+  const statusPollMs = useMemo(() => {
+    const ms = n(status?.settings?.dashboardRecommendedPollMs, DEFAULT_STATUS_POLL_MS);
+    return Math.max(2_000, Math.min(60_000, ms));
+  }, [status?.settings?.dashboardRecommendedPollMs]);
+
   const refreshStatus = useCallback(async () => {
     const next = await fetchJson<Uc6Status>("/api/uc6/status");
     setStatus(next);
@@ -417,9 +493,9 @@ export default function Uc6Page() {
 
   useEffect(() => {
     void refreshStatus();
-    const timer = setInterval(() => void refreshStatus(), STATUS_POLL_MS);
+    const timer = setInterval(() => void refreshStatus(), statusPollMs);
     return () => clearInterval(timer);
-  }, [refreshStatus]);
+  }, [refreshStatus, statusPollMs]);
 
   useEffect(() => {
     const eth = getEthereum();
@@ -765,6 +841,17 @@ export default function Uc6Page() {
               <Metric label="Token Id" value={String(status?.position?.tokenId ?? "—")} mono />
               <Metric label="Active LP NFTs" value={String(activeLpCount || 0)} />
               <Metric label="Total LP (All NFTs)" value={fmtUsd(aggregateLpUsd)} />
+              <Metric label="HTTP Provider" value={status?.providers?.http?.active || "—"} />
+              <Metric
+                label="WS Provider"
+                value={
+                  status?.providers?.ws?.enabled
+                    ? `${status?.providers?.ws?.active || "—"} (${status?.providers?.ws?.connected ? "connected" : "disconnected"})`
+                    : "disabled"
+                }
+              />
+              <Metric label="Last Head" value={status?.providers?.ws?.lastHeadBlock != null ? String(status.providers?.ws?.lastHeadBlock) : "—"} />
+              <Metric label="Head Seen" value={status?.providers?.ws?.lastHeadAtIso || "—"} />
               <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
               <Metric label="Band Width" value={`±${fmtPct(bandPct)}`} />
               <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
@@ -773,6 +860,7 @@ export default function Uc6Page() {
               <Metric label="Time In Range (Trading On)" value={status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100)} />
               <Metric label="Time In Range Since" value={status?.ops?.timeInRange?.sinceIso || "—"} />
               <Metric label="Min Rebalance Interval" value={`${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s`} />
+              <Metric label="Dashboard Poll" value={`${statusPollMs}ms`} />
               <Metric
                 label="Cooldown Remaining"
                 value={<Pill label={cooldownRemaining > 0 ? `${cooldownRemaining}s` : "ready"} tone={cooldownRemaining > 0 ? "warn" : "good"} />}
@@ -944,6 +1032,22 @@ export default function Uc6Page() {
 
               <NumberField label="slippageBps" value={draft.slippageBps} onChange={(v) => updateNumber("slippageBps", v)} />
               <NumberField label="pollIntervalMs" value={draft.pollIntervalMs} onChange={(v) => updateNumber("pollIntervalMs", v)} />
+              <SelectField
+                label="wsEnabled"
+                value={draft.wsEnabled ? "true" : "false"}
+                onChange={(v) => updateBool("wsEnabled", v === "true")}
+                options={["true", "false"]}
+              />
+              <NumberField label="slot0RefreshEverySec" value={draft.slot0RefreshEverySec} onChange={(v) => updateNumber("slot0RefreshEverySec", v)} />
+              <NumberField label="balancesRefreshEverySec" value={draft.balancesRefreshEverySec} onChange={(v) => updateNumber("balancesRefreshEverySec", v)} />
+              <NumberField label="positionRefreshEverySec" value={draft.positionRefreshEverySec} onChange={(v) => updateNumber("positionRefreshEverySec", v)} />
+              <NumberField label="inventoryRefreshEverySec" value={draft.inventoryRefreshEverySec} onChange={(v) => updateNumber("inventoryRefreshEverySec", v)} />
+              <NumberField label="collectableRefreshEverySec" value={draft.collectableRefreshEverySec} onChange={(v) => updateNumber("collectableRefreshEverySec", v)} />
+              <NumberField
+                label="dashboardRecommendedPollMs"
+                value={draft.dashboardRecommendedPollMs}
+                onChange={(v) => updateNumber("dashboardRecommendedPollMs", v)}
+              />
               <NumberField label="maxDeployUsdc" value={draft.maxDeployUsdc} onChange={(v) => updateNumber("maxDeployUsdc", v)} />
               <NumberField
                 label="maxInitialMintUsdc"
