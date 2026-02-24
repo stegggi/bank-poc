@@ -947,6 +947,7 @@ class HttpProviderPool {
     provider.failCount = 0;
     provider.successStreak += 1;
     provider.lastError = null;
+    provider.cooldownUntilMs = 0;
     if (provider.priority === 0) return;
     const primary = this.providers[0];
     if (provider.successStreak >= this.promoteSuccessThreshold && primary && primary.cooldownUntilMs <= Date.now()) {
@@ -1932,6 +1933,7 @@ class Uc6Bot {
         functionName: "slot0",
       });
     } catch (errV7) {
+      if (isRpc429Error(errV7)) throw errV7;
       try {
         return await this.publicClient.readContract({
           address: poolAddress,
@@ -1970,10 +1972,15 @@ class Uc6Bot {
   }
 
   async refreshPoolSnapshotsLight() {
-    const [primary, fallback] = await Promise.all([
+    const needFallback =
+      !this.state.latest?.fallback ||
+      !this.refreshClock.slot0Ms ||
+      Date.now() - this.refreshClock.slot0Ms >= 60_000;
+    const [primary, fallbackMaybe] = await Promise.all([
       this.getPoolSnapshot(this.slipstreamPool, "slipstream"),
-      this.getPoolSnapshot(this.uniswapPool, "uniswapv3").catch(() => null),
+      needFallback ? this.getPoolSnapshot(this.uniswapPool, "uniswapv3").catch(() => null) : Promise.resolve(undefined),
     ]);
+    const fallback = fallbackMaybe === undefined ? this.state.latest?.fallback || null : fallbackMaybe;
     this.state.latest.primary = primary;
     this.state.latest.fallback = fallback;
     this.markRefreshStamp("slot0Ms", "slot0AtIso");
@@ -2028,15 +2035,26 @@ class Uc6Bot {
     let ethBalanceRaw = null;
 
     if (needSlot0) {
-      const out = await this.refreshPoolSnapshotsLight();
-      primary = out.primary;
-      fallback = out.fallback;
+      try {
+        const out = await this.refreshPoolSnapshotsLight();
+        primary = out.primary;
+        fallback = out.fallback;
+      } catch (err) {
+        // Keep serving cached market data when providers are throttled, but surface the error.
+        this.setLastError(err);
+        if (!primary) throw err;
+      }
     }
     if (needBalances) {
-      const out = await this.refreshWalletBalancesHeavy();
-      usdcBalanceRaw = out.usdcBalanceRaw;
-      wethBalanceRaw = out.wethBalanceRaw;
-      ethBalanceRaw = out.ethBalanceRaw;
+      try {
+        const out = await this.refreshWalletBalancesHeavy();
+        usdcBalanceRaw = out.usdcBalanceRaw;
+        wethBalanceRaw = out.wethBalanceRaw;
+        ethBalanceRaw = out.ethBalanceRaw;
+      } catch (err) {
+        this.setLastError(err);
+        if (!this.state.latest?.wallet) throw err;
+      }
     }
     return { primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
   }
