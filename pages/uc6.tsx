@@ -388,7 +388,15 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
 }
 
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const r = await fetch(url, { ...(init || {}), cache: "no-store" });
+  const controller = new AbortController();
+  const timeoutMs = 8_000;
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let r: Response;
+  try {
+    r = await fetch(url, { ...(init || {}), cache: "no-store", signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
   const txt = await r.text();
   let parsed: unknown = {};
   try {
@@ -473,6 +481,7 @@ export default function Uc6Page() {
   const [busy, setBusy] = useState("");
   const [notice, setNotice] = useState("");
   const [error, setError] = useState("");
+  const [statusError, setStatusError] = useState("");
 
   const isBase = walletChain.toLowerCase() === BASE_CHAIN_ID_HEX;
   const isOwner = useMemo(() => {
@@ -486,9 +495,14 @@ export default function Uc6Page() {
   }, [status?.settings?.dashboardRecommendedPollMs]);
 
   const refreshStatus = useCallback(async () => {
-    const next = await fetchJson<Uc6Status>("/api/uc6/status");
-    setStatus(next);
-    setDraft((prev) => prev ?? coerceDraft(next.settings));
+    try {
+      const next = await fetchJson<Uc6Status>("/api/uc6/status");
+      setStatus(next);
+      setDraft((prev) => prev ?? coerceDraft(next.settings));
+      setStatusError("");
+    } catch (err: unknown) {
+      setStatusError(err instanceof Error ? err.message : "Failed to refresh UC6 status");
+    }
   }, []);
 
   useEffect(() => {
@@ -820,6 +834,7 @@ export default function Uc6Page() {
 
           {!!notice && <p style={{ ...styles.alert, ...styles.alertOk }}>{notice}</p>}
           {!!error && <p style={{ ...styles.alert, ...styles.alertErr }}>{error}</p>}
+          {!!statusError && <p style={{ ...styles.alert, ...styles.alertErr }}>Status refresh error: {statusError}</p>}
           {hasMultipleActive && (
             <p style={{ ...styles.alert, ...styles.alertErr }}>
               Multiple active Slipstream positions detected ({activeLpCount}). Bot trading is blocked until positions are consolidated.
