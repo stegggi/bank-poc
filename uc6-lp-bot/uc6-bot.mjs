@@ -1129,7 +1129,20 @@ class WsHeadWatcher {
 
 class Uc6Bot {
   constructor() {
-    const httpPrimaryUrl = ENV.httpAnkrUrl || ENV.rpcUrl || ENV.httpAlchemyUrl || ENV.httpPublicUrl;
+    const hasExplicitHttpProviders = Boolean(
+      ENV.httpAnkrUrl || ENV.httpAlchemyUrl || process.env.UC6_HTTP_PUBLIC_URL
+    );
+    const httpProviders = hasExplicitHttpProviders
+      ? [
+          { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
+          { name: "alchemy_http", url: ENV.httpAlchemyUrl || "" },
+          { name: "base_public_http", url: ENV.httpPublicUrl || "" },
+        ]
+      : [
+          { name: "legacy_http", url: ENV.rpcUrl || "" },
+          { name: "base_public_http", url: ENV.httpPublicUrl || "" },
+        ];
+    const httpPrimaryUrl = (httpProviders.find((p) => p.url) || {}).url || "";
     if (!httpPrimaryUrl) throw new Error("Missing UC6 HTTP RPC URL (UC6_HTTP_ANKR_URL or UC6_RPC_URL)");
     if (!ENV.privateKey) throw new Error("Missing UC6_PRIVATE_KEY");
     if (!ENV.adminToken) throw new Error("Missing UC6_ADMIN_TOKEN");
@@ -1152,11 +1165,7 @@ class Uc6Bot {
     this.httpPool = new HttpProviderPool({
       account: this.account,
       chain: base,
-      providers: [
-        { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
-        { name: "alchemy_http", url: ENV.httpAlchemyUrl || ENV.rpcUrl || "" },
-        { name: "base_public_http", url: ENV.httpPublicUrl || "" },
-      ],
+      providers: httpProviders,
     });
     this.publicClient = {
       readContract: (args) => this.httpPool.invoke("readContract", (p) => p.publicClient.readContract(args), { timeoutMs: 8_000, retries: 2 }),
@@ -1926,26 +1935,32 @@ class Uc6Bot {
   }
 
   async readSlot0(poolAddress) {
-    try {
-      return await this.publicClient.readContract({
-        address: poolAddress,
-        abi: SLOT0_ABI_V7,
-        functionName: "slot0",
-      });
-    } catch (errV7) {
-      if (isRpc429Error(errV7)) throw errV7;
-      try {
-        return await this.publicClient.readContract({
-          address: poolAddress,
-          abi: SLOT0_ABI_V6,
-          functionName: "slot0",
-        });
-      } catch (errV6) {
-        const m7 = errV7 instanceof Error ? errV7.message : String(errV7 || "slot0(v7) failed");
-        const m6 = errV6 instanceof Error ? errV6.message : String(errV6 || "slot0(v6) failed");
-        throw new Error(`slot0 read failed for ${poolAddress}: ${m7}; fallback: ${m6}`);
-      }
-    }
+    return this.httpPool.invoke(
+      "slot0",
+      async (provider) => {
+        try {
+          return await provider.publicClient.readContract({
+            address: poolAddress,
+            abi: SLOT0_ABI_V7,
+            functionName: "slot0",
+          });
+        } catch (errV7) {
+          if (isRpc429Error(errV7)) throw errV7;
+          try {
+            return await provider.publicClient.readContract({
+              address: poolAddress,
+              abi: SLOT0_ABI_V6,
+              functionName: "slot0",
+            });
+          } catch (errV6) {
+            const m7 = errV7 instanceof Error ? errV7.message : String(errV7 || "slot0(v7) failed");
+            const m6 = errV6 instanceof Error ? errV6.message : String(errV6 || "slot0(v6) failed");
+            throw new Error(`slot0 read failed for ${poolAddress}: ${m7}; fallback: ${m6}`);
+          }
+        }
+      },
+      { timeoutMs: 8_000, retries: 2 }
+    );
   }
 
   toUsdcPerWethPrice(sqrtPriceX96, token0, token1) {
