@@ -533,6 +533,36 @@ function fmtIsoLocal(iso?: string | null): string {
   return new Date(ms).toLocaleString();
 }
 
+function selectorHumanLabel(
+  selector?: { type?: "tickSpacing" | "fee" | string; value?: number },
+  venue?: Uc6Venue
+): string {
+  const type = String(selector?.type || "");
+  const value = Number(selector?.value);
+  if (type === "fee" && Number.isFinite(value) && value > 0) {
+    const pct = value / 10_000;
+    return `Fee tier ${pct.toFixed(value % 100 === 0 ? 2 : 4)}% (${value})`;
+  }
+  if (type === "tickSpacing" && Number.isFinite(value) && value > 0) {
+    return venue === "slipstream"
+      ? `Tick spacing ${value} (pool grid)`
+      : `Tick spacing ${value}`;
+  }
+  if (Number.isFinite(value)) return `${type || "selector"} ${value}`;
+  return "—";
+}
+
+function actualBandHalfPctFromTicks(tickLower?: number | null, tickUpper?: number | null): number | null {
+  const lower = Number(tickLower);
+  const upper = Number(tickUpper);
+  if (!(Number.isFinite(lower) && Number.isFinite(upper) && upper > lower)) return null;
+  const halfTicks = (upper - lower) / 2;
+  // Concentrated liquidity ranges are linear in log-price (tick space). Convert half-range ticks back to price percent.
+  const ratioHalf = Math.exp(Math.log(1.0001) * halfTicks);
+  if (!Number.isFinite(ratioHalf) || ratioHalf <= 0) return null;
+  return (ratioHalf - 1) * 100;
+}
+
 function fmtDurationCompact(seconds: number | null | undefined): string {
   if (seconds == null || Number.isNaN(seconds)) return "—";
   const s = Math.max(0, Math.round(Number(seconds)));
@@ -888,12 +918,14 @@ export default function Uc6Page() {
   const events = (status?.events?.lastN || []).slice(-5).reverse();
   const inRange = Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
-  const bandPct = n(status?.settings?.bandHalfBps, 0) / 100;
+  const configuredBandHalfPct = n(status?.settings?.bandHalfBps, 0) / 100;
+  const actualBandHalfPct = actualBandHalfPctFromTicks(status?.position?.tickLower, status?.position?.tickUpper);
   const edgeDistPct = n(status?.position?.distanceToEdge?.pct, 0) * 100;
   const churnRatio = status?.ops?.churnRatioToday;
   const activeLpCount = Number(status?.ops?.positionInventory?.activeCount || 0);
   const hasMultipleActive = activeLpCount > 1;
   const aggregateLpUsd = n(status?.ops?.positionInventory?.totalUsdValue, 0);
+  const selectorLabel = selectorHumanLabel(status?.market?.selector, status?.market?.venueActive);
   const bandPerformanceRows = (status?.analytics?.bandPerformance || []).map((row) => [
     `±${fmtPct(row.bandHalfPct)}`,
     String(Math.round(n(row.runs, 0))),
@@ -964,12 +996,8 @@ export default function Uc6Page() {
               <Metric label="Chain" value={`${status?.market?.chain?.name || "Base"} (${status?.market?.chain?.chainId || BASE_CHAIN_ID_DEC})`} />
               <Metric label="Venue Active" value={status?.market?.venueActive || "—"} />
               <Metric label="Pair" value={`${status?.market?.pair?.base || "WETH"}/${status?.market?.pair?.quote || "USDC"}`} />
-              <Metric label="Selector" value={`${status?.market?.selector?.type || "—"}: ${String(status?.market?.selector?.value ?? "—")}`} />
               <Metric label="Spot Price" value={fmtUsd(status?.market?.spotPrice?.usdcPerWeth)} />
               <Metric label="Price Updated" value={status?.market?.spotPrice?.updatedAtIso || "—"} />
-              <Metric label="Tick" value={String(status?.market?.tick?.current ?? "—")} />
-              <Metric label="Tick Spacing" value={String(status?.market?.tick?.spacing ?? "—")} />
-              <Metric label="Token Id" value={String(status?.position?.tokenId ?? "—")} mono />
               <Metric label="Active LP NFTs" value={String(activeLpCount || 0)} />
               <Metric label="Total LP (All NFTs)" value={fmtUsd(aggregateLpUsd)} />
               <Metric label="HTTP Provider" value={status?.providers?.http?.active || "—"} />
@@ -983,11 +1011,6 @@ export default function Uc6Page() {
               />
               <Metric label="Last Head" value={status?.providers?.ws?.lastHeadBlock != null ? String(status.providers?.ws?.lastHeadBlock) : "—"} />
               <Metric label="Head Seen" value={status?.providers?.ws?.lastHeadAtIso || "—"} />
-              <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
-              <Metric label="Band Width" value={`±${fmtPct(bandPct)}`} />
-              <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
-              <Metric label="Distance To Edge" value={`${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`} />
-              <Metric label="Edge Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
               <Metric label="Time In Range (Trading On)" value={status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100)} />
               <Metric label="Time In Range Since" value={status?.ops?.timeInRange?.sinceIso || "—"} />
               <Metric label="Min Rebalance Interval" value={`${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s`} />
@@ -1030,6 +1053,21 @@ export default function Uc6Page() {
               </div>
             )}
             <div style={styles.metaGrid}>
+              <Metric label="Token ID (LP NFT)" value={String(status?.position?.tokenId ?? "—")} mono />
+              <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
+              <Metric label="Pool Tier / Selector" value={selectorLabel} />
+              <Metric label="Current Pool Tick (internal)" value={String(status?.market?.tick?.current ?? "—")} />
+              <Metric label="Pool Tick Spacing (grid)" value={String(status?.market?.tick?.spacing ?? "—")} />
+              <Metric label="Configured Band Target" value={`±${fmtPct(configuredBandHalfPct)}`} />
+              <Metric
+                label="Actual Band Width"
+                value={
+                  actualBandHalfPct == null
+                    ? "—"
+                    : `±${fmtPct(actualBandHalfPct)}`
+                }
+              />
+              <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
               <Metric label="USDC in LP" value={`${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`} />
               <Metric label="WETH in LP" value={`${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`} />
               <Metric label="LP Value" value={fmtUsd(status?.position?.amountsInLP?.usdValue)} />
@@ -1254,6 +1292,7 @@ export default function Uc6Page() {
               <Metric label="Churn Ratio" value={<Pill label={churnRatio == null ? "n/a" : fmtPct(churnRatio * 100)} tone={churnTone(churnRatio)} />} />
               <Metric label="Churn Protection" value={status?.settings?.churnProtection?.enabled ? "enabled" : "disabled"} />
               <Metric label="Churn Limit" value={fmtPct(n(status?.settings?.churnProtection?.maxCostToFeeRatio, 0) * 100)} />
+              <Metric label="Rebalance Trigger Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
               <Metric label="Last Rebalance" value={status?.ops?.lastRebalanceAtIso || "—"} />
               <Metric label="Gate" value={status?.counters?.reason || "—"} />
             </div>
