@@ -77,6 +77,74 @@ type OwnerPayload = {
   churnMaxCostToFeeRatio: number;
 };
 
+type PositionLifecycleRecord = {
+  id: string;
+  chain?: { name?: string; chainId?: number };
+  venue?: Uc6Venue | string;
+  poolAddress?: string;
+  pair?: { base?: string; quote?: string };
+  selector?: { type?: "tickSpacing" | "fee" | string; value?: number; humanLabel?: string };
+  band?: {
+    bandHalfBps?: number;
+    tickLower?: number;
+    tickUpper?: number;
+  };
+  entry?: {
+    openedAtIso?: string | null;
+    entrySnapshotAtIso?: string | null;
+    entryValueUsd?: number;
+    entryTokens?: { weth?: number; usdc?: number };
+    spotPriceUsdcPerWeth?: number;
+    rawMintValueUsd?: number | null;
+  };
+  exit?: {
+    closedAtIso?: string | null;
+    exitValueUsd?: number | null;
+    exitTokens?: { weth?: number; usdc?: number } | null;
+    spotPriceUsdcPerWeth?: number | null;
+  };
+  duration?: {
+    secondsInPosition?: number | null;
+    human?: string | null;
+  };
+  performance?: {
+    feesCollectedUsd?: number;
+    rewardsUsd?: number;
+    gasUsd?: number;
+    swapCostUsd?: number;
+    mintBurnUsd?: number;
+    totalCostsUsd?: number;
+    impermanentLossUsd?: number;
+    netProfitUsd?: number;
+    costToFeeRatio?: number;
+    avgDeployedUsd?: number;
+    apr?: number;
+  };
+  activity?: {
+    rebalances?: number;
+    harvests?: number;
+    swaps?: number;
+    txCount?: number;
+  };
+  tx?: {
+    openTxHashes?: string[];
+    closeTxHashes?: string[];
+    allTxHashes?: string[];
+  };
+  status?: "OPEN" | "CLOSED" | string;
+  notes?: string | null;
+  createdAtIso?: string;
+  updatedAtIso?: string;
+};
+
+type PositionRecordsPage = {
+  items: PositionLifecycleRecord[];
+  page: number;
+  pageSize: number;
+  totalItems: number;
+  totalPages: number;
+};
+
 type Uc6Status = {
   ok?: boolean;
   ts?: string;
@@ -256,6 +324,9 @@ type Uc6Status = {
     lastDecision?: Record<string, unknown> | null;
     lastError?: { atIso?: string | null; message?: string } | null;
   };
+  positionsSummary?: PositionLifecycleRecord[];
+  activePositionRunId?: string | null;
+  activePositionRecord?: PositionLifecycleRecord | null;
   counters?: { reason?: string };
   events?: {
     lastN?: Array<{
@@ -436,9 +507,30 @@ function fmtUsd(v: number | null | undefined): string {
   return `$${fmtNum(n, 2)}`;
 }
 
+function fmtSignedUsd(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  if (n === 0) return "$0.00";
+  const abs = Math.abs(n);
+  const core = abs < 0.01 ? "<$0.01" : `$${fmtNum(abs, 2)}`;
+  return n < 0 ? `-${core}` : core;
+}
+
 function fmtPct(v: number | null | undefined, digits = 2): string {
   if (v == null || Number.isNaN(v)) return "—";
   return `${fmtNum(v, digits)}%`;
+}
+
+function fmtRatioPct(ratio: number | null | undefined): string {
+  if (ratio == null || Number.isNaN(ratio)) return "—";
+  return fmtPct(Number(ratio) * 100, 2);
+}
+
+function fmtIsoLocal(iso?: string | null): string {
+  if (!iso) return "—";
+  const ms = Date.parse(iso);
+  if (!Number.isFinite(ms)) return iso;
+  return new Date(ms).toLocaleString();
 }
 
 function fmtDurationCompact(seconds: number | null | undefined): string {
@@ -474,6 +566,10 @@ function boolTone(v: boolean | null | undefined): "good" | "bad" | "muted" {
 
 export default function Uc6Page() {
   const [status, setStatus] = useState<Uc6Status | null>(null);
+  const [positionsPage, setPositionsPage] = useState<PositionRecordsPage | null>(null);
+  const [positionsPageNum, setPositionsPageNum] = useState(1);
+  const [positionsError, setPositionsError] = useState("");
+  const [selectedPosition, setSelectedPosition] = useState<PositionLifecycleRecord | null>(null);
   const [draft, setDraft] = useState<Uc6DraftSettings | null>(null);
   const [walletAddress, setWalletAddress] = useState("");
   const [walletChain, setWalletChain] = useState("");
@@ -505,11 +601,27 @@ export default function Uc6Page() {
     }
   }, []);
 
+  const refreshPositions = useCallback(async (page = positionsPageNum) => {
+    try {
+      const next = await fetchJson<PositionRecordsPage>(`/api/uc6/positions?page=${encodeURIComponent(String(page))}&pageSize=10`);
+      setPositionsPage(next);
+      setPositionsError("");
+    } catch (err: unknown) {
+      setPositionsError(err instanceof Error ? err.message : "Failed to refresh position records");
+    }
+  }, [positionsPageNum]);
+
   useEffect(() => {
     void refreshStatus();
     const timer = setInterval(() => void refreshStatus(), statusPollMs);
     return () => clearInterval(timer);
   }, [refreshStatus, statusPollMs]);
+
+  useEffect(() => {
+    void refreshPositions(positionsPageNum);
+    const timer = setInterval(() => void refreshPositions(positionsPageNum), statusPollMs);
+    return () => clearInterval(timer);
+  }, [positionsPageNum, refreshPositions, statusPollMs]);
 
   useEffect(() => {
     const eth = getEthereum();
@@ -791,6 +903,10 @@ export default function Uc6Page() {
     fmtDurationCompact(row.avgDurationSec),
     fmtUsd(row.totalNetUsd),
   ]);
+  const activeLifecycleRecord = status?.activePositionRecord || null;
+  const closedPositionRecords = positionsPage?.items || [];
+  const positionsPageCount = Math.max(1, Number(positionsPage?.totalPages || 1));
+  const positionsCurrentPage = Math.max(1, Number(positionsPage?.page || positionsPageNum));
 
   return (
     <>
@@ -923,6 +1039,143 @@ export default function Uc6Page() {
               />
               <Metric label="Distance To Edge" value={`${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`} />
               <Metric label="Liquidity" value={status?.position?.liquidity || "—"} mono />
+            </div>
+          </Card>
+
+          <Card title="LP Position Record" fullWidth wideViewport>
+            {!!positionsError && <p style={{ ...styles.alert, ...styles.alertErr, marginTop: 0 }}>Positions refresh error: {positionsError}</p>}
+
+            <div style={styles.recordActiveWrap}>
+              <div style={styles.recordActiveTitle}>Active (Open) Strategy Run</div>
+              {activeLifecycleRecord ? (
+                <div style={styles.metaGrid}>
+                  <Metric label="Run ID" value={activeLifecycleRecord.id || "—"} mono />
+                  <Metric
+                    label="Pair"
+                    value={`${activeLifecycleRecord.pair?.base || "WETH"}/${activeLifecycleRecord.pair?.quote || "USDC"}`}
+                  />
+                  <Metric
+                    label="Band"
+                    value={
+                      <span title={`${activeLifecycleRecord.band?.tickLower ?? "—"} .. ${activeLifecycleRecord.band?.tickUpper ?? "—"}`}>
+                        ±{fmtPct(n(activeLifecycleRecord.band?.bandHalfBps, 0) / 100)}
+                      </span>
+                    }
+                  />
+                  <Metric label="Opened" value={fmtIsoLocal(activeLifecycleRecord.entry?.openedAtIso)} />
+                  <Metric label="Entry Snapshot" value={fmtIsoLocal(activeLifecycleRecord.entry?.entrySnapshotAtIso)} />
+                  <Metric label="Entry Value" value={fmtUsd(activeLifecycleRecord.entry?.entryValueUsd)} />
+                  <Metric label="Fees Collected" value={fmtUsd(activeLifecycleRecord.performance?.feesCollectedUsd)} />
+                  <Metric label="Total Costs" value={fmtUsd(activeLifecycleRecord.performance?.totalCostsUsd)} />
+                  <Metric label="IL" value={fmtSignedUsd(activeLifecycleRecord.performance?.impermanentLossUsd)} />
+                  <Metric label="Net Profit" value={fmtSignedUsd(activeLifecycleRecord.performance?.netProfitUsd)} />
+                  <Metric label="Tx Count" value={String(activeLifecycleRecord.activity?.txCount ?? 0)} />
+                  <Metric label="Status" value={activeLifecycleRecord.status || "OPEN"} />
+                </div>
+              ) : (
+                <div style={styles.note}>No active open lifecycle record.</div>
+              )}
+            </div>
+
+            <div style={{ ...styles.note, marginTop: 12 }}>
+              Closed positions only. Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs.
+            </div>
+
+            <div style={styles.tableWrap}>
+              <table style={styles.table}>
+                <thead>
+                  <tr>
+                    {[
+                      "Pair",
+                      "Venue",
+                      "Fee/Tier",
+                      "Band",
+                      "Entry Time",
+                      "Exit Time",
+                      "Duration",
+                      "Entry Value",
+                      "Fees Collected",
+                      "Total Costs",
+                      "IL",
+                      "Net Profit",
+                      "Cost/Fee",
+                      "APR",
+                      "Actions",
+                    ].map((h) => (
+                      <th key={h} style={styles.th}>
+                        {h}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {closedPositionRecords.length === 0 ? (
+                    <tr>
+                      <td style={styles.td} colSpan={15}>
+                        No closed position records yet.
+                      </td>
+                    </tr>
+                  ) : (
+                    closedPositionRecords.map((rec) => {
+                      const selectorLabel = rec.selector?.humanLabel || `${rec.selector?.type || "—"}:${String(rec.selector?.value ?? "—")}`;
+                      const bandLabel = `±${(n(rec.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
+                      const ticksLabel = `${rec.band?.tickLower ?? "—"} .. ${rec.band?.tickUpper ?? "—"}`;
+                      const ilUsd = n(rec.performance?.impermanentLossUsd, 0);
+                      const netUsd = n(rec.performance?.netProfitUsd, 0);
+                      return (
+                        <tr key={rec.id}>
+                          <td style={styles.td}>{`${rec.pair?.base || "WETH"}/${rec.pair?.quote || "USDC"}`}</td>
+                          <td style={styles.td}>{rec.venue === "uniswapv3" ? "Uniswap v3" : "Slipstream"}</td>
+                          <td style={styles.td}>{selectorLabel}</td>
+                          <td style={styles.td}>
+                            <span title={ticksLabel}>{bandLabel}</span>
+                          </td>
+                          <td style={styles.td} title={rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso || ""}>
+                            {fmtIsoLocal(rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso)}
+                          </td>
+                          <td style={styles.td} title={rec.exit?.closedAtIso || ""}>
+                            {rec.exit?.closedAtIso ? fmtIsoLocal(rec.exit.closedAtIso) : "OPEN"}
+                          </td>
+                          <td style={styles.td}>{rec.duration?.human || fmtDurationCompact(rec.duration?.secondsInPosition)}</td>
+                          <td style={styles.td}>{fmtUsd(rec.entry?.entryValueUsd)}</td>
+                          <td style={styles.td}>{fmtUsd(rec.performance?.feesCollectedUsd)}</td>
+                          <td style={styles.td}>{fmtUsd(rec.performance?.totalCostsUsd)}</td>
+                          <td style={{ ...styles.td, color: ilUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.impermanentLossUsd)}</td>
+                          <td style={{ ...styles.td, color: netUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.netProfitUsd)}</td>
+                          <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
+                          <td style={styles.td}>{fmtPct(rec.performance?.apr)}</td>
+                          <td style={styles.td}>
+                            <button style={styles.tableActionButton} onClick={() => setSelectedPosition(rec)}>
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div style={styles.paginationRow}>
+              <button
+                style={styles.buttonSecondary}
+                onClick={() => setPositionsPageNum((p) => Math.max(1, p - 1))}
+                disabled={positionsCurrentPage <= 1}
+              >
+                Prev
+              </button>
+              <span style={styles.paginationLabel}>
+                Page {positionsCurrentPage} / {positionsPageCount}
+                {positionsPage ? ` (${positionsPage.totalItems} records)` : ""}
+              </span>
+              <button
+                style={styles.buttonSecondary}
+                onClick={() => setPositionsPageNum((p) => Math.min(positionsPageCount, p + 1))}
+                disabled={positionsCurrentPage >= positionsPageCount}
+              >
+                Next
+              </button>
             </div>
           </Card>
 
@@ -1118,14 +1371,127 @@ export default function Uc6Page() {
             <pre style={styles.pre}>{JSON.stringify(status, null, 2)}</pre>
           </details>
         </section>
+
+        <PositionRecordDrawer record={selectedPosition} onClose={() => setSelectedPosition(null)} />
       </main>
     </>
   );
 }
 
-function Card({ title, children, fullWidth }: { title: string; children: ReactNode; fullWidth?: boolean }) {
+function PositionRecordDrawer({
+  record,
+  onClose,
+}: {
+  record: PositionLifecycleRecord | null;
+  onClose: () => void;
+}) {
+  if (!record) return null;
+  const perf = record.performance || {};
+  const tx = record.tx || {};
+  const openTxs = tx.openTxHashes || [];
+  const closeTxs = tx.closeTxHashes || [];
+  const allTxs = tx.allTxHashes || [];
   return (
-    <section style={{ ...styles.panel, ...(fullWidth ? styles.fullWidth : undefined) }}>
+    <div style={styles.drawerBackdrop} onClick={onClose}>
+      <aside style={styles.drawer} onClick={(e) => e.stopPropagation()}>
+        <div style={styles.drawerHeader}>
+          <div>
+            <div style={{ ...styles.statLabel, marginBottom: 2 }}>Position Lifecycle Record</div>
+            <div style={{ ...styles.statValue, fontSize: 16 }}>{record.id}</div>
+          </div>
+          <button style={styles.buttonSecondary} onClick={onClose}>
+            Close
+          </button>
+        </div>
+
+        <div style={styles.drawerSection}>
+          <div style={styles.drawerSectionTitle}>Overview</div>
+          <div style={styles.metaGrid}>
+            <Metric label="Pair" value={`${record.pair?.base || "WETH"}/${record.pair?.quote || "USDC"}`} />
+            <Metric label="Venue" value={record.venue === "uniswapv3" ? "Uniswap v3" : "Slipstream"} />
+            <Metric
+              label="Band"
+              value={
+                <span title={`${record.band?.tickLower ?? "—"} .. ${record.band?.tickUpper ?? "—"}`}>
+                  ±{fmtPct(n(record.band?.bandHalfBps, 0) / 100)}
+                </span>
+              }
+            />
+            <Metric label="Status" value={record.status || "—"} />
+            <Metric label="Entry Snapshot" value={fmtIsoLocal(record.entry?.entrySnapshotAtIso || record.entry?.openedAtIso)} />
+            <Metric label="Exit" value={fmtIsoLocal(record.exit?.closedAtIso)} />
+            <Metric label="Duration" value={record.duration?.human || fmtDurationCompact(record.duration?.secondsInPosition)} />
+            <Metric label="Entry Value" value={fmtUsd(record.entry?.entryValueUsd)} />
+            <Metric label="Exit Value" value={fmtUsd(record.exit?.exitValueUsd)} />
+            <Metric label="Avg Deployed" value={fmtUsd(perf.avgDeployedUsd)} />
+          </div>
+        </div>
+
+        <div style={styles.drawerSection}>
+          <div style={styles.drawerSectionTitle}>Performance</div>
+          <div style={styles.metaGrid}>
+            <Metric label="Fees Collected" value={fmtUsd(perf.feesCollectedUsd)} />
+            <Metric label="Rewards" value={fmtUsd(perf.rewardsUsd)} />
+            <Metric label="Gas" value={fmtUsd(perf.gasUsd)} />
+            <Metric label="Swap Cost" value={fmtUsd(perf.swapCostUsd)} />
+            <Metric label="Mint/Burn (subset)" value={fmtUsd(perf.mintBurnUsd)} />
+            <Metric label="Total Costs" value={fmtUsd(perf.totalCostsUsd)} />
+            <Metric label="IL" value={fmtSignedUsd(perf.impermanentLossUsd)} />
+            <Metric label="Net Profit" value={fmtSignedUsd(perf.netProfitUsd)} />
+            <Metric label="Cost / Fee" value={fmtRatioPct(perf.costToFeeRatio)} />
+            <Metric label="APR" value={fmtPct(perf.apr)} />
+          </div>
+        </div>
+
+        <div style={styles.drawerSection}>
+          <div style={styles.drawerSectionTitle}>Activity</div>
+          <div style={styles.metaGrid}>
+            <Metric label="Rebalances" value={String(record.activity?.rebalances ?? 0)} />
+            <Metric label="Harvests" value={String(record.activity?.harvests ?? 0)} />
+            <Metric label="Swaps" value={String(record.activity?.swaps ?? 0)} />
+            <Metric label="Tx Count" value={String(record.activity?.txCount ?? 0)} />
+          </div>
+        </div>
+
+        <div style={styles.drawerSection}>
+          <div style={styles.drawerSectionTitle}>Transactions</div>
+          <div style={styles.note}>Open: {openTxs.length} | Close: {closeTxs.length} | All: {allTxs.length}</div>
+          <div style={styles.drawerTxList}>
+            {allTxs.length === 0 ? (
+              <div style={styles.note}>No tx hashes recorded.</div>
+            ) : (
+              allTxs.map((hash) => (
+                <div key={hash} style={styles.drawerTxRow}>
+                  <code style={styles.drawerMono}>{hash}</code>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
+
+function Card({
+  title,
+  children,
+  fullWidth,
+  wideViewport,
+}: {
+  title: string;
+  children: ReactNode;
+  fullWidth?: boolean;
+  wideViewport?: boolean;
+}) {
+  return (
+    <section
+      style={{
+        ...styles.panel,
+        ...(fullWidth ? styles.fullWidth : undefined),
+        ...(wideViewport ? styles.wideViewportPanel : undefined),
+      }}
+    >
       <h2 style={styles.h2}>{title}</h2>
       {children}
     </section>
@@ -1259,6 +1625,11 @@ const styles: Record<string, CSSProperties> = {
   fullWidth: {
     gridColumn: "1 / -1",
   },
+  wideViewportPanel: {
+    width: "calc(100vw - 32px)",
+    maxWidth: "none",
+    marginLeft: "calc(50% - 50vw + 16px)",
+  },
   cardGrid: {
     display: "grid",
     gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
@@ -1366,6 +1737,18 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 13,
     color: "#42526a",
   },
+  recordActiveWrap: {
+    border: "1px solid #e5ebf4",
+    borderRadius: 10,
+    background: "#fbfdff",
+    padding: 12,
+  },
+  recordActiveTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#243850",
+    marginBottom: 4,
+  },
   pill: {
     display: "inline-flex",
     alignItems: "center",
@@ -1416,6 +1799,16 @@ const styles: Record<string, CSSProperties> = {
     borderCollapse: "collapse",
     fontSize: 13,
   },
+  tableActionButton: {
+    border: "1px solid #9db3cf",
+    background: "#f8fbff",
+    color: "#10253f",
+    borderRadius: 7,
+    padding: "4px 9px",
+    cursor: "pointer",
+    fontWeight: 700,
+    fontSize: 12,
+  },
   th: {
     textAlign: "left",
     padding: "8px 10px",
@@ -1428,6 +1821,73 @@ const styles: Record<string, CSSProperties> = {
     borderBottom: "1px solid #eef2f7",
     whiteSpace: "nowrap",
     color: "#1f2f45",
+  },
+  paginationRow: {
+    marginTop: 10,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    flexWrap: "wrap",
+  },
+  paginationLabel: {
+    color: "#42526a",
+    fontSize: 13,
+    fontWeight: 600,
+  },
+  drawerBackdrop: {
+    position: "fixed",
+    inset: 0,
+    background: "rgba(15, 23, 42, 0.35)",
+    display: "flex",
+    justifyContent: "flex-end",
+    zIndex: 1000,
+  },
+  drawer: {
+    width: "min(760px, 100vw)",
+    height: "100vh",
+    overflowY: "auto",
+    background: "#ffffff",
+    borderLeft: "1px solid #d7dce4",
+    boxShadow: "-12px 0 36px rgba(15, 23, 42, 0.12)",
+    padding: 16,
+    display: "grid",
+    gap: 12,
+  },
+  drawerHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    gap: 12,
+  },
+  drawerSection: {
+    border: "1px solid #e5ebf4",
+    borderRadius: 10,
+    padding: 12,
+    background: "#fbfdff",
+  },
+  drawerSectionTitle: {
+    fontSize: 13,
+    fontWeight: 700,
+    color: "#243850",
+    marginBottom: 8,
+  },
+  drawerTxList: {
+    maxHeight: 240,
+    overflowY: "auto",
+    border: "1px solid #e5ebf4",
+    borderRadius: 8,
+    background: "#fff",
+    marginTop: 8,
+  },
+  drawerTxRow: {
+    padding: "8px 10px",
+    borderBottom: "1px solid #eef2f7",
+  },
+  drawerMono: {
+    fontSize: 12,
+    color: "#243850",
+    wordBreak: "break-all",
   },
   summary: {
     cursor: "pointer",

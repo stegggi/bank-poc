@@ -3,7 +3,7 @@ import process from "node:process";
 import path from "node:path";
 import fs from "node:fs";
 import { promises as fsp } from "node:fs";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 
 import {
   createPublicClient,
@@ -63,6 +63,10 @@ const ENV = {
 
 const SETTINGS_PATH = path.join(ENV.dataDir, "settings.json");
 const STATE_PATH = path.join(ENV.dataDir, "state.json");
+const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
+const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
+const POSITION_SUMMARY_LIMIT = 20;
+const POSITION_PAGE_SIZE_MAX = 100;
 
 const POOL_ABI = [
   {
@@ -641,6 +645,8 @@ function defaultState(accountAddress) {
     consecutiveRebalanceFailures: 0,
     forceRebalanceRequestedAt: null,
     forceRebalanceRecoveryPending: false,
+    activePositionRunId: null,
+    pendingEntrySnapshot: null,
     pendingCompoundUsd: 0,
     rangeStats: {
       sinceIso: nowIso(),
@@ -706,6 +712,45 @@ async function writeJsonAtomic(filePath, value) {
   const text = JSON.stringify(value, null, 2);
   await fsp.writeFile(tmp, text, { encoding: "utf8", mode: 0o600 });
   await fsp.rename(tmp, filePath);
+}
+
+async function appendJsonLineAtomic(filePath, value) {
+  const dir = path.dirname(filePath);
+  await ensureDir(dir);
+  const line = `${JSON.stringify(value)}\n`;
+  await fsp.appendFile(filePath, line, { encoding: "utf8", mode: 0o600 });
+}
+
+async function readJsonLinesIfExists(filePath) {
+  try {
+    const text = await fsp.readFile(filePath, "utf8");
+    if (!text || !text.trim()) return [];
+    const lines = text.split(/\r?\n/);
+    const out = [];
+    for (const line of lines) {
+      if (!line || !line.trim()) continue;
+      try {
+        out.push(JSON.parse(line));
+      } catch {
+        // ignore malformed lines in append-only journal
+      }
+    }
+    return out;
+  } catch (err) {
+    if (err && typeof err === "object" && "code" in err && err.code === "ENOENT") return [];
+    throw err;
+  }
+}
+
+function humanDurationFromSeconds(totalSec) {
+  const s = Math.max(0, Math.round(Number(totalSec || 0)));
+  const days = Math.floor(s / 86400);
+  const hours = Math.floor((s % 86400) / 3600);
+  const mins = Math.floor((s % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  if (mins > 0) return `${mins}m`;
+  return `${s}s`;
 }
 
 function stableStringify(value) {
@@ -1213,6 +1258,11 @@ class Uc6Bot {
       collectableMs: 0,
       heavyMs: 0,
     };
+    this.positionLifecycleEvents = [];
+    this.positionRecords = [];
+    this.positionRecordsById = new Map();
+    this.pendingLifecycleContext = null;
+    this.lifecyclePhaseContext = null;
   }
 
   async init() {
@@ -1228,6 +1278,15 @@ class Uc6Bot {
       await this.loadState();
     } catch (err) {
       this.state = defaultState(this.account.address);
+      this.setLastError(err);
+    }
+
+    try {
+      await this.loadLifecycleStores();
+    } catch (err) {
+      this.positionLifecycleEvents = [];
+      this.positionRecords = [];
+      this.positionRecordsById = new Map();
       this.setLastError(err);
     }
 
@@ -1479,6 +1538,584 @@ class Uc6Bot {
     if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
       this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
     }
+  }
+
+  emptyLifecycleAccounting() {
+    return {
+      gasUsd: 0,
+      swapCostUsd: 0,
+      mintBurnUsd: 0,
+      feesCollectedUsd: 0,
+      rewardsUsd: 0,
+      isEstimated: false,
+    };
+  }
+
+  emptyLifecycleRecord(seed = {}) {
+    return {
+      id: seed.id || randomUUID(),
+      chain: { name: "Base", chainId: base.id },
+      venue: seed.venue || "slipstream",
+      poolAddress: seed.poolAddress || this.slipstreamPool,
+      pair: { base: "WETH", quote: "USDC" },
+      selector: seed.selector || { type: "tickSpacing", value: 0, humanLabel: undefined },
+      band: seed.band || { bandHalfBps: 0, tickLower: 0, tickUpper: 0 },
+      entry: {
+        openedAtIso: seed.openedAtIso || nowIso(),
+        entrySnapshotAtIso: null,
+        entryValueUsd: 0,
+        entryTokens: { weth: 0, usdc: 0 },
+        spotPriceUsdcPerWeth: 0,
+        rawMintValueUsd: null,
+      },
+      exit: {
+        closedAtIso: null,
+        exitValueUsd: null,
+        exitTokens: null,
+        spotPriceUsdcPerWeth: null,
+      },
+      duration: {
+        secondsInPosition: null,
+        human: null,
+      },
+      performance: {
+        feesCollectedUsd: 0,
+        rewardsUsd: 0,
+        gasUsd: 0,
+        swapCostUsd: 0,
+        mintBurnUsd: 0,
+        totalCostsUsd: 0,
+        impermanentLossUsd: 0,
+        netProfitUsd: 0,
+        costToFeeRatio: 0,
+        avgDeployedUsd: 0,
+        apr: 0,
+      },
+      activity: {
+        rebalances: 0,
+        harvests: 0,
+        swaps: 0,
+        txCount: 0,
+      },
+      tx: {
+        openTxHashes: [],
+        closeTxHashes: [],
+        allTxHashes: [],
+      },
+      status: "OPEN",
+      notes: null,
+      createdAtIso: seed.createdAtIso || nowIso(),
+      updatedAtIso: nowIso(),
+      _internal: {
+        baselineWeth: 0,
+        baselineUsdc: 0,
+        entryCaptured: false,
+        openPhaseDone: false,
+      },
+    };
+  }
+
+  selectorForVenue(venue, snapshot = null) {
+    if (venue === "uniswapv3") {
+      const fee = Number(snapshot?.fee || this.state.latest?.fallback?.fee || 0);
+      return {
+        type: "fee",
+        value: fee,
+        humanLabel:
+          fee > 0
+            ? `${(fee / 10000).toFixed(fee % 100 === 0 ? 2 : 4)}%`
+            : undefined,
+      };
+    }
+    return {
+      type: "tickSpacing",
+      value: Number(snapshot?.tickSpacing || this.state.latest?.primary?.tickSpacing || 0),
+      humanLabel: undefined,
+    };
+  }
+
+  currentBandDescriptor() {
+    const p = this.state.position || {};
+    return {
+      bandHalfBps: Number(p.bandHalfBps || this.settings.bandHalfBps || 0),
+      tickLower: Number(p.tickLower ?? 0),
+      tickUpper: Number(p.tickUpper ?? 0),
+    };
+  }
+
+  lifecycleCommonFields({ type, positionRunId, tokenId = null, band = null, txHashes = [], accounting = null, details = {} }) {
+    const venue = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const market = this.state.latest?.primary || this.state.latest?.fallback || {};
+    const poolAddress = venue === "uniswapv3" ? this.uniswapPool : this.slipstreamPool;
+    return {
+      id: randomUUID(),
+      atIso: nowIso(),
+      chainId: base.id,
+      positionRunId,
+      type,
+      venue,
+      poolAddress,
+      tokenId: tokenId == null ? undefined : String(tokenId),
+      band: band || undefined,
+      spotPriceUsdcPerWeth: this.getSpotUsdcPerWeth() || Number(market?.priceUsdcPerWeth || 0) || undefined,
+      txHashes: Array.isArray(txHashes) ? txHashes.filter(Boolean).map(String) : [],
+      accounting: {
+        ...this.emptyLifecycleAccounting(),
+        ...(accounting || {}),
+      },
+      details: details && typeof details === "object" ? details : {},
+    };
+  }
+
+  async appendLifecycleEvent(event) {
+    const next = {
+      ...event,
+      id: event?.id || randomUUID(),
+      atIso: event?.atIso || nowIso(),
+      chainId: base.id,
+    };
+    this.positionLifecycleEvents.push(next);
+    await appendJsonLineAtomic(POSITION_EVENTS_PATH, next);
+    this.applyLifecycleEventToRecords(next);
+    await this.persistPositionRecords();
+    return next;
+  }
+
+  sanitizePositionRecordForPersist(record) {
+    if (!record || typeof record !== "object") return record;
+    const { _internal, ...rest } = record;
+    return rest;
+  }
+
+  async persistPositionRecords() {
+    const items = (Array.isArray(this.positionRecords) ? this.positionRecords : [])
+      .map((r) => this.sanitizePositionRecordForPersist(r));
+    await writeJsonAtomic(POSITION_RECORDS_PATH, {
+      version: 1,
+      updatedAtIso: nowIso(),
+      items,
+    });
+  }
+
+  async loadLifecycleStores() {
+    this.positionLifecycleEvents = await readJsonLinesIfExists(POSITION_EVENTS_PATH);
+    this.positionRecordsById = new Map();
+    this.positionRecords = [];
+    for (const ev of this.positionLifecycleEvents) {
+      try {
+        this.applyLifecycleEventToRecords(ev);
+      } catch {
+        // skip malformed historical lifecycle rows
+      }
+    }
+  }
+
+  getLifecycleRecordById(id, { createFromEvent = null } = {}) {
+    if (!id) return null;
+    let rec = this.positionRecordsById.get(id);
+    if (!rec && createFromEvent) {
+      rec = this.emptyLifecycleRecord({
+        id,
+        venue: createFromEvent.venue,
+        poolAddress: createFromEvent.poolAddress,
+        selector:
+          createFromEvent.details?.selector ||
+          this.selectorForVenue(createFromEvent.venue),
+        band: createFromEvent.band || this.currentBandDescriptor(),
+        openedAtIso: createFromEvent.atIso,
+        createdAtIso: createFromEvent.atIso,
+      });
+      this.positionRecordsById.set(id, rec);
+      this.positionRecords.push(rec);
+    }
+    return rec || null;
+  }
+
+  addUniqueTxHashes(targetArr, txHashes) {
+    if (!Array.isArray(targetArr)) return;
+    const seen = new Set(targetArr.map(String));
+    for (const hash of Array.isArray(txHashes) ? txHashes : []) {
+      if (!hash) continue;
+      const key = String(hash);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      targetArr.push(key);
+    }
+  }
+
+  addAccountingToRecord(rec, accounting) {
+    if (!rec || !accounting) return;
+    const perf = rec.performance;
+    perf.gasUsd += Number(accounting.gasUsd || 0);
+    perf.swapCostUsd += Number(accounting.swapCostUsd || 0);
+    perf.mintBurnUsd += Number(accounting.mintBurnUsd || 0);
+    perf.feesCollectedUsd += Number(accounting.feesCollectedUsd || 0);
+    perf.rewardsUsd += Number(accounting.rewardsUsd || 0);
+  }
+
+  updateBaselineFromSwap(rec, details = {}) {
+    if (!rec?._internal?.entryCaptured) return;
+    const tokenIn = details.tokenIn;
+    const tokenOut = details.tokenOut;
+    const actualIn = (() => {
+      try {
+        return BigInt(details.actualIn || 0);
+      } catch {
+        return 0n;
+      }
+    })();
+    const actualOut = (() => {
+      try {
+        return BigInt(details.actualOut || 0);
+      } catch {
+        return 0n;
+      }
+    })();
+    if (sameAddress(tokenIn, this.weth)) rec._internal.baselineWeth -= Number(formatUnits(actualIn, WETH_DECIMALS));
+    if (sameAddress(tokenOut, this.weth)) rec._internal.baselineWeth += Number(formatUnits(actualOut, WETH_DECIMALS));
+    if (sameAddress(tokenIn, this.usdc)) rec._internal.baselineUsdc -= Number(formatUnits(actualIn, USDC_DECIMALS));
+    if (sameAddress(tokenOut, this.usdc)) rec._internal.baselineUsdc += Number(formatUnits(actualOut, USDC_DECIMALS));
+  }
+
+  updateBaselineFromPrincipalAdd(rec, principal = {}) {
+    if (!rec?._internal?.entryCaptured) return;
+    rec._internal.baselineWeth += Number(principal.weth || 0);
+    rec._internal.baselineUsdc += Number(principal.usdc || 0);
+  }
+
+  recomputeLifecycleRecordDerived(rec) {
+    if (!rec) return;
+    const perf = rec.performance;
+    perf.totalCostsUsd = Number(perf.gasUsd || 0) + Number(perf.swapCostUsd || 0);
+    perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
+    // User requested formula. `impermanentLossUsd` is stored as signed delta from LP - HODL.
+    perf.netProfitUsd =
+      Number(perf.feesCollectedUsd || 0) +
+      Number(perf.rewardsUsd || 0) -
+      Number(perf.totalCostsUsd || 0) -
+      Number(perf.impermanentLossUsd || 0);
+    perf.costToFeeRatio =
+      Number(perf.totalCostsUsd || 0) / Math.max(Number(perf.feesCollectedUsd || 0), 1e-9);
+    const entryValueUsd = Number(rec.entry?.entryValueUsd || 0);
+    const exitValueUsd = Number(rec.exit?.exitValueUsd || 0);
+    perf.avgDeployedUsd = rec.status === "CLOSED" && exitValueUsd > 0
+      ? (entryValueUsd + exitValueUsd) / 2
+      : entryValueUsd;
+
+    const openedAtMs = Date.parse(rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso || "");
+    const closedAtMs = Date.parse(rec.exit?.closedAtIso || "");
+    if (Number.isFinite(openedAtMs) && Number.isFinite(closedAtMs) && closedAtMs > openedAtMs) {
+      rec.duration.secondsInPosition = Math.round((closedAtMs - openedAtMs) / 1000);
+      rec.duration.human = humanDurationFromSeconds(rec.duration.secondsInPosition);
+      const days = rec.duration.secondsInPosition / 86400;
+      if (days > 0 && perf.avgDeployedUsd > 0) {
+        perf.apr = (perf.netProfitUsd / perf.avgDeployedUsd) * (365 / days) * 100;
+      }
+    } else if (Number.isFinite(openedAtMs) && openedAtMs > 0) {
+      rec.duration.secondsInPosition = null;
+      rec.duration.human = null;
+      perf.apr = 0;
+    }
+    rec.updatedAtIso = nowIso();
+  }
+
+  applyLifecycleEventToRecords(ev) {
+    if (!ev || typeof ev !== "object") return;
+    const runId = String(ev.positionRunId || "");
+    if (!runId) return;
+    const rec = this.getLifecycleRecordById(runId, { createFromEvent: ev });
+    if (!rec) return;
+
+    rec.updatedAtIso = ev.atIso || nowIso();
+    if (ev.venue) rec.venue = ev.venue;
+    if (ev.poolAddress) rec.poolAddress = ev.poolAddress;
+    if (ev.details?.selector) rec.selector = { ...rec.selector, ...ev.details.selector };
+    if (ev.band && typeof ev.band === "object") {
+      rec.band = {
+        bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
+        tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
+        tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
+      };
+    }
+
+    if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
+    const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes : [];
+    this.addUniqueTxHashes(rec.tx.allTxHashes, txHashes);
+    rec.activity.txCount = rec.tx.allTxHashes.length;
+
+    const type = String(ev.type || "");
+    if (type === "OPEN_POSITION") {
+      rec.entry.openedAtIso = ev.atIso || rec.entry.openedAtIso;
+      rec.status = "OPEN";
+      rec.notes = rec.notes || null;
+      rec.selector = ev.details?.selector || rec.selector;
+      if (ev.band) {
+        rec.band = {
+          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
+          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
+          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
+        };
+      }
+      rec._internal.openPhaseDone = false;
+    } else if (type === "OPEN_SWAP") {
+      rec.activity.swaps += 1;
+      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
+    } else if (type === "OPEN_MINT") {
+      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
+      if (ev.details?.mintedTokenId) rec.notes = rec.notes || null;
+      if (ev.band) rec.band = { ...rec.band, ...ev.band };
+      const rawMintValueUsd = Number(ev.details?.rawMintValueUsd || 0);
+      if (rawMintValueUsd > 0 && !(Number(rec.entry.rawMintValueUsd || 0) > 0)) {
+        rec.entry.rawMintValueUsd = rawMintValueUsd;
+      }
+    } else if (type === "TOP_UP") {
+      rec.activity.swaps += Number(ev.details?.swapsInAction || 0);
+      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
+      this.updateBaselineFromPrincipalAdd(rec, ev.details?.principalAdded || {});
+    } else if (type === "ENTRY_SNAPSHOT") {
+      const entryTokens = ev.details?.entryTokens || {};
+      rec.entry.entrySnapshotAtIso = ev.atIso || rec.entry.entrySnapshotAtIso;
+      rec.entry.entryValueUsd = Number(ev.details?.entryValueUsd || rec.entry.entryValueUsd || 0);
+      rec.entry.entryTokens = {
+        weth: Number(entryTokens.weth || 0),
+        usdc: Number(entryTokens.usdc || 0),
+      };
+      rec.entry.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0);
+      if (Number(ev.details?.rawMintValueUsd || 0) > 0) {
+        rec.entry.rawMintValueUsd = Number(ev.details.rawMintValueUsd);
+      }
+      rec._internal.baselineWeth = rec.entry.entryTokens.weth;
+      rec._internal.baselineUsdc = rec.entry.entryTokens.usdc;
+      rec._internal.entryCaptured = true;
+      rec._internal.openPhaseDone = true;
+    } else if (type === "HARVEST_COLLECT") {
+      rec.activity.harvests += 1;
+    } else if (type === "REBALANCE_START") {
+      rec.activity.rebalances += 1;
+      if (ev.details?.newBand) {
+        const b = ev.details.newBand;
+        rec.band = {
+          bandHalfBps: Number(b.bandHalfBps || rec.band.bandHalfBps || 0),
+          tickLower: Number(b.tickLower ?? rec.band.tickLower ?? 0),
+          tickUpper: Number(b.tickUpper ?? rec.band.tickUpper ?? 0),
+        };
+      }
+    } else if (type === "REBALANCE_CLOSE") {
+      // fees already included via accounting; track close hashes only when final close, not rebalance close
+    } else if (type === "REBALANCE_INVENTORY_SWAP") {
+      rec.activity.swaps += 1;
+      this.updateBaselineFromSwap(rec, ev.details || {});
+    } else if (type === "REBALANCE_MINT") {
+      if (ev.band) {
+        rec.band = {
+          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
+          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
+          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
+        };
+      }
+    } else if (type === "CLOSE_POSITION_START") {
+      this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+    } else if (type === "CLOSE_POSITION") {
+      this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+      const principalOut = ev.details?.principalOut || {};
+      const exitTokens = ev.details?.exitTokens || principalOut;
+      if (exitTokens) {
+        rec.exit.exitTokens = {
+          weth: Number(exitTokens.weth || 0),
+          usdc: Number(exitTokens.usdc || 0),
+        };
+      }
+      if (Number(ev.details?.exitValueUsd || 0) > 0) {
+        rec.exit.exitValueUsd = Number(ev.details.exitValueUsd);
+      }
+      if (Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0) > 0) {
+        rec.exit.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth);
+      }
+      rec.exit.closedAtIso = ev.atIso || rec.exit.closedAtIso;
+    } else if (type === "EXIT_SNAPSHOT") {
+      const exitTokens = ev.details?.exitTokens || rec.exit.exitTokens || {};
+      rec.exit.closedAtIso = ev.atIso || rec.exit.closedAtIso;
+      rec.exit.exitTokens = {
+        weth: Number(exitTokens.weth || 0),
+        usdc: Number(exitTokens.usdc || 0),
+      };
+      rec.exit.exitValueUsd = Number(ev.details?.exitValueUsd || rec.exit.exitValueUsd || 0);
+      rec.exit.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || rec.exit.spotPriceUsdcPerWeth || 0);
+      rec.status = "CLOSED";
+
+      const baselineWeth = Number(rec._internal?.baselineWeth || 0);
+      const baselineUsdc = Number(rec._internal?.baselineUsdc || 0);
+      const pExit = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
+      const hodlExit = baselineWeth * pExit + baselineUsdc;
+      const lpExitPrincipal = Number(rec.exit?.exitTokens?.weth || 0) * pExit + Number(rec.exit?.exitTokens?.usdc || 0);
+      if (pExit > 0 && Number.isFinite(hodlExit) && Number.isFinite(lpExitPrincipal)) {
+        rec.performance.impermanentLossUsd = lpExitPrincipal - hodlExit;
+      }
+    }
+
+    this.recomputeLifecycleRecordDerived(rec);
+    this.positionRecords.sort((a, b) => {
+      const aClosed = Date.parse(a?.exit?.closedAtIso || "");
+      const bClosed = Date.parse(b?.exit?.closedAtIso || "");
+      const aOpen = a.status !== "CLOSED";
+      const bOpen = b.status !== "CLOSED";
+      if (aOpen !== bOpen) return aOpen ? -1 : 1;
+      return (Number.isFinite(bClosed) ? bClosed : 0) - (Number.isFinite(aClosed) ? aClosed : 0);
+    });
+  }
+
+  getClosedPositionRecordsSorted() {
+    return (Array.isArray(this.positionRecords) ? this.positionRecords : [])
+      .filter((r) => r && r.status === "CLOSED")
+      .slice()
+      .sort((a, b) => {
+        const ams = Date.parse(a?.exit?.closedAtIso || "");
+        const bms = Date.parse(b?.exit?.closedAtIso || "");
+        return (Number.isFinite(bms) ? bms : 0) - (Number.isFinite(ams) ? ams : 0);
+      });
+  }
+
+  getPositionRecordsPage(page = 1, pageSize = 10) {
+    const p = Math.max(1, Math.floor(Number(page || 1)));
+    const size = Math.max(1, Math.min(POSITION_PAGE_SIZE_MAX, Math.floor(Number(pageSize || 10))));
+    const all = this.getClosedPositionRecordsSorted();
+    const totalItems = all.length;
+    const totalPages = Math.max(1, Math.ceil(totalItems / size));
+    const pageSafe = Math.min(p, totalPages);
+    const start = (pageSafe - 1) * size;
+    const items = all.slice(start, start + size).map((r) => this.sanitizePositionRecordForPersist(r));
+    return {
+      items,
+      page: pageSafe,
+      pageSize: size,
+      totalItems,
+      totalPages,
+    };
+  }
+
+  getPositionsSummary(limit = POSITION_SUMMARY_LIMIT) {
+    return this.getClosedPositionRecordsSorted()
+      .slice(0, Math.max(0, Number(limit || POSITION_SUMMARY_LIMIT)))
+      .map((r) => this.sanitizePositionRecordForPersist(r));
+  }
+
+  getActivePositionRecord() {
+    const runId = this.state.activePositionRunId ? String(this.state.activePositionRunId) : null;
+    if (!runId) return null;
+    const rec = this.positionRecordsById.get(runId);
+    if (!rec || rec.status === "CLOSED") return null;
+    return this.sanitizePositionRecordForPersist(rec);
+  }
+
+  async maybeEmitPendingEntrySnapshot() {
+    const pending = this.state.pendingEntrySnapshot;
+    if (!pending || !pending.positionRunId || pending.emitted) return false;
+    const dueMs = Date.parse(pending.dueAtIso || "");
+    if (!(Number.isFinite(dueMs) && Date.now() >= dueMs)) return false;
+    if (!this.state.position?.tokenId) return false;
+    const latest = this.state.latest || {};
+    const activePool = latest.primary || latest.fallback || null;
+    if (!activePool?.sqrtPriceX96) return false;
+    const pos = this.state.position || {};
+    const liq = pos.liquidity ? BigInt(pos.liquidity) : 0n;
+    const lower = Number(pos.tickLower);
+    const upper = Number(pos.tickUpper);
+    if (!(liq > 0n && Number.isFinite(lower) && Number.isFinite(upper) && upper > lower)) return false;
+    const amounts = this.lpAmountsFromLiquidity(
+      liq,
+      lower,
+      upper,
+      BigInt(activePool.sqrtPriceX96),
+      activePool.token0 || this.weth,
+      activePool.token1 || this.usdc
+    );
+    const entryTokens = {
+      weth: Number(formatUnits(amounts.wethRaw, WETH_DECIMALS)),
+      usdc: Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS)),
+    };
+    const spot = this.getSpotUsdcPerWeth();
+    const entryValueUsd = entryTokens.usdc + entryTokens.weth * spot;
+    await this.appendLifecycleEvent(
+      this.lifecycleCommonFields({
+        type: "ENTRY_SNAPSHOT",
+        positionRunId: String(pending.positionRunId),
+        tokenId: this.state.position?.tokenId || null,
+        band: {
+          bandHalfBps: Number(pos.bandHalfBps || this.settings.bandHalfBps || 0),
+          tickLower: Number(pos.tickLower || 0),
+          tickUpper: Number(pos.tickUpper || 0),
+        },
+        accounting: this.emptyLifecycleAccounting(),
+        details: {
+          entryTokens,
+          entryValueUsd,
+          rawMintValueUsd: Number(pending.rawMintValueUsd || 0),
+          spotPriceUsdcPerWeth: spot,
+          note: "baseline after top-up",
+        },
+      })
+    );
+    this.state.pendingEntrySnapshot = null;
+    return true;
+  }
+
+  scheduleEntrySnapshot({ positionRunId, rawMintValueUsd = 0 }) {
+    if (!positionRunId) return;
+    const existing = this.positionRecordsById.get(String(positionRunId));
+    if (existing?._internal?.entryCaptured || existing?.entry?.entrySnapshotAtIso) {
+      this.state.pendingEntrySnapshot = null;
+      return;
+    }
+    const dueAt = new Date(Date.now() + 60_000).toISOString();
+    this.state.pendingEntrySnapshot = {
+      positionRunId: String(positionRunId),
+      dueAtIso: dueAt,
+      rawMintValueUsd: Number(rawMintValueUsd || 0),
+    };
+  }
+
+  ensureActivePositionRun({ reason = "auto", snapshot = null, tokenId = null } = {}) {
+    if (this.state.activePositionRunId) return String(this.state.activePositionRunId);
+    const runId = randomUUID();
+    this.state.activePositionRunId = runId;
+    const band = this.currentBandDescriptor();
+    const venue = this.settings.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const details = {
+      reason,
+      plannedBand: {
+        bandHalfBps: Number(this.settings.bandHalfBps || 0),
+        tickLower: Number(band.tickLower || 0),
+        tickUpper: Number(band.tickUpper || 0),
+      },
+      reservePolicy: {
+        minUsdc: Number(this.settings.reserveMinUsdc || 0),
+        pct: Number(this.settings.reservePct || 0),
+        maxUsdc: Number(this.settings.reserveMaxUsdc || 0),
+      },
+      selector: this.selectorForVenue(venue, snapshot),
+    };
+    void this.appendLifecycleEvent(
+      this.lifecycleCommonFields({
+        type: "OPEN_POSITION",
+        positionRunId: runId,
+        tokenId,
+        band: {
+          bandHalfBps: Number(this.settings.bandHalfBps || 0),
+          tickLower: Number(band.tickLower || 0),
+          tickUpper: Number(band.tickUpper || 0),
+        },
+        details,
+      })
+    ).catch((err) => this.setLastError(err));
+    return runId;
+  }
+
+  setLifecyclePhaseContext(ctx) {
+    this.lifecyclePhaseContext = ctx && typeof ctx === "object" ? { ...ctx } : null;
+  }
+
+  clearLifecyclePhaseContext() {
+    this.lifecyclePhaseContext = null;
   }
 
   getEventsSince(startMs = null) {
@@ -2462,6 +3099,40 @@ class Uc6Bot {
             slippageBpsReal,
             isEstimated: false,
           });
+          const phaseCtx = this.lifecyclePhaseContext;
+          if (phaseCtx?.positionRunId && (phaseCtx.phase === "open_swap" || phaseCtx.phase === "rebalance_inventory_swap")) {
+            const gasUsed = BigInt(receipt?.gasUsed || 0n);
+            const gasPrice = BigInt(receipt?.effectiveGasPrice || 0n);
+            const gasUsdThisTx = Number(formatUnits(gasUsed * gasPrice, 18)) * this.getSpotUsdcPerWeth();
+            const lifecycleType = phaseCtx.phase === "open_swap" ? "OPEN_SWAP" : "REBALANCE_INVENTORY_SWAP";
+            await this.appendLifecycleEvent(
+              this.lifecycleCommonFields({
+                type: lifecycleType,
+                positionRunId: String(phaseCtx.positionRunId),
+                tokenId: phaseCtx.tokenId || this.state.position?.tokenId || null,
+                band: phaseCtx.band || undefined,
+                txHashes: [hash],
+                accounting: {
+                  gasUsd: gasUsdThisTx,
+                  swapCostUsd: Math.max(0, swapCostUsd),
+                  mintBurnUsd: 0,
+                  feesCollectedUsd: 0,
+                  rewardsUsd: 0,
+                  isEstimated: false,
+                },
+                details: {
+                  tokenIn,
+                  tokenOut,
+                  amountIn: amountIn.toString(),
+                  quoteOut: quoteOut.toString(),
+                  actualOut: actualOut.toString(),
+                  actualIn: actualIn.toString(),
+                  slippageBpsReal,
+                  quoteSource,
+                },
+              })
+            ).catch((err) => this.setLastError(err));
+          }
           return {
             tokenIn,
             tokenOut,
@@ -2914,6 +3585,64 @@ class Uc6Bot {
           }
         }
 
+        let amount0Used = 0n;
+        let amount1Used = 0n;
+        if (Array.isArray(sim.result)) {
+          if (typeof sim.result[2] === "bigint") amount0Used = sim.result[2];
+          if (typeof sim.result[3] === "bigint") amount1Used = sim.result[3];
+        }
+        const phaseCtx = this.lifecyclePhaseContext;
+        if (phaseCtx?.positionRunId && (phaseCtx.phase === "open_mint" || phaseCtx.phase === "rebalance_mint")) {
+          const gasUsdThisTx = (() => {
+            const gasUsed = BigInt(receipt?.gasUsed || 0n);
+            const gasPrice = BigInt(receipt?.effectiveGasPrice || 0n);
+            return Number(formatUnits(gasUsed * gasPrice, 18)) * this.getSpotUsdcPerWeth();
+          })();
+          const usedUsdc = sameAddress(token0, this.usdc)
+            ? Number(formatUnits(amount0Used, USDC_DECIMALS))
+            : sameAddress(token1, this.usdc)
+              ? Number(formatUnits(amount1Used, USDC_DECIMALS))
+              : 0;
+          const usedWeth = sameAddress(token0, this.weth)
+            ? Number(formatUnits(amount0Used, WETH_DECIMALS))
+            : sameAddress(token1, this.weth)
+              ? Number(formatUnits(amount1Used, WETH_DECIMALS))
+              : 0;
+          const rawMintValueUsd = usedUsdc + usedWeth * this.getSpotUsdcPerWeth();
+          await this.appendLifecycleEvent(
+            this.lifecycleCommonFields({
+              type: phaseCtx.phase === "open_mint" ? "OPEN_MINT" : "REBALANCE_MINT",
+              positionRunId: String(phaseCtx.positionRunId),
+              tokenId: tokenId.toString(),
+              band: {
+                bandHalfBps:
+                  Number(phaseCtx.band?.bandHalfBps || this.estimateBandHalfBpsFromTicks(tickLower, tickUpper) || 0),
+                tickLower,
+                tickUpper,
+              },
+              txHashes: [hash],
+              accounting: {
+                gasUsd: gasUsdThisTx,
+                mintBurnUsd: gasUsdThisTx,
+                isEstimated: false,
+              },
+              details: {
+                mintedTokenId: tokenId.toString(),
+                liquidity: pos?.liquidity?.toString() || null,
+                amount0Used: amount0Used.toString(),
+                amount1Used: amount1Used.toString(),
+                rawMintValueUsd,
+              },
+            })
+          ).catch((err) => this.setLastError(err));
+          if (phaseCtx.phase === "open_mint") {
+            this.scheduleEntrySnapshot({
+              positionRunId: String(phaseCtx.positionRunId),
+              rawMintValueUsd,
+            });
+          }
+        }
+
         return {
           tokenId: tokenId.toString(),
           liquidity: pos?.liquidity?.toString() || null,
@@ -2921,6 +3650,8 @@ class Uc6Bot {
           tickUpper: pos?.tickUpper ?? tickUpper,
           centerTick: Math.round((tickLower + tickUpper) / 2),
           venue,
+          amount0Used,
+          amount1Used,
         };
       } catch (err) {
         if (broadcastedHash && err && typeof err === "object") {
@@ -2995,14 +3726,16 @@ class Uc6Bot {
 
     let used0 = 0n;
     let used1 = 0n;
+    let liquidityAdded = 0n;
     if (Array.isArray(sim.result)) {
+      if (typeof sim.result[0] === "bigint") liquidityAdded = sim.result[0];
       if (typeof sim.result[1] === "bigint") used0 = sim.result[1];
       if (typeof sim.result[2] === "bigint") used1 = sim.result[2];
     }
-    return { hash, receipt, amount0Used: used0, amount1Used: used1 };
+    return { hash, receipt, amount0Used: used0, amount1Used: used1, liquidityAdded };
   }
 
-  async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null }) {
+  async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null, feeBreakdownOverride = null }) {
     if (!tokenId) return;
     await this.assertTxAllowed("close_position");
     const id = BigInt(tokenId);
@@ -3023,10 +3756,12 @@ class Uc6Bot {
     const pos = this.parsePositionResult(posRaw);
     if (!pos) return;
 
+    let hashDec = null;
+    let recDec = null;
     if (pos.liquidity > 0n) {
       const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
       await this.assertTxAllowed("close_decrease_liquidity");
-      const hashDec = await this.walletClient.writeContract({
+      hashDec = await this.walletClient.writeContract({
         address: npmAddress,
         abi: NPM_POSITION_ABI,
         functionName: "decreaseLiquidity",
@@ -3041,7 +3776,7 @@ class Uc6Bot {
         ],
         account: this.account,
       });
-      const recDec = await this.publicClient.waitForTransactionReceipt({ hash: hashDec });
+      recDec = await this.publicClient.waitForTransactionReceipt({ hash: hashDec });
       this.addTxToActiveAction("decrease", hashDec, recDec);
     }
 
@@ -3065,11 +3800,26 @@ class Uc6Bot {
     });
     const recCollect = await this.publicClient.waitForTransactionReceipt({ hash: hashCollect });
     this.addTxToActiveAction("collect", hashCollect, recCollect);
+    const decodedCollect = this.extractCollectedAmountsFromReceipt(recCollect, npmAddress, id);
 
     const postUsdc = await this.readTokenBalance(this.usdc);
     const postWeth = await this.readTokenBalance(this.weth);
     const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
     const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
+    let collectUsdcRaw = usdcDelta;
+    let collectWethRaw = wethDelta;
+    if (decodedCollect && (decodedCollect.amount0 > 0n || decodedCollect.amount1 > 0n)) {
+      let mappedUsdc = 0n;
+      let mappedWeth = 0n;
+      if (sameAddress(pos.token0, this.usdc)) mappedUsdc = decodedCollect.amount0;
+      if (sameAddress(pos.token1, this.usdc)) mappedUsdc = decodedCollect.amount1;
+      if (sameAddress(pos.token0, this.weth)) mappedWeth = decodedCollect.amount0;
+      if (sameAddress(pos.token1, this.weth)) mappedWeth = decodedCollect.amount1;
+      if (mappedUsdc > 0n || mappedWeth > 0n) {
+        collectUsdcRaw = mappedUsdc;
+        collectWethRaw = mappedWeth;
+      }
+    }
     const feesUsd =
       Number(formatUnits(usdcDelta, USDC_DECIMALS)) +
       Number(formatUnits(wethDelta, WETH_DECIMALS)) * this.getSpotUsdcPerWeth();
@@ -3078,20 +3828,98 @@ class Uc6Bot {
     this.addFeesToActiveAction(feeValueOverrideUsd == null ? feesUsd : feeValueOverrideUsd);
     this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
 
+    let hashBurn = null;
+    let recBurn = null;
     try {
       await this.assertTxAllowed("close_burn");
-      const hashBurn = await this.walletClient.writeContract({
+      hashBurn = await this.walletClient.writeContract({
         address: npmAddress,
         abi: NPM_POSITION_ABI,
         functionName: "burn",
         args: [id],
         account: this.account,
       });
-      const recBurn = await this.publicClient.waitForTransactionReceipt({ hash: hashBurn });
+      recBurn = await this.publicClient.waitForTransactionReceipt({ hash: hashBurn });
       this.addTxToActiveAction("burn", hashBurn, recBurn);
     } catch {
       // Burn can fail if dust remains; position is still closed if liquidity is zero.
     }
+
+    const feeBreakdown = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
+      ? {
+          usdc: Math.max(0, Number(feeBreakdownOverride.usdc || 0)),
+          weth: Math.max(0, Number(feeBreakdownOverride.weth || 0)),
+          usd: Math.max(0, Number(feeBreakdownOverride.usd || 0)),
+        }
+      : {
+          usdc: Number(formatUnits(usdcDelta, USDC_DECIMALS)),
+          weth: Number(formatUnits(wethDelta, WETH_DECIMALS)),
+          usd: feeValueOverrideUsd == null ? feesUsd : Number(feeValueOverrideUsd || 0),
+        };
+    const collectOut = {
+      usdc: Number(formatUnits(collectUsdcRaw, USDC_DECIMALS)),
+      weth: Number(formatUnits(collectWethRaw, WETH_DECIMALS)),
+    };
+    const principalOut = {
+      usdc: Math.max(0, collectOut.usdc - feeBreakdown.usdc),
+      weth: Math.max(0, collectOut.weth - feeBreakdown.weth),
+    };
+    const closeTxHashes = [hashDec, hashCollect, hashBurn].filter(Boolean).map(String);
+    const phaseCtx = this.lifecyclePhaseContext;
+    if (phaseCtx?.positionRunId && (phaseCtx.phase === "rebalance_close" || phaseCtx.phase === "final_close")) {
+      const gasFrom = (receipt) => {
+        const gasUsed = BigInt(receipt?.gasUsed || 0n);
+        const gasPrice = BigInt(receipt?.effectiveGasPrice || 0n);
+        return Number(formatUnits(gasUsed * gasPrice, 18)) * this.getSpotUsdcPerWeth();
+      };
+      const gasUsd = gasFrom(recDec) + gasFrom(recCollect) + gasFrom(recBurn);
+      const lifecycleType = phaseCtx.phase === "final_close" ? "CLOSE_POSITION" : "REBALANCE_CLOSE";
+      const details = {
+        closedTokenId: String(tokenId),
+        principalOut,
+        feesOut: { usdc: feeBreakdown.usdc, weth: feeBreakdown.weth },
+      };
+      await this.appendLifecycleEvent(
+        this.lifecycleCommonFields({
+          type: lifecycleType,
+          positionRunId: String(phaseCtx.positionRunId),
+          tokenId: tokenId,
+          band: phaseCtx.band || undefined,
+          txHashes: closeTxHashes,
+          accounting: {
+            gasUsd,
+            mintBurnUsd: gasUsd,
+            feesCollectedUsd: Number(feeBreakdown.usd || 0),
+            isEstimated: false,
+          },
+          details,
+        })
+      ).catch((err) => this.setLastError(err));
+      if (phaseCtx.phase === "final_close") {
+        const spot = this.getSpotUsdcPerWeth();
+        const exitValueUsd = principalOut.usdc + principalOut.weth * spot;
+        await this.appendLifecycleEvent(
+          this.lifecycleCommonFields({
+            type: "EXIT_SNAPSHOT",
+            positionRunId: String(phaseCtx.positionRunId),
+            tokenId: tokenId,
+            txHashes: [],
+            details: {
+              exitTokens: principalOut,
+              exitValueUsd,
+              spotPriceUsdcPerWeth: spot,
+            },
+          })
+        ).catch((err) => this.setLastError(err));
+      }
+    }
+
+    return {
+      closedTokenId: String(tokenId),
+      principalOut,
+      feesOut: { usdc: feeBreakdown.usdc, weth: feeBreakdown.weth, usd: feeBreakdown.usd },
+      txHashes: closeTxHashes,
+    };
   }
 
   async maybeTopUpLiquidity(snapshot) {
@@ -3318,6 +4146,7 @@ class Uc6Bot {
       ];
       let increaseOk = false;
       let increaseLastErr = null;
+      let increaseResult = null;
       let roundAmount0Desired = amount0Desired;
       let roundAmount1Desired = amount1Desired;
       for (let roundIdx = 0; roundIdx < stfHaircutRounds.length && !increaseOk; roundIdx += 1) {
@@ -3327,7 +4156,7 @@ class Uc6Bot {
           const a1 = haircut === 10000n ? roundAmount1Desired : (roundAmount1Desired * haircut) / 10000n;
           if (a0 <= 0n || a1 <= 0n) continue;
           try {
-            await this.increaseLiquidityPosition({
+            increaseResult = await this.increaseLiquidityPosition({
               npmAddress: npm,
               tokenId,
               amount0Desired: a0,
@@ -3369,6 +4198,63 @@ class Uc6Bot {
         reason: "idle_deploy",
         txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
       });
+      {
+        const action = this.activeAction ? { ...this.activeAction } : null;
+        const runId = this.state.activePositionRunId ? String(this.state.activePositionRunId) : null;
+        if (action && runId) {
+          const token0Addr = snapshot.token0;
+          const token1Addr = snapshot.token1;
+          const amount0Used = BigInt(increaseResult?.amount0Used || 0n);
+          const amount1Used = BigInt(increaseResult?.amount1Used || 0n);
+          const principalAdded = {
+            weth:
+              sameAddress(token0Addr, this.weth)
+                ? Number(formatUnits(amount0Used, WETH_DECIMALS))
+                : sameAddress(token1Addr, this.weth)
+                  ? Number(formatUnits(amount1Used, WETH_DECIMALS))
+                  : 0,
+            usdc:
+              sameAddress(token0Addr, this.usdc)
+                ? Number(formatUnits(amount0Used, USDC_DECIMALS))
+                : sameAddress(token1Addr, this.usdc)
+                  ? Number(formatUnits(amount1Used, USDC_DECIMALS))
+                  : 0,
+          };
+          await this.appendLifecycleEvent(
+            this.lifecycleCommonFields({
+              type: "TOP_UP",
+              positionRunId: runId,
+              tokenId,
+              band: {
+                bandHalfBps: Number(this.state.position?.bandHalfBps || this.settings.bandHalfBps || 0),
+                tickLower: Number(this.state.position?.tickLower || 0),
+                tickUpper: Number(this.state.position?.tickUpper || 0),
+              },
+              txHashes: Array.isArray(action.txHashes) ? action.txHashes : [],
+              accounting: {
+                gasUsd: Number(action.gasUsd || 0),
+                swapCostUsd: Number(action.swapCostUsd || 0),
+                mintBurnUsd: Number(action.mintBurnUsd || 0),
+                feesCollectedUsd: Number(action.feesCollectedUsd || 0),
+                rewardsUsd: Number(action.rewardsUsd || 0),
+                isEstimated: Boolean(action.isEstimated),
+              },
+              details: {
+                method: "increaseLiquidity",
+                amount0Used: amount0Used.toString(),
+                amount1Used: amount1Used.toString(),
+                liquidityAdded: increaseResult?.liquidityAdded ? String(increaseResult.liquidityAdded) : null,
+                principalAdded,
+                swapsInAction: Array.isArray(action.swaps) ? action.swaps.length : 0,
+              },
+            })
+          ).catch((err) => this.setLastError(err));
+          this.scheduleEntrySnapshot({
+            positionRunId: runId,
+            rawMintValueUsd: Number(this.state.pendingEntrySnapshot?.rawMintValueUsd || 0),
+          });
+        }
+      }
       this.finalizeActiveAction("topup", "idle_deploy");
       return true;
     } catch (err) {
@@ -3785,6 +4671,34 @@ class Uc6Bot {
         pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
         txHash: this.activeAction?.txHashes?.[this.activeAction.txHashes.length - 1] || null,
       });
+      {
+        const action = this.activeAction ? { ...this.activeAction } : null;
+        const runId = this.state.activePositionRunId ? String(this.state.activePositionRunId) : null;
+        if (action && runId) {
+          await this.appendLifecycleEvent(
+            this.lifecycleCommonFields({
+              type: "HARVEST_COLLECT",
+              positionRunId: runId,
+              tokenId,
+              txHashes: Array.isArray(action.txHashes) ? action.txHashes : [],
+              accounting: {
+                gasUsd: Number(action.gasUsd || 0),
+                swapCostUsd: Number(action.swapCostUsd || 0),
+                mintBurnUsd: Number(action.mintBurnUsd || 0),
+                feesCollectedUsd: Number(collected.usd || action.feesCollectedUsd || 0),
+                rewardsUsd: Number(action.rewardsUsd || 0),
+                isEstimated: Boolean(action.isEstimated),
+              },
+              details: {
+                thresholdUsd: Number(this.settings.harvestThresholdUsd || 0),
+                collectableBeforeUsd: collectableUsd,
+                collected: { weth: Number(collected.weth || 0), usdc: Number(collected.usdc || 0) },
+                collectedUsd: Number(collected.usd || 0),
+              },
+            })
+          ).catch((err) => this.setLastError(err));
+        }
+      }
       this.finalizeActiveAction("harvest", "threshold", {
         note: "increaseLiquidity not implemented; collected fees kept as pending compound",
       });
@@ -3803,20 +4717,83 @@ class Uc6Bot {
     const npm = this.slipstreamNpm;
 
     const currentTokenId = this.state.position?.tokenId;
+    const existingBand = currentTokenId
+      ? {
+          bandHalfBps: Number(this.state.position?.bandHalfBps || this.settings.bandHalfBps || 0),
+          tickLower: Number(this.state.position?.tickLower || 0),
+          tickUpper: Number(this.state.position?.tickUpper || 0),
+        }
+      : null;
+    const plannedBand = {
+      bandHalfBps: Number(this.settings.bandHalfBps || 0),
+      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, this.settings.bandHalfBps) || {}),
+    };
+    const runId = this.ensureActivePositionRun({
+      reason: currentTokenId ? "auto_rebalance" : "auto",
+      snapshot,
+      tokenId: currentTokenId || null,
+    });
+    if (currentTokenId && runId) {
+      await this.appendLifecycleEvent(
+        this.lifecycleCommonFields({
+          type: "REBALANCE_START",
+          positionRunId: runId,
+          tokenId: currentTokenId,
+          band: existingBand || undefined,
+          accounting: this.emptyLifecycleAccounting(),
+          details: {
+            reason: String(this.activeAction?.reason || "auto"),
+            prevBand: existingBand,
+            newBand: plannedBand,
+          },
+        })
+      ).catch((err) => this.setLastError(err));
+    }
+
+    const runSwapStep = async (fn) => {
+      if (!runId) return await fn();
+      this.setLifecyclePhaseContext({
+        phase: currentTokenId || closedExistingPosition ? "rebalance_inventory_swap" : "open_swap",
+        positionRunId: runId,
+        tokenId: this.state.position?.tokenId || currentTokenId || null,
+        band: plannedBand,
+      });
+      try {
+        return await fn();
+      } finally {
+        this.clearLifecyclePhaseContext();
+      }
+    };
+
     let closedExistingPosition = false;
     if (currentTokenId) {
-      let preCloseCollectableUsd = Number(this.state.latest?.collectableNow?.usd || 0);
+      let preCloseCollectable = this.state.latest?.collectableNow || {
+        usdc: 0,
+        weth: 0,
+        usd: Number(this.state.latest?.collectableNow?.usd || 0),
+      };
       try {
         const freshCollectable = await this.collectableNowSnapshot();
-        preCloseCollectableUsd = Number(freshCollectable?.usd || 0);
+        preCloseCollectable = freshCollectable;
       } catch {
         // use latest cached collectable snapshot
       }
-      await this.closePosition({
-        npmAddress: npm,
+      this.setLifecyclePhaseContext({
+        phase: "rebalance_close",
+        positionRunId: runId,
         tokenId: currentTokenId,
-        feeValueOverrideUsd: preCloseCollectableUsd,
+        band: existingBand || undefined,
       });
+      try {
+        await this.closePosition({
+          npmAddress: npm,
+          tokenId: currentTokenId,
+          feeValueOverrideUsd: Number(preCloseCollectable?.usd || 0),
+          feeBreakdownOverride: preCloseCollectable,
+        });
+      } finally {
+        this.clearLifecyclePhaseContext();
+      }
       this.state.position = {
         ...this.state.position,
         tokenId: null,
@@ -3830,12 +4807,14 @@ class Uc6Bot {
     // Only normalize after closing an existing position. When opening from a failed prior attempt,
     // keep inventory mix to avoid repeated back-and-forth swaps.
     if (closedExistingPosition) {
-      await this.normalizeInventoryToUsdc({
-        router,
-        fee: snapshot.fee,
-        tickSpacing: snapshot.tickSpacing,
-        snapshot,
-      });
+      await runSwapStep(async () =>
+        await this.normalizeInventoryToUsdc({
+          router,
+          fee: snapshot.fee,
+          tickSpacing: snapshot.tickSpacing,
+          snapshot,
+        })
+      );
     }
 
     let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
@@ -3851,16 +4830,18 @@ class Uc6Bot {
     let deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
     if (deployableUsdcRaw <= 0n && wethBalanceRaw > 0n) {
       // If wallet drifted to WETH while no position exists, restore deployable USDC once.
-      await this.swapExactInputSingle({
-        router,
-        tokenIn: this.weth,
-        tokenOut: this.usdc,
-        amountIn: wethBalanceRaw,
-        slippageBps: this.settings.slippageBps,
-        fee: snapshot.fee,
-        tickSpacing: snapshot.tickSpacing,
-        snapshot,
-      });
+      await runSwapStep(async () =>
+        await this.swapExactInputSingle({
+          router,
+          tokenIn: this.weth,
+          tokenOut: this.usdc,
+          amountIn: wethBalanceRaw,
+          slippageBps: this.settings.slippageBps,
+          fee: snapshot.fee,
+          tickSpacing: snapshot.tickSpacing,
+          snapshot,
+        })
+      );
       usdcBalanceRaw = await this.readTokenBalance(this.usdc);
       wethBalanceRaw = await this.readTokenBalance(this.weth);
       freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
@@ -3882,16 +4863,18 @@ class Uc6Bot {
     // Move only part of USDC to WETH. Use ceil division so small deploy amounts still get some WETH.
     const swapIn = (deployableUsdcRaw + 1n) / 2n;
     if (swapIn > 0n) {
-      await this.swapExactInputSingle({
-        router,
-        tokenIn: this.usdc,
-        tokenOut: this.weth,
-        amountIn: swapIn,
-        slippageBps: this.settings.slippageBps,
-        fee: snapshot.fee,
-        tickSpacing: snapshot.tickSpacing,
-        snapshot,
-      });
+      await runSwapStep(async () =>
+        await this.swapExactInputSingle({
+          router,
+          tokenIn: this.usdc,
+          tokenOut: this.weth,
+          amountIn: swapIn,
+          slippageBps: this.settings.slippageBps,
+          fee: snapshot.fee,
+          tickSpacing: snapshot.tickSpacing,
+          snapshot,
+        })
+      );
     }
 
     const usdcAfter = await this.readTokenBalance(this.usdc);
@@ -3906,30 +4889,34 @@ class Uc6Bot {
       if (wethToUse <= 0n && usdcToUse > 0n) {
         const topUpUsdcIn = usdcToUse / 4n;
         if (topUpUsdcIn > 0n) {
-          await this.swapExactInputSingle({
-            router,
-            tokenIn: this.usdc,
-            tokenOut: this.weth,
-            amountIn: topUpUsdcIn,
-            slippageBps: this.settings.slippageBps,
-            fee: snapshot.fee,
-            tickSpacing: snapshot.tickSpacing,
-            snapshot,
-          });
+          await runSwapStep(async () =>
+            await this.swapExactInputSingle({
+              router,
+              tokenIn: this.usdc,
+              tokenOut: this.weth,
+              amountIn: topUpUsdcIn,
+              slippageBps: this.settings.slippageBps,
+              fee: snapshot.fee,
+              tickSpacing: snapshot.tickSpacing,
+              snapshot,
+            })
+          );
         }
       } else if (usdcToUse <= 0n && wethToUse > 0n) {
         const topUpWethIn = wethToUse / 4n;
         if (topUpWethIn > 0n) {
-          await this.swapExactInputSingle({
-            router,
-            tokenIn: this.weth,
-            tokenOut: this.usdc,
-            amountIn: topUpWethIn,
-            slippageBps: this.settings.slippageBps,
-            fee: snapshot.fee,
-            tickSpacing: snapshot.tickSpacing,
-            snapshot,
-          });
+          await runSwapStep(async () =>
+            await this.swapExactInputSingle({
+              router,
+              tokenIn: this.weth,
+              tokenOut: this.usdc,
+              amountIn: topUpWethIn,
+              slippageBps: this.settings.slippageBps,
+              fee: snapshot.fee,
+              tickSpacing: snapshot.tickSpacing,
+              snapshot,
+            })
+          );
         }
       }
 
@@ -4000,20 +4987,34 @@ class Uc6Bot {
       }
 
       try {
-        minted = await this.mintPosition({
-          npmAddress: npm,
-          token0,
-          token1,
-          fee: mintBasis.fee,
-          tickSpacing: mintBasis.tickSpacing,
-          tickLower: targetRange.tickLower,
-          tickUpper: targetRange.tickUpper,
-          amount0Desired,
-          amount1Desired,
-          slippageBps: this.settings.slippageBps,
-          sqrtPriceX96: mintBasis.sqrtPriceX96,
-          venue: "slipstream",
+        this.setLifecyclePhaseContext({
+          phase: closedExistingPosition ? "rebalance_mint" : "open_mint",
+          positionRunId: runId,
+          tokenId: null,
+          band: {
+            bandHalfBps: Number(this.settings.bandHalfBps || 0),
+            tickLower: targetRange.tickLower,
+            tickUpper: targetRange.tickUpper,
+          },
         });
+        try {
+          minted = await this.mintPosition({
+            npmAddress: npm,
+            token0,
+            token1,
+            fee: mintBasis.fee,
+            tickSpacing: mintBasis.tickSpacing,
+            tickLower: targetRange.tickLower,
+            tickUpper: targetRange.tickUpper,
+            amount0Desired,
+            amount1Desired,
+            slippageBps: this.settings.slippageBps,
+            sqrtPriceX96: mintBasis.sqrtPriceX96,
+            venue: "slipstream",
+          });
+        } finally {
+          this.clearLifecyclePhaseContext();
+        }
         break;
       } catch (err) {
         lastMintErr = err;
@@ -4199,6 +5200,7 @@ class Uc6Bot {
       this.setLastError(err);
     }
     await this.refreshCollectableNowMaybe();
+    await this.maybeEmitPendingEntrySnapshot().catch((err) => this.setLastError(err));
 
     const tokenId = this.state.position?.tokenId;
     if (tokenId && this.state.position?.tickLower != null && this.state.position?.tickUpper != null) {
@@ -4432,6 +5434,9 @@ class Uc6Bot {
       analytics: {
         bandPerformance,
       },
+      positionsSummary: this.getPositionsSummary(POSITION_SUMMARY_LIMIT),
+      activePositionRunId: this.state.activePositionRunId ? String(this.state.activePositionRunId) : null,
+      activePositionRecord: this.getActivePositionRecord(),
       providers: {
         http: this.httpPool.snapshotStatus(),
         ws: this.wsHeadWatcher.status(),
@@ -4637,19 +5642,52 @@ class Uc6Bot {
       if (tokenId) {
         this.beginAction("liquidate", "owner_liquidate_and_pause");
         try {
+          const activeSnapshot = this.state.latest?.primary || this.state.latest?.fallback || null;
+          const runId = this.ensureActivePositionRun({
+            reason: "manual",
+            snapshot: activeSnapshot,
+            tokenId,
+          });
+          await this.appendLifecycleEvent(
+            this.lifecycleCommonFields({
+              type: "CLOSE_POSITION_START",
+              positionRunId: runId,
+              tokenId,
+              band: this.currentBandDescriptor(),
+              accounting: this.emptyLifecycleAccounting(),
+              details: { reason: "owner_liquidate_and_pause" },
+            })
+          ).catch((err) => this.setLastError(err));
           let preCloseCollectableUsd = Number(this.state.latest?.collectableNow?.usd || 0);
+          let preCloseCollectable = this.state.latest?.collectableNow || {
+            usdc: 0,
+            weth: 0,
+            usd: preCloseCollectableUsd,
+          };
           try {
             const freshCollectable = await this.collectableNowSnapshot();
             this.state.latest.collectableNow = freshCollectable;
             preCloseCollectableUsd = Number(freshCollectable?.usd || preCloseCollectableUsd || 0);
+            preCloseCollectable = freshCollectable;
           } catch {
             // keep last known collectable snapshot if refresh fails
           }
-          await this.closePosition({
-            npmAddress,
+          this.setLifecyclePhaseContext({
+            phase: "final_close",
+            positionRunId: runId,
             tokenId,
-            feeValueOverrideUsd: preCloseCollectableUsd,
+            band: this.currentBandDescriptor(),
           });
+          try {
+            await this.closePosition({
+              npmAddress,
+              tokenId,
+              feeValueOverrideUsd: preCloseCollectableUsd,
+              feeBreakdownOverride: preCloseCollectable,
+            });
+          } finally {
+            this.clearLifecyclePhaseContext();
+          }
           this.state.position = {
             ...this.state.position,
             venue,
@@ -4661,6 +5699,8 @@ class Uc6Bot {
             inRange: null,
           };
           this.state.pendingCompoundUsd = 0;
+          this.state.pendingEntrySnapshot = null;
+          this.state.activePositionRunId = null;
           this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
           this.finalizeActiveAction("liquidate", "owner_liquidate_and_pause");
           liquidated = true;
@@ -4732,6 +5772,12 @@ class Uc6Bot {
 
     if (req.method === "GET" && u.pathname === "/status") {
       return jsonResponse(res, 200, this.statusPayload());
+    }
+
+    if (req.method === "GET" && u.pathname === "/positions") {
+      const page = Number(u.searchParams.get("page") || 1);
+      const pageSize = Number(u.searchParams.get("pageSize") || POSITION_PAGE_SIZE_DEFAULT);
+      return jsonResponse(res, 200, this.getPositionRecordsPage(page, pageSize));
     }
 
     if (u.pathname.startsWith("/owner/")) {
