@@ -31,6 +31,10 @@ const EVENT_RING_LIMIT = 5;
 const ACCOUNTING_EVENT_LIMIT = 5000;
 const MIN_IDLE_TOPUP_USD = 1;
 const USDC_RESERVE_GUARD_RAW = BigInt(250000); // 0.25 USDC safety buffer above reserve target
+const CAPITAL_SAMPLE_MIN_INTERVAL_MS = 5 * 60 * 1000;
+const CAPITAL_SAMPLE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000;
+const CAPITAL_SAMPLE_MAX_GAP_MS = 30 * 60 * 1000;
+const CAPITAL_SAMPLE_MAX_POINTS = 15_000;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -653,6 +657,11 @@ function defaultState(accountAddress) {
       lastSampleAtIso: null,
       eligibleMs: 0,
       inRangeMs: 0,
+    },
+    capitalStats: {
+      sinceIso: nowIso(),
+      lastSampleAtIso: null,
+      samples: [],
     },
     position: {
       venue: "slipstream",
@@ -1359,11 +1368,23 @@ class Uc6Bot {
         ...this.state.rangeStats,
       };
     }
+    if (!this.state.capitalStats || typeof this.state.capitalStats !== "object") {
+      this.state.capitalStats = { ...baseState.capitalStats };
+    } else {
+      this.state.capitalStats = {
+        ...baseState.capitalStats,
+        ...this.state.capitalStats,
+      };
+    }
+    if (!Array.isArray(this.state.capitalStats.samples)) this.state.capitalStats.samples = [];
     if (this.state.events.length > EVENT_RING_LIMIT) {
       this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
     }
     if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
       this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
+    }
+    if (this.state.capitalStats.samples.length > CAPITAL_SAMPLE_MAX_POINTS) {
+      this.state.capitalStats.samples = this.state.capitalStats.samples.slice(-CAPITAL_SAMPLE_MAX_POINTS);
     }
   }
 
@@ -1432,6 +1453,113 @@ class Uc6Bot {
     }
     this.state.rangeStats.lastSampleAtIso = new Date(nowMs).toISOString();
     if (!this.state.rangeStats.sinceIso) this.state.rangeStats.sinceIso = this.state.rangeStats.lastSampleAtIso;
+  }
+
+  estimateAggregatedLpUsdValueFromLatest() {
+    const latest = this.state.latest || {};
+    const positionInventory = latest.positionInventory || null;
+    if (positionInventory && Number(positionInventory.activeCount || 0) > 0) {
+      return Number(positionInventory.totalUsdValue || 0);
+    }
+    return this.estimateTrackedLpUsdValueFromLatest();
+  }
+
+  ensureCapitalStatsSampler(nowMs = Date.now()) {
+    if (!this.state.capitalStats || typeof this.state.capitalStats !== "object") {
+      this.state.capitalStats = {
+        sinceIso: new Date(nowMs).toISOString(),
+        lastSampleAtIso: null,
+        samples: [],
+      };
+    }
+    if (!Array.isArray(this.state.capitalStats.samples)) this.state.capitalStats.samples = [];
+    if (!this.state.capitalStats.sinceIso) this.state.capitalStats.sinceIso = new Date(nowMs).toISOString();
+    return this.state.capitalStats;
+  }
+
+  updateCapitalStats(deployedUsd, nowMs = Date.now()) {
+    const value = Number(deployedUsd);
+    if (!Number.isFinite(value) || value < 0) return;
+    const stats = this.ensureCapitalStatsSampler(nowMs);
+    const prevIso = stats.lastSampleAtIso || null;
+    const prevMs = prevIso ? Date.parse(prevIso) : NaN;
+    const shouldSample =
+      !Number.isFinite(prevMs) ||
+      nowMs <= prevMs ||
+      nowMs - prevMs >= CAPITAL_SAMPLE_MIN_INTERVAL_MS;
+    stats.lastSampleAtIso = new Date(nowMs).toISOString();
+    if (!shouldSample) return;
+
+    stats.samples.push({
+      atIso: stats.lastSampleAtIso,
+      deployedUsd: value,
+    });
+
+    const cutoffMs = nowMs - CAPITAL_SAMPLE_RETENTION_MS;
+    stats.samples = stats.samples
+      .filter((s) => {
+        const t = Date.parse(s?.atIso || "");
+        return Number.isFinite(t) && t >= cutoffMs;
+      })
+      .slice(-CAPITAL_SAMPLE_MAX_POINTS);
+  }
+
+  averageDeployedUsdSince(sinceMs, fallbackUsd, nowMs = Date.now()) {
+    const fallback = Number.isFinite(Number(fallbackUsd)) ? Number(fallbackUsd) : 0;
+    if (!(Number.isFinite(sinceMs) && Number.isFinite(nowMs) && nowMs > sinceMs)) {
+      return fallback > 0 ? fallback : 1;
+    }
+    const stats = this.state.capitalStats;
+    const samplesRaw = Array.isArray(stats?.samples) ? stats.samples : [];
+    const samples = samplesRaw
+      .map((s) => ({
+        atMs: Date.parse(s?.atIso || ""),
+        deployedUsd: Number(s?.deployedUsd || 0),
+      }))
+      .filter((s) => Number.isFinite(s.atMs) && Number.isFinite(s.deployedUsd) && s.deployedUsd >= 0)
+      .sort((a, b) => a.atMs - b.atMs);
+
+    if (samples.length === 0) return fallback > 0 ? fallback : 1;
+
+    let weightedUsdMs = 0;
+    let coveredMs = 0;
+
+    let prev = null;
+    for (const sample of samples) {
+      if (sample.atMs <= sinceMs) prev = sample;
+      if (sample.atMs > sinceMs) break;
+    }
+    if (!prev) {
+      prev = samples.find((s) => s.atMs >= sinceMs) || null;
+    }
+    if (!prev) return fallback > 0 ? fallback : 1;
+
+    for (const sample of samples) {
+      if (sample.atMs <= prev.atMs) continue;
+      const start = Math.max(prev.atMs, sinceMs);
+      const end = Math.min(sample.atMs, nowMs);
+      const delta = end - start;
+      if (delta > 0 && delta <= CAPITAL_SAMPLE_MAX_GAP_MS) {
+        weightedUsdMs += prev.deployedUsd * delta;
+        coveredMs += delta;
+      }
+      prev = sample;
+      if (sample.atMs >= nowMs) break;
+    }
+
+    if (prev) {
+      const tailStart = Math.max(prev.atMs, sinceMs);
+      const tailEnd = nowMs;
+      const tailDelta = tailEnd - tailStart;
+      if (tailDelta > 0 && tailDelta <= CAPITAL_SAMPLE_MAX_GAP_MS) {
+        weightedUsdMs += prev.deployedUsd * tailDelta;
+        coveredMs += tailDelta;
+      }
+    }
+
+    if (coveredMs <= 0) return fallback > 0 ? fallback : 1;
+    const avg = weightedUsdMs / coveredMs;
+    return avg > 0 ? avg : fallback > 0 ? fallback : 1;
   }
 
   async assertTxAllowed(context = "tx") {
@@ -3176,11 +3304,58 @@ class Uc6Bot {
   }
 
   computeTargetRange(currentTick, tickSpacing, bandHalfBps) {
-    const center = this.floorTick(currentTick, tickSpacing);
-    const delta = this.toTickDelta(bandHalfBps, tickSpacing);
-    let tickLower = this.floorTick(center - delta, tickSpacing);
-    let tickUpper = this.ceilTick(center + delta, tickSpacing);
-    if (tickUpper <= tickLower) tickUpper = tickLower + tickSpacing;
+    const tick = Math.round(Number(currentTick || 0));
+    const spacing = Math.max(1, Math.round(Number(tickSpacing || 0)));
+    const targetHalfBps = Math.max(1, Number(bandHalfBps || 0));
+    const priceFactor = 1 + targetHalfBps / 10_000;
+    const targetHalfTicks = Math.max(1, Math.round(Math.log(priceFactor) / Math.log(1.0001)));
+    const targetSpanTicks = Math.max(spacing, targetHalfTicks * 2);
+    const baseSpanSteps = Math.max(1, Math.round(targetSpanTicks / spacing));
+
+    let best = null;
+    const consider = (tickLower, tickUpper) => {
+      if (!(Number.isFinite(tickLower) && Number.isFinite(tickUpper))) return;
+      if (tickUpper <= tickLower) return;
+      if (!(tick > tickLower && tick < tickUpper)) return;
+      const effBps = this.estimateBandHalfBpsFromTicks(tickLower, tickUpper);
+      if (!(Number.isFinite(effBps) && effBps > 0)) return;
+      const center = Math.round((tickLower + tickUpper) / 2);
+      const widthDiff = Math.abs(effBps - targetHalfBps);
+      const centerDiff = Math.abs(((tickLower + tickUpper) / 2) - tick);
+      const narrowerPenalty = effBps < targetHalfBps ? 1 : 0;
+      const score = widthDiff * 1_000_000 + centerDiff * 10 + narrowerPenalty;
+      if (!best || score < best.score) {
+        best = { score, centerTick: center, tickLower, tickUpper, bandHalfBpsEffective: effBps };
+      }
+    };
+
+    for (let stepOffset = -4; stepOffset <= 4; stepOffset += 1) {
+      const spanSteps = baseSpanSteps + stepOffset;
+      if (spanSteps <= 0) continue;
+      const span = spanSteps * spacing;
+      const idealLower = tick - span / 2;
+      const baseLowerCandidates = new Set([
+        this.floorTick(idealLower, spacing),
+        this.ceilTick(idealLower, spacing),
+      ]);
+      for (const baseLower of baseLowerCandidates) {
+        for (const shift of [-spacing, 0, spacing]) {
+          const tickLower = baseLower + shift;
+          const tickUpper = tickLower + span;
+          consider(tickLower, tickUpper);
+        }
+      }
+    }
+
+    if (best) {
+      return { centerTick: best.centerTick, tickLower: best.tickLower, tickUpper: best.tickUpper };
+    }
+
+    const center = this.floorTick(tick, spacing);
+    const delta = this.toTickDelta(targetHalfBps, spacing);
+    let tickLower = this.floorTick(center - delta, spacing);
+    let tickUpper = this.ceilTick(center + delta, spacing);
+    if (tickUpper <= tickLower) tickUpper = tickLower + spacing;
     return { centerTick: center, tickLower, tickUpper };
   }
 
@@ -5207,6 +5382,7 @@ class Uc6Bot {
       const tick = snapshots.primary.tick;
       this.state.position.inRange = tick > this.state.position.tickLower && tick < this.state.position.tickUpper;
     }
+    this.updateCapitalStats(this.estimateAggregatedLpUsdValueFromLatest(), Date.now());
     this.updateRangeStats(Date.now());
 
     await this.evaluateAndAct();
@@ -5272,10 +5448,7 @@ class Uc6Bot {
 
     const distance = this.distanceToEdge(pos, Number(activePool?.tick ?? 0));
     const positionInventory = latest.positionInventory || null;
-    const aggregatedLpUsdValue =
-      positionInventory && Number(positionInventory.activeCount || 0) > 0
-        ? Number(positionInventory.totalUsdValue || 0)
-        : lpUsdValue;
+    const aggregatedLpUsdValue = this.estimateAggregatedLpUsdValueFromLatest() || lpUsdValue;
     const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(walletValueUsd + aggregatedLpUsdValue);
     const reserveTargetUsd = reserveTargetUsdc;
     const portfolioTotalUsd = walletValueUsd + aggregatedLpUsdValue;
@@ -5296,12 +5469,12 @@ class Uc6Bot {
     const bandPerformance = this.summarizeBandPerformance(eventsAll);
 
     const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
-    const avgCapitalToday = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
-    const avgCapital7d = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
-    const avgCapital30d = aggregatedLpUsdValue > 0 ? aggregatedLpUsdValue : 1;
-    const aprToday = aggregatedLpUsdValue > 0 ? (todayStats.netUsd / avgCapitalToday) * 365 : null;
-    const apr7d = aggregatedLpUsdValue > 0 ? (stats7d.netUsd / avgCapital7d) * 365 : null;
-    const apr30d = events30d.length > 0 && aggregatedLpUsdValue > 0 ? (stats30d.netUsd / avgCapital30d) * 365 : null;
+    const avgCapitalToday = this.averageDeployedUsdSince(todayStart, aggregatedLpUsdValue, now);
+    const avgCapital7d = this.averageDeployedUsdSince(now - 7 * 24 * 60 * 60 * 1000, aggregatedLpUsdValue, now);
+    const avgCapital30d = this.averageDeployedUsdSince(now - 30 * 24 * 60 * 60 * 1000, aggregatedLpUsdValue, now);
+    const aprToday = avgCapitalToday > 0 ? (todayStats.netUsd / avgCapitalToday) * (365 / 1) : null;
+    const apr7d = avgCapital7d > 0 ? (stats7d.netUsd / avgCapital7d) * (365 / 7) : null;
+    const apr30d = events30d.length > 0 && avgCapital30d > 0 ? (stats30d.netUsd / avgCapital30d) * (365 / 30) : null;
     const churnRatioToday = Number.isFinite(todayStats.churnRatio) ? todayStats.churnRatio : null;
     const rangeStats = this.state.rangeStats || {};
     const inRangeEligibleMs = Number(rangeStats.inRangeMs || 0);
@@ -5406,26 +5579,32 @@ class Uc6Bot {
         collectableNow,
         collectedTodayUsd: todayStats.feesUsd,
         collected7dUsd: stats7d.feesUsd,
+        collected30dUsd: stats30d.feesUsd,
         collectedTotalUsd: statsAll.feesUsd,
         pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
       },
       costs: {
         gasTodayUsd: todayStats.gasUsd,
         gas7dUsd: stats7d.gasUsd,
+        gas30dUsd: stats30d.gasUsd,
         gasTotalUsd: statsAll.gasUsd,
         swapCostsTodayUsd: todayStats.swapCostsUsd,
         swapCosts7dUsd: stats7d.swapCostsUsd,
+        swapCosts30dUsd: stats30d.swapCostsUsd,
         swapCostsTotalUsd: statsAll.swapCostsUsd,
         mintBurnTodayUsd: todayStats.mintBurnUsd,
         mintBurn7dUsd: stats7d.mintBurnUsd,
+        mintBurn30dUsd: stats30d.mintBurnUsd,
         mintBurnTotalUsd: statsAll.mintBurnUsd,
         totalTodayUsd: todayStats.totalCostsUsd,
         total7dUsd: stats7d.totalCostsUsd,
+        total30dUsd: stats30d.totalCostsUsd,
         totalTotalUsd: statsAll.totalCostsUsd,
       },
       pnl: {
         netTodayUsd: todayStats.netUsd,
         net7dUsd: stats7d.netUsd,
+        net30dUsd: stats30d.netUsd,
         netTotalUsd: statsAll.netUsd,
         aprToday,
         apr7d,

@@ -227,26 +227,32 @@ type Uc6Status = {
     collectableNow?: { usdc?: number; weth?: number; usd?: number; isEstimated?: boolean };
     collectedTodayUsd?: number;
     collected7dUsd?: number;
+    collected30dUsd?: number;
     collectedTotalUsd?: number;
     pendingCompoundUsd?: number;
   };
   costs?: {
     gasTodayUsd?: number;
     gas7dUsd?: number;
+    gas30dUsd?: number;
     gasTotalUsd?: number;
     swapCostsTodayUsd?: number;
     swapCosts7dUsd?: number;
+    swapCosts30dUsd?: number;
     swapCostsTotalUsd?: number;
     mintBurnTodayUsd?: number;
     mintBurn7dUsd?: number;
+    mintBurn30dUsd?: number;
     mintBurnTotalUsd?: number;
     totalTodayUsd?: number;
     total7dUsd?: number;
+    total30dUsd?: number;
     totalTotalUsd?: number;
   };
   pnl?: {
     netTodayUsd?: number;
     net7dUsd?: number;
+    net30dUsd?: number;
     netTotalUsd?: number;
     aprToday?: number | null;
     apr7d?: number | null;
@@ -1238,11 +1244,11 @@ export default function Uc6Page() {
                   fmtPct(n(status?.pnl?.apr7d, 0) * 100),
                 ],
                 [
-                  "All-time",
-                  fmtUsd(status?.fees?.collectedTotalUsd),
+                  "30D",
+                  fmtUsd(status?.fees?.collected30dUsd),
                   "$0.00",
-                  fmtUsd(status?.costs?.totalTotalUsd),
-                  fmtUsd(status?.pnl?.netTotalUsd),
+                  fmtUsd(status?.costs?.total30dUsd),
+                  fmtUsd(status?.pnl?.net30dUsd),
                   status?.pnl?.apr30d == null ? "—" : fmtPct(n(status?.pnl?.apr30d, 0) * 100),
                 ],
               ]}
@@ -1252,7 +1258,7 @@ export default function Uc6Page() {
               {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
             </div>
             <div style={{ ...styles.note, marginTop: 10 }}>
-              Band performance (completed runs only; one row per `bandHalfBps` used at the time of recenter).
+              Band performance (completed runs only; currently grouped by actual placed band width after tick-grid snapping, not configured target).
             </div>
             <SimpleTable
               headers={["Band", "Runs", "Fees Total", "Fees Avg", "Avg Fees / LP", "Avg Time To Rebalance", "Net Total"]}
