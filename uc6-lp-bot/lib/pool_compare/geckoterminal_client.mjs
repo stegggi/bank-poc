@@ -23,7 +23,9 @@ function parseRetryAfterMs(headerValue) {
 }
 
 function buildUrl(baseUrl, pathname, params = {}) {
-  const url = new URL(pathname, baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  const base = new URL(baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`);
+  const relPath = String(pathname || "").replace(/^\/+/, "");
+  const url = new URL(relPath, base);
   for (const [k, v] of Object.entries(params || {})) {
     if (v == null) continue;
     url.searchParams.set(k, String(v));
@@ -168,4 +170,3 @@ export function createGeckoTerminalClient({
     },
   };
 }
-
