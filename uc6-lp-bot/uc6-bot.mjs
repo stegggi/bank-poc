@@ -2039,8 +2039,9 @@ class Uc6Bot {
     } catch {
       return null;
     }
-    const wethLower = String(this.weth || "").toLowerCase();
-    const usdcLower = String(this.usdc || "").toLowerCase();
+    const wethLower = String(this.weth || ENV.weth || "").toLowerCase();
+    const usdcLower = String(this.usdc || ENV.usdc || "").toLowerCase();
+    if (!wethLower || !usdcLower) return null;
     const token0IsWeth = wethLower < usdcLower;
     const wethRaw = token0IsWeth ? amount0Used : amount1Used;
     const usdcRaw = token0IsWeth ? amount1Used : amount0Used;
@@ -2053,28 +2054,76 @@ class Uc6Bot {
   deriveFallbackEntryBaselineForRecord(rec, { closeAtIso = null } = {}) {
     if (!rec?.tokenId) return null;
     const tokenId = String(rec.tokenId);
-    const events = (Array.isArray(this.positionLifecycleEvents) ? this.positionLifecycleEvents : [])
-      .filter((ev) => {
+    const allEvents = Array.isArray(this.positionLifecycleEvents) ? this.positionLifecycleEvents : [];
+    const byTokenEvents = allEvents.filter((ev) => {
         const candidates = [
           ev?.tokenId,
           ev?.details?.mintedTokenId,
           ev?.details?.closedTokenId,
         ].filter(Boolean).map((v) => String(v));
         return candidates.includes(tokenId);
-      })
-      .slice()
-      .sort((a, b) => Date.parse(a?.atIso || "") - Date.parse(b?.atIso || ""));
-    if (!events.length) return null;
+      });
+    const openTxSet = new Set(
+      (Array.isArray(rec?.tx?.openTxHashes) ? rec.tx.openTxHashes : [])
+        .filter(Boolean)
+        .map((h) => String(h).toLowerCase())
+    );
+    const byOpenTxEvents = openTxSet.size > 0
+      ? allEvents.filter((ev) => {
+          const hashes = Array.isArray(ev?.txHashes) ? ev.txHashes : [];
+          return hashes.some((h) => openTxSet.has(String(h).toLowerCase()));
+        })
+      : [];
+    const events = [...byTokenEvents];
+    for (const ev of byOpenTxEvents) {
+      if (!events.includes(ev)) events.push(ev);
+    }
+    events.sort((a, b) => Date.parse(a?.atIso || "") - Date.parse(b?.atIso || ""));
+    if (!events.length) {
+      const rawMintValueUsd = Number(rec.entry?.rawMintValueUsd || 0);
+      if (!(rawMintValueUsd > 0)) return null;
+      const pExit = Number(rec?.exit?.spotPriceUsdcPerWeth || 0);
+      return {
+        entrySnapshotAtIso: rec.entry?.openedAtIso || closeAtIso || null,
+        entryTokens: { weth: 0, usdc: 0 },
+        entryValueUsd: rawMintValueUsd,
+        spotPriceUsdcPerWeth: Math.max(0, pExit),
+        rawMintValueUsd,
+        approx: true,
+        note: "entry snapshot fallback (value-only from raw mint value)",
+      };
+    }
 
     const mintEv = events.find((ev) => ev?.type === "OPEN_MINT" || ev?.type === "REBALANCE_MINT");
-    if (!mintEv) return null;
+    if (!mintEv) {
+      const rawMintValueUsd = Number(rec.entry?.rawMintValueUsd || 0);
+      if (!(rawMintValueUsd > 0)) return null;
+      const firstAt = events[0]?.atIso || rec.entry?.openedAtIso || closeAtIso || null;
+      const spot = Number(
+        events.find((ev) => Number(ev?.spotPriceUsdcPerWeth || 0) > 0)?.spotPriceUsdcPerWeth ||
+        rec?.exit?.spotPriceUsdcPerWeth || 0
+      );
+      return {
+        entrySnapshotAtIso: firstAt,
+        entryTokens: { weth: 0, usdc: 0 },
+        entryValueUsd: rawMintValueUsd,
+        spotPriceUsdcPerWeth: Math.max(0, spot),
+        rawMintValueUsd,
+        approx: true,
+        note: "entry snapshot fallback (value-only; mint event missing in journal)",
+      };
+    }
     const mintMs = Date.parse(mintEv.atIso || "");
     if (!Number.isFinite(mintMs)) return null;
 
     const mintPrincipal = this.mintPrincipalForLifecycleEvent(mintEv);
+    const hasMintTokenBaseline = Boolean(mintPrincipal) &&
+      (Number(mintPrincipal?.weth || 0) > 0 || Number(mintPrincipal?.usdc || 0) > 0);
     let entryWeth = Number(mintPrincipal?.weth || 0);
     let entryUsdc = Number(mintPrincipal?.usdc || 0);
     let rawMintValueUsd = Number(rec.entry?.rawMintValueUsd || mintEv?.details?.rawMintValueUsd || 0);
+    let topupWeth = 0;
+    let topupUsdc = 0;
 
     let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
     const closeMs = Date.parse(closeAtIso || rec?.exit?.closedAtIso || "");
@@ -2087,8 +2136,14 @@ class Uc6Bot {
       if (ev === mintEv) continue;
       if (ev?.type === "TOP_UP") {
         const p = ev?.details?.principalAdded || {};
-        entryWeth += Number(p.weth || 0);
-        entryUsdc += Number(p.usdc || 0);
+        const addWeth = Number(p.weth || 0);
+        const addUsdc = Number(p.usdc || 0);
+        topupWeth += addWeth;
+        topupUsdc += addUsdc;
+        if (hasMintTokenBaseline) {
+          entryWeth += addWeth;
+          entryUsdc += addUsdc;
+        }
         lastIncludedEv = ev;
       }
     }
@@ -2101,21 +2156,37 @@ class Uc6Bot {
       Number(rec?.exit?.spotPriceUsdcPerWeth || 0),
     ];
     const spot = spotCandidates.find((v) => Number.isFinite(v) && v > 0) || 0;
-    const entryValueUsd = spot > 0 ? (entryUsdc + (entryWeth * spot)) : Math.max(0, rawMintValueUsd);
+    const topupValueUsd = (topupUsdc > 0 ? topupUsdc : 0) + (spot > 0 ? (topupWeth * spot) : 0);
+    let entryValueUsd = 0;
+    if (rawMintValueUsd > 0) {
+      // Most reliable for tax backfill: mint event already stores raw USD at execution time.
+      entryValueUsd = rawMintValueUsd + topupValueUsd;
+    } else if (spot > 0 && hasMintTokenBaseline) {
+      entryValueUsd = entryUsdc + (entryWeth * spot);
+    } else {
+      entryValueUsd = Math.max(0, rawMintValueUsd);
+    }
     const entryAtIso = lastIncludedEv?.atIso || mintEv?.atIso || closeAtIso || null;
 
-    if (!(entryValueUsd > 0) && !(entryWeth > 0 || entryUsdc > 0)) return null;
+    if (!(entryValueUsd > 0) && !(entryWeth > 0 || entryUsdc > 0 || topupWeth > 0 || topupUsdc > 0)) return null;
+    const entryTokens = hasMintTokenBaseline
+      ? { weth: Math.max(0, entryWeth), usdc: Math.max(0, entryUsdc) }
+      : { weth: 0, usdc: 0 };
+    const noteBase =
+      Number.isFinite(closeMs) && closeMs - mintMs < 60_000
+        ? "entry snapshot fallback (position closed before delayed entry snapshot)"
+        : "entry snapshot fallback (reconstructed from mint/top-up events)";
+    const note = hasMintTokenBaseline
+      ? noteBase
+      : `${noteBase}; value baseline recovered but token baseline unavailable`;
     return {
       entrySnapshotAtIso: entryAtIso,
-      entryTokens: { weth: Math.max(0, entryWeth), usdc: Math.max(0, entryUsdc) },
+      entryTokens,
       entryValueUsd: Math.max(0, entryValueUsd),
       spotPriceUsdcPerWeth: Math.max(0, Number(spot || 0)),
       rawMintValueUsd: rawMintValueUsd > 0 ? rawMintValueUsd : null,
       approx: true,
-      note:
-        Number.isFinite(closeMs) && closeMs - mintMs < 60_000
-          ? "entry snapshot fallback (position closed before delayed entry snapshot)"
-          : "entry snapshot fallback (reconstructed from mint/top-up events)",
+      note,
     };
   }
 
