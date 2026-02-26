@@ -2190,6 +2190,93 @@ class Uc6Bot {
     };
   }
 
+  deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso = null } = {}) {
+    if (!rec) return null;
+    const tokenId = rec?.tokenId != null ? String(rec.tokenId) : "";
+    const allEvents = Array.isArray(this.positionLifecycleEvents) ? this.positionLifecycleEvents : [];
+    const openTxSet = new Set(
+      (Array.isArray(rec?.tx?.openTxHashes) ? rec.tx.openTxHashes : [])
+        .filter(Boolean)
+        .map((h) => String(h).toLowerCase())
+    );
+    const events = allEvents.filter((ev) => {
+      const tokenCandidates = [
+        ev?.tokenId,
+        ev?.details?.mintedTokenId,
+        ev?.details?.closedTokenId,
+      ]
+        .filter(Boolean)
+        .map((v) => String(v));
+      const tokenMatch = tokenId ? tokenCandidates.includes(tokenId) : false;
+      const txMatch = openTxSet.size > 0
+        ? (Array.isArray(ev?.txHashes) ? ev.txHashes : []).some((h) => openTxSet.has(String(h).toLowerCase()))
+        : false;
+      return tokenMatch || txMatch;
+    });
+    events.sort((a, b) => Date.parse(a?.atIso || "") - Date.parse(b?.atIso || ""));
+
+    const mintEv = events.find((ev) => ev?.type === "OPEN_MINT" || ev?.type === "REBALANCE_MINT");
+    const closeMs = Date.parse(closeAtIso || rec?.exit?.closedAtIso || "");
+    const exitSpot = Number(rec?.exit?.spotPriceUsdcPerWeth || 0);
+    const recRawMintValue = Number(rec?.entry?.rawMintValueUsd || 0);
+
+    if (!mintEv) {
+      if (!(recRawMintValue > 0)) return null;
+      return {
+        entrySnapshotAtIso: rec?.entry?.openedAtIso || closeAtIso || nowIso(),
+        entryTokens: { weth: 0, usdc: 0 },
+        entryValueUsd: recRawMintValue,
+        spotPriceUsdcPerWeth: Math.max(0, exitSpot),
+        rawMintValueUsd: recRawMintValue,
+        approx: true,
+        note: "entry snapshot fallback (value-only from stored raw mint value)",
+      };
+    }
+
+    const mintMs = Date.parse(mintEv?.atIso || "");
+    if (!Number.isFinite(mintMs)) return null;
+    let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
+    if (Number.isFinite(closeMs)) cutoffMs = Math.min(cutoffMs, closeMs);
+
+    const spotCandidates = [
+      Number(mintEv?.details?.spotPriceUsdcPerWeth || 0),
+      Number(mintEv?.spotPriceUsdcPerWeth || 0),
+      exitSpot,
+    ];
+    const baseSpot = spotCandidates.find((v) => Number.isFinite(v) && v > 0) || 0;
+    let valueUsd = Number(mintEv?.details?.rawMintValueUsd || recRawMintValue || 0);
+    let lastIncludedEv = mintEv;
+
+    for (const ev of events) {
+      const evMs = Date.parse(ev?.atIso || "");
+      if (!Number.isFinite(evMs) || evMs < mintMs || evMs > cutoffMs) continue;
+      if (ev === mintEv) continue;
+      if (ev?.type !== "TOP_UP") continue;
+      const p = ev?.details?.principalAdded || {};
+      const addUsdc = Number(p.usdc || 0);
+      const addWeth = Number(p.weth || 0);
+      const spot = Number(
+        ev?.details?.spotPriceUsdcPerWeth ||
+        ev?.spotPriceUsdcPerWeth ||
+        baseSpot ||
+        0
+      );
+      valueUsd += Math.max(0, addUsdc) + (spot > 0 ? Math.max(0, addWeth) * spot : 0);
+      lastIncludedEv = ev;
+    }
+
+    if (!(valueUsd > 0)) return null;
+    return {
+      entrySnapshotAtIso: lastIncludedEv?.atIso || mintEv?.atIso || rec?.entry?.openedAtIso || closeAtIso || nowIso(),
+      entryTokens: { weth: 0, usdc: 0 },
+      entryValueUsd: valueUsd,
+      spotPriceUsdcPerWeth: Math.max(0, baseSpot),
+      rawMintValueUsd: Number(mintEv?.details?.rawMintValueUsd || recRawMintValue || 0) || null,
+      approx: true,
+      note: "entry snapshot fallback (value-only reconstruction from mint/top-up events)",
+    };
+  }
+
   applyEntryBaselineFallbackToRecord(rec, baseline) {
     if (!rec || !baseline) return false;
     const beforeKey = JSON.stringify({
@@ -2230,7 +2317,10 @@ class Uc6Bot {
 
   ensureEntryBaselineBeforeClose(rec, { closeAtIso = null } = {}) {
     if (!rec || !this.isEntrySnapshotMissing(rec)) return false;
-    const baseline = this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso });
+    let baseline = this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso });
+    if (!baseline) {
+      baseline = this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso });
+    }
     if (!baseline) return false;
     return this.applyEntryBaselineFallbackToRecord(rec, baseline);
   }
