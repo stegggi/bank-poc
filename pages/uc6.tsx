@@ -685,6 +685,12 @@ function actualBandHalfPctFromTicks(tickLower?: number | null, tickUpper?: numbe
   return (ratioHalf - 1) * 100;
 }
 
+function formatRecordBandLabel(record: Pick<PositionLifecycleRecord, "band">): string {
+  const actualPct = actualBandHalfPctFromTicks(record.band?.tickLower, record.band?.tickUpper);
+  if (actualPct != null) return `±${fmtPct(actualPct)}`;
+  return `±${(n(record.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
+}
+
 function fmtDurationCompact(seconds: number | null | undefined): string {
   if (seconds == null || Number.isNaN(seconds)) return "—";
   const s = Math.max(0, Math.round(Number(seconds)));
@@ -1313,7 +1319,7 @@ export default function Uc6Page() {
                     label="Band"
                     value={
                       <span title={`${activeLifecycleRecord.band?.tickLower ?? "—"} .. ${activeLifecycleRecord.band?.tickUpper ?? "—"}`}>
-                        ±{fmtPct(n(activeLifecycleRecord.band?.bandHalfBps, 0) / 100)}
+                        {formatRecordBandLabel(activeLifecycleRecord)}
                       </span>
                     }
                   />
@@ -1377,7 +1383,7 @@ export default function Uc6Page() {
                   ) : (
                     closedPositionRecords.map((rec) => {
                       const selectorLabel = rec.selector?.humanLabel || `${rec.selector?.type || "—"}:${String(rec.selector?.value ?? "—")}`;
-                      const bandLabel = `±${(n(rec.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
+                      const bandLabel = formatRecordBandLabel(rec);
                       const ticksLabel = `${rec.band?.tickLower ?? "—"} .. ${rec.band?.tickUpper ?? "—"}`;
                       const divVsHodlUsd = n(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd, 0);
                       const feesNetUsd = n(rec.performance?.feesNetUsd, 0);
@@ -1720,7 +1726,7 @@ function PositionRecordDrawer({
               label="Band"
               value={
                 <span title={`${record.band?.tickLower ?? "—"} .. ${record.band?.tickUpper ?? "—"}`}>
-                  ±{fmtPct(n(record.band?.bandHalfBps, 0) / 100)}
+                  {formatRecordBandLabel(record)}
                 </span>
               }
             />
