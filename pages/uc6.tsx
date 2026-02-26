@@ -1232,7 +1232,7 @@ export default function Uc6Page() {
             </div>
           </Card>
 
-          <Card title="LP Position Composition">
+          <Card title="LP Position Composition" fullWidth wideViewport>
             {isOwner && (
               <div style={{ ...styles.row, marginBottom: 12 }}>
                 <button
