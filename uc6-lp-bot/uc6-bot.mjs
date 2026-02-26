@@ -1270,6 +1270,8 @@ class Uc6Bot {
     this.positionLifecycleEvents = [];
     this.positionRecords = [];
     this.positionRecordsById = new Map();
+    this.lifecycleCurrentTokenByRunId = new Map();
+    this.lifecyclePendingOpenByRunId = new Map();
     this.pendingLifecycleContext = null;
     this.lifecyclePhaseContext = null;
   }
@@ -1296,6 +1298,8 @@ class Uc6Bot {
       this.positionLifecycleEvents = [];
       this.positionRecords = [];
       this.positionRecordsById = new Map();
+      this.lifecycleCurrentTokenByRunId = new Map();
+      this.lifecyclePendingOpenByRunId = new Map();
       this.setLastError(err);
     }
 
@@ -1682,6 +1686,7 @@ class Uc6Bot {
   emptyLifecycleRecord(seed = {}) {
     return {
       id: seed.id || randomUUID(),
+      tokenId: seed.tokenId || null,
       chain: { name: "Base", chainId: base.id },
       venue: seed.venue || "slipstream",
       poolAddress: seed.poolAddress || this.slipstreamPool,
@@ -1829,6 +1834,8 @@ class Uc6Bot {
     this.positionLifecycleEvents = await readJsonLinesIfExists(POSITION_EVENTS_PATH);
     this.positionRecordsById = new Map();
     this.positionRecords = [];
+    this.lifecycleCurrentTokenByRunId = new Map();
+    this.lifecyclePendingOpenByRunId = new Map();
     for (const ev of this.positionLifecycleEvents) {
       try {
         this.applyLifecycleEventToRecords(ev);
@@ -1844,6 +1851,7 @@ class Uc6Bot {
     if (!rec && createFromEvent) {
       rec = this.emptyLifecycleRecord({
         id,
+        tokenId: createFromEvent.tokenId || createFromEvent.details?.mintedTokenId || id,
         venue: createFromEvent.venue,
         poolAddress: createFromEvent.poolAddress,
         selector:
@@ -1879,6 +1887,115 @@ class Uc6Bot {
     perf.mintBurnUsd += Number(accounting.mintBurnUsd || 0);
     perf.feesCollectedUsd += Number(accounting.feesCollectedUsd || 0);
     perf.rewardsUsd += Number(accounting.rewardsUsd || 0);
+  }
+
+  getOrCreatePendingOpenForRun(runId, seed = null) {
+    if (!runId) return null;
+    let pending = this.lifecyclePendingOpenByRunId.get(runId);
+    if (!pending) {
+      pending = {
+        openedAtIso: null,
+        selector: null,
+        band: null,
+        accounting: this.emptyLifecycleAccounting(),
+        tx: {
+          openTxHashes: [],
+          allTxHashes: [],
+        },
+        activity: {
+          swaps: 0,
+        },
+        notes: null,
+      };
+      this.lifecyclePendingOpenByRunId.set(runId, pending);
+    }
+    if (seed && typeof seed === "object") {
+      if (seed.openedAtIso) pending.openedAtIso = pending.openedAtIso || String(seed.openedAtIso);
+      if (seed.selector && typeof seed.selector === "object") pending.selector = { ...(pending.selector || {}), ...seed.selector };
+      if (seed.band && typeof seed.band === "object") {
+        pending.band = {
+          bandHalfBps: Number(seed.band.bandHalfBps || pending.band?.bandHalfBps || 0),
+          tickLower: Number(seed.band.tickLower ?? pending.band?.tickLower ?? 0),
+          tickUpper: Number(seed.band.tickUpper ?? pending.band?.tickUpper ?? 0),
+        };
+      }
+      if (seed.notes && !pending.notes) pending.notes = String(seed.notes);
+    }
+    return pending;
+  }
+
+  addLifecycleEventToPendingOpen(pending, ev, { countAsSwap = false } = {}) {
+    if (!pending || !ev) return;
+    if (ev.accounting) {
+      pending.accounting.gasUsd += Number(ev.accounting.gasUsd || 0);
+      pending.accounting.swapCostUsd += Number(ev.accounting.swapCostUsd || 0);
+      pending.accounting.mintBurnUsd += Number(ev.accounting.mintBurnUsd || 0);
+      pending.accounting.feesCollectedUsd += Number(ev.accounting.feesCollectedUsd || 0);
+      pending.accounting.rewardsUsd += Number(ev.accounting.rewardsUsd || 0);
+      pending.accounting.isEstimated = Boolean(pending.accounting.isEstimated || ev.accounting.isEstimated);
+    }
+    const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes : [];
+    this.addUniqueTxHashes(pending.tx.openTxHashes, txHashes);
+    this.addUniqueTxHashes(pending.tx.allTxHashes, txHashes);
+    if (countAsSwap) pending.activity.swaps += 1;
+    if (ev.details?.selector && typeof ev.details.selector === "object") {
+      pending.selector = { ...(pending.selector || {}), ...ev.details.selector };
+    }
+    if (ev.band && typeof ev.band === "object") {
+      pending.band = {
+        bandHalfBps: Number(ev.band.bandHalfBps || pending.band?.bandHalfBps || 0),
+        tickLower: Number(ev.band.tickLower ?? pending.band?.tickLower ?? 0),
+        tickUpper: Number(ev.band.tickUpper ?? pending.band?.tickUpper ?? 0),
+      };
+    }
+  }
+
+  applyPendingOpenToRecord(rec, pending) {
+    if (!rec || !pending) return;
+    rec.entry.openedAtIso = rec.entry.openedAtIso || pending.openedAtIso || rec.entry.openedAtIso;
+    if (pending.selector) rec.selector = { ...rec.selector, ...pending.selector };
+    if (pending.band) {
+      rec.band = {
+        bandHalfBps: Number(pending.band.bandHalfBps || rec.band.bandHalfBps || 0),
+        tickLower: Number(pending.band.tickLower ?? rec.band.tickLower ?? 0),
+        tickUpper: Number(pending.band.tickUpper ?? rec.band.tickUpper ?? 0),
+      };
+    }
+    this.addAccountingToRecord(rec, pending.accounting);
+    this.addUniqueTxHashes(rec.tx.openTxHashes, pending.tx.openTxHashes);
+    this.addUniqueTxHashes(rec.tx.allTxHashes, pending.tx.allTxHashes);
+    rec.activity.swaps += Number(pending.activity?.swaps || 0);
+    rec.activity.txCount = rec.tx.allTxHashes.length;
+    if (!rec.notes && pending.notes) rec.notes = pending.notes;
+  }
+
+  closeLifecycleRecordFromPrincipalOut(rec, { atIso = null, principalOut = null, spotPriceUsdcPerWeth = null, exitValueUsd = null } = {}) {
+    if (!rec) return;
+    const principal = principalOut && typeof principalOut === "object" ? principalOut : {};
+    const exitTokens = {
+      weth: Number(principal.weth || 0),
+      usdc: Number(principal.usdc || 0),
+    };
+    rec.exit.exitTokens = exitTokens;
+    const spot = Number(spotPriceUsdcPerWeth || rec.exit?.spotPriceUsdcPerWeth || 0);
+    if (spot > 0) rec.exit.spotPriceUsdcPerWeth = spot;
+    const computedExitValueUsd = exitTokens.usdc + exitTokens.weth * (spot > 0 ? spot : 0);
+    rec.exit.exitValueUsd = Number.isFinite(Number(exitValueUsd)) && Number(exitValueUsd) > 0
+      ? Number(exitValueUsd)
+      : (spot > 0 ? computedExitValueUsd : Number(rec.exit?.exitValueUsd || 0) || null);
+    rec.exit.closedAtIso = atIso || rec.exit.closedAtIso || nowIso();
+    rec.status = "CLOSED";
+
+    const baselineWeth = Number(rec._internal?.baselineWeth || 0);
+    const baselineUsdc = Number(rec._internal?.baselineUsdc || 0);
+    const pExit = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
+    if (pExit > 0) {
+      const hodlExit = baselineWeth * pExit + baselineUsdc;
+      const lpExitPrincipal = exitTokens.weth * pExit + exitTokens.usdc;
+      if (Number.isFinite(hodlExit) && Number.isFinite(lpExitPrincipal)) {
+        rec.performance.impermanentLossUsd = lpExitPrincipal - hodlExit;
+      }
+    }
   }
 
   updateBaselineFromSwap(rec, details = {}) {
@@ -1951,137 +2068,199 @@ class Uc6Bot {
     if (!ev || typeof ev !== "object") return;
     const runId = String(ev.positionRunId || "");
     if (!runId) return;
-    const rec = this.getLifecycleRecordById(runId, { createFromEvent: ev });
-    if (!rec) return;
-
-    rec.updatedAtIso = ev.atIso || nowIso();
-    if (ev.venue) rec.venue = ev.venue;
-    if (ev.poolAddress) rec.poolAddress = ev.poolAddress;
-    if (ev.details?.selector) rec.selector = { ...rec.selector, ...ev.details.selector };
-    if (ev.band && typeof ev.band === "object") {
-      rec.band = {
-        bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
-        tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
-        tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
-      };
-    }
-
-    if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
-    const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes : [];
-    this.addUniqueTxHashes(rec.tx.allTxHashes, txHashes);
-    rec.activity.txCount = rec.tx.allTxHashes.length;
-
     const type = String(ev.type || "");
+    const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes : [];
+    const touchRecordCommon = (rec) => {
+      if (!rec) return;
+      rec.updatedAtIso = ev.atIso || nowIso();
+      if (ev.venue) rec.venue = ev.venue;
+      if (ev.poolAddress) rec.poolAddress = ev.poolAddress;
+      if (ev.details?.selector) rec.selector = { ...rec.selector, ...ev.details.selector };
+      if (ev.band && typeof ev.band === "object") {
+        rec.band = {
+          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
+          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
+          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
+        };
+      }
+      if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
+      this.addUniqueTxHashes(rec.tx.allTxHashes, txHashes);
+      rec.activity.txCount = rec.tx.allTxHashes.length;
+    };
+    const currentTokenId = this.lifecycleCurrentTokenByRunId.get(runId) || null;
+    const resolveTokenId = (...candidates) => {
+      for (const c of candidates) {
+        if (c == null) continue;
+        const s = String(c);
+        if (s) return s;
+      }
+      return null;
+    };
+    const getRecordForToken = (tokenId, { create = false, seedEvent = ev } = {}) => {
+      const id = resolveTokenId(tokenId);
+      if (!id) return null;
+      let rec = this.positionRecordsById.get(id);
+      if (!rec && create) {
+        rec = this.getLifecycleRecordById(id, {
+          createFromEvent: {
+            ...seedEvent,
+            tokenId: id,
+          },
+        });
+        if (rec) rec.tokenId = id;
+      }
+      if (rec && !rec.tokenId) rec.tokenId = id;
+      return rec;
+    };
+
     if (type === "OPEN_POSITION") {
-      rec.entry.openedAtIso = ev.atIso || rec.entry.openedAtIso;
-      rec.status = "OPEN";
-      rec.notes = rec.notes || null;
-      rec.selector = ev.details?.selector || rec.selector;
-      if (ev.band) {
-        rec.band = {
-          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
-          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
-          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
-        };
+      const pending = this.getOrCreatePendingOpenForRun(runId, {
+        openedAtIso: ev.atIso,
+        selector: ev.details?.selector || null,
+        band: ev.band || ev.details?.plannedBand || null,
+      });
+      if (pending) pending.notes = pending.notes || String(ev.details?.reason || "open_position");
+    } else if (type === "OPEN_SWAP" || type === "REBALANCE_INVENTORY_SWAP") {
+      const pending = this.getOrCreatePendingOpenForRun(runId, {
+        openedAtIso: ev.atIso,
+        band: ev.band || null,
+      });
+      this.addLifecycleEventToPendingOpen(pending, ev, { countAsSwap: true });
+    } else if (type === "OPEN_MINT" || type === "REBALANCE_MINT") {
+      const mintedTokenId = resolveTokenId(ev.details?.mintedTokenId, ev.tokenId);
+      const rec = getRecordForToken(mintedTokenId, { create: true });
+      if (rec) {
+        const pending = this.getOrCreatePendingOpenForRun(runId, null);
+        if (pending) {
+          this.applyPendingOpenToRecord(rec, pending);
+          this.lifecyclePendingOpenByRunId.delete(runId);
+        }
+        touchRecordCommon(rec);
+        rec.status = "OPEN";
+        rec.entry.openedAtIso = ev.atIso || rec.entry.openedAtIso;
+        this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
+        if (ev.band) rec.band = { ...rec.band, ...ev.band };
+        const rawMintValueUsd = Number(ev.details?.rawMintValueUsd || 0);
+        if (rawMintValueUsd > 0 && !(Number(rec.entry.rawMintValueUsd || 0) > 0)) {
+          rec.entry.rawMintValueUsd = rawMintValueUsd;
+        }
+        this.recomputeLifecycleRecordDerived(rec);
       }
-      rec._internal.openPhaseDone = false;
-    } else if (type === "OPEN_SWAP") {
-      rec.activity.swaps += 1;
-      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
-    } else if (type === "OPEN_MINT") {
-      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
-      if (ev.details?.mintedTokenId) rec.notes = rec.notes || null;
-      if (ev.band) rec.band = { ...rec.band, ...ev.band };
-      const rawMintValueUsd = Number(ev.details?.rawMintValueUsd || 0);
-      if (rawMintValueUsd > 0 && !(Number(rec.entry.rawMintValueUsd || 0) > 0)) {
-        rec.entry.rawMintValueUsd = rawMintValueUsd;
-      }
+      if (mintedTokenId) this.lifecycleCurrentTokenByRunId.set(runId, mintedTokenId);
     } else if (type === "TOP_UP") {
-      rec.activity.swaps += Number(ev.details?.swapsInAction || 0);
-      this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
-      this.updateBaselineFromPrincipalAdd(rec, ev.details?.principalAdded || {});
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        rec.activity.swaps += Number(ev.details?.swapsInAction || 0);
+        this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
+        this.updateBaselineFromPrincipalAdd(rec, ev.details?.principalAdded || {});
+        this.recomputeLifecycleRecordDerived(rec);
+      }
     } else if (type === "ENTRY_SNAPSHOT") {
-      const entryTokens = ev.details?.entryTokens || {};
-      rec.entry.entrySnapshotAtIso = ev.atIso || rec.entry.entrySnapshotAtIso;
-      rec.entry.entryValueUsd = Number(ev.details?.entryValueUsd || rec.entry.entryValueUsd || 0);
-      rec.entry.entryTokens = {
-        weth: Number(entryTokens.weth || 0),
-        usdc: Number(entryTokens.usdc || 0),
-      };
-      rec.entry.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0);
-      if (Number(ev.details?.rawMintValueUsd || 0) > 0) {
-        rec.entry.rawMintValueUsd = Number(ev.details.rawMintValueUsd);
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        const entryTokens = ev.details?.entryTokens || {};
+        rec.entry.entrySnapshotAtIso = ev.atIso || rec.entry.entrySnapshotAtIso;
+        rec.entry.entryValueUsd = Number(ev.details?.entryValueUsd || rec.entry.entryValueUsd || 0);
+        rec.entry.entryTokens = {
+          weth: Number(entryTokens.weth || 0),
+          usdc: Number(entryTokens.usdc || 0),
+        };
+        rec.entry.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0);
+        if (Number(ev.details?.rawMintValueUsd || 0) > 0) {
+          rec.entry.rawMintValueUsd = Number(ev.details.rawMintValueUsd);
+        }
+        rec._internal.baselineWeth = rec.entry.entryTokens.weth;
+        rec._internal.baselineUsdc = rec.entry.entryTokens.usdc;
+        rec._internal.entryCaptured = true;
+        rec._internal.openPhaseDone = true;
+        this.recomputeLifecycleRecordDerived(rec);
       }
-      rec._internal.baselineWeth = rec.entry.entryTokens.weth;
-      rec._internal.baselineUsdc = rec.entry.entryTokens.usdc;
-      rec._internal.entryCaptured = true;
-      rec._internal.openPhaseDone = true;
     } else if (type === "HARVEST_COLLECT") {
-      rec.activity.harvests += 1;
-    } else if (type === "REBALANCE_START") {
-      rec.activity.rebalances += 1;
-      if (ev.details?.newBand) {
-        const b = ev.details.newBand;
-        rec.band = {
-          bandHalfBps: Number(b.bandHalfBps || rec.band.bandHalfBps || 0),
-          tickLower: Number(b.tickLower ?? rec.band.tickLower ?? 0),
-          tickUpper: Number(b.tickUpper ?? rec.band.tickUpper ?? 0),
-        };
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        rec.activity.harvests += 1;
+        this.recomputeLifecycleRecordDerived(rec);
       }
+    } else if (type === "REBALANCE_START") {
+      const closingTokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(closingTokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        rec.activity.rebalances += 1;
+        this.recomputeLifecycleRecordDerived(rec);
+      }
+      this.getOrCreatePendingOpenForRun(runId, {
+        openedAtIso: ev.atIso,
+        band: ev.details?.newBand || null,
+      });
     } else if (type === "REBALANCE_CLOSE") {
-      // fees already included via accounting; track close hashes only when final close, not rebalance close
-    } else if (type === "REBALANCE_INVENTORY_SWAP") {
-      rec.activity.swaps += 1;
-      this.updateBaselineFromSwap(rec, ev.details || {});
-    } else if (type === "REBALANCE_MINT") {
-      if (ev.band) {
-        rec.band = {
-          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
-          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
-          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
-        };
+      const tokenId = resolveTokenId(ev.details?.closedTokenId, ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+        const principalOut = ev.details?.principalOut || {};
+        this.closeLifecycleRecordFromPrincipalOut(rec, {
+          atIso: ev.atIso || null,
+          principalOut,
+          spotPriceUsdcPerWeth: Number(ev.spotPriceUsdcPerWeth || 0),
+        });
+        this.recomputeLifecycleRecordDerived(rec);
+      }
+      if (tokenId && this.lifecycleCurrentTokenByRunId.get(runId) === tokenId) {
+        this.lifecycleCurrentTokenByRunId.delete(runId);
       }
     } else if (type === "CLOSE_POSITION_START") {
-      this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+        this.recomputeLifecycleRecordDerived(rec);
+      }
     } else if (type === "CLOSE_POSITION") {
-      this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
-      const principalOut = ev.details?.principalOut || {};
-      const exitTokens = ev.details?.exitTokens || principalOut;
-      if (exitTokens) {
-        rec.exit.exitTokens = {
-          weth: Number(exitTokens.weth || 0),
-          usdc: Number(exitTokens.usdc || 0),
-        };
+      const tokenId = resolveTokenId(ev.details?.closedTokenId, ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
+        const principalOut = ev.details?.principalOut || {};
+        this.closeLifecycleRecordFromPrincipalOut(rec, {
+          atIso: ev.atIso || null,
+          principalOut,
+          spotPriceUsdcPerWeth: Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0),
+          exitValueUsd: Number(ev.details?.exitValueUsd || 0),
+        });
+        this.recomputeLifecycleRecordDerived(rec);
       }
-      if (Number(ev.details?.exitValueUsd || 0) > 0) {
-        rec.exit.exitValueUsd = Number(ev.details.exitValueUsd);
+      if (tokenId && this.lifecycleCurrentTokenByRunId.get(runId) === tokenId) {
+        this.lifecycleCurrentTokenByRunId.delete(runId);
       }
-      if (Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || 0) > 0) {
-        rec.exit.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth);
-      }
-      rec.exit.closedAtIso = ev.atIso || rec.exit.closedAtIso;
     } else if (type === "EXIT_SNAPSHOT") {
-      const exitTokens = ev.details?.exitTokens || rec.exit.exitTokens || {};
-      rec.exit.closedAtIso = ev.atIso || rec.exit.closedAtIso;
-      rec.exit.exitTokens = {
-        weth: Number(exitTokens.weth || 0),
-        usdc: Number(exitTokens.usdc || 0),
-      };
-      rec.exit.exitValueUsd = Number(ev.details?.exitValueUsd || rec.exit.exitValueUsd || 0);
-      rec.exit.spotPriceUsdcPerWeth = Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || rec.exit.spotPriceUsdcPerWeth || 0);
-      rec.status = "CLOSED";
-
-      const baselineWeth = Number(rec._internal?.baselineWeth || 0);
-      const baselineUsdc = Number(rec._internal?.baselineUsdc || 0);
-      const pExit = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
-      const hodlExit = baselineWeth * pExit + baselineUsdc;
-      const lpExitPrincipal = Number(rec.exit?.exitTokens?.weth || 0) * pExit + Number(rec.exit?.exitTokens?.usdc || 0);
-      if (pExit > 0 && Number.isFinite(hodlExit) && Number.isFinite(lpExitPrincipal)) {
-        rec.performance.impermanentLossUsd = lpExitPrincipal - hodlExit;
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        const exitTokens = ev.details?.exitTokens || rec.exit.exitTokens || {};
+        this.closeLifecycleRecordFromPrincipalOut(rec, {
+          atIso: ev.atIso || null,
+          principalOut: exitTokens,
+          spotPriceUsdcPerWeth: Number(ev.details?.spotPriceUsdcPerWeth || ev.spotPriceUsdcPerWeth || rec.exit?.spotPriceUsdcPerWeth || 0),
+          exitValueUsd: Number(ev.details?.exitValueUsd || rec.exit?.exitValueUsd || 0),
+        });
+        this.recomputeLifecycleRecordDerived(rec);
+      }
+      if (tokenId && this.lifecycleCurrentTokenByRunId.get(runId) === tokenId) {
+        this.lifecycleCurrentTokenByRunId.delete(runId);
       }
     }
 
-    this.recomputeLifecycleRecordDerived(rec);
     this.positionRecords.sort((a, b) => {
       const aClosed = Date.parse(a?.exit?.closedAtIso || "");
       const bClosed = Date.parse(b?.exit?.closedAtIso || "");
@@ -2172,9 +2351,9 @@ class Uc6Bot {
   }
 
   getActivePositionRecord() {
-    const runId = this.state.activePositionRunId ? String(this.state.activePositionRunId) : null;
-    if (!runId) return null;
-    const rec = this.positionRecordsById.get(runId);
+    const tokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
+    if (!tokenId) return null;
+    const rec = this.positionRecordsById.get(tokenId);
     if (!rec || rec.status === "CLOSED") return null;
     return this.sanitizePositionRecordForPersist(rec);
   }
@@ -5659,7 +5838,7 @@ class Uc6Bot {
       },
       positionsSummary: this.getPositionsSummary(POSITION_SUMMARY_LIMIT),
       positionsTaxSummary: this.getPositionsTaxSummary(),
-      activePositionRunId: this.state.activePositionRunId ? String(this.state.activePositionRunId) : null,
+      activePositionId: this.state.position?.tokenId ? String(this.state.position.tokenId) : null,
       activePositionRecord: this.getActivePositionRecord(),
       providers: {
         http: this.httpPool.snapshotStatus(),

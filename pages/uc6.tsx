@@ -79,6 +79,7 @@ type OwnerPayload = {
 
 type PositionLifecycleRecord = {
   id: string;
+  tokenId?: string | null;
   chain?: { name?: string; chainId?: number };
   venue?: Uc6Venue | string;
   poolAddress?: string;
@@ -346,7 +347,7 @@ type Uc6Status = {
       lastClosedAtIso?: string | null;
     }>;
   };
-  activePositionRunId?: string | null;
+  activePositionId?: string | null;
   activePositionRecord?: PositionLifecycleRecord | null;
   counters?: { reason?: string };
   events?: {
@@ -1135,10 +1136,14 @@ export default function Uc6Page() {
             </div>
 
             <div style={styles.recordActiveWrap}>
-              <div style={styles.recordActiveTitle}>Active (Open) Strategy Run</div>
+              <div style={styles.recordActiveTitle}>Active (Open) LP Position</div>
               {activeLifecycleRecord ? (
                 <div style={styles.metaGrid}>
-                  <Metric label="Run ID" value={activeLifecycleRecord.id || "—"} mono />
+                  <Metric
+                    label="Token ID (LP NFT)"
+                    value={activeLifecycleRecord.tokenId || activeLifecycleRecord.id || status?.activePositionId || "—"}
+                    mono
+                  />
                   <Metric
                     label="Pair"
                     value={`${activeLifecycleRecord.pair?.base || "WETH"}/${activeLifecycleRecord.pair?.quote || "USDC"}`}
@@ -1162,12 +1167,12 @@ export default function Uc6Page() {
                   <Metric label="Status" value={activeLifecycleRecord.status || "OPEN"} />
                 </div>
               ) : (
-                <div style={styles.note}>No active open lifecycle record.</div>
+                <div style={styles.note}>No active open LP position record.</div>
               )}
             </div>
 
             <div style={{ ...styles.note, marginTop: 12 }}>
-              Closed positions only. Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs.
+              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs.
             </div>
 
             <div style={styles.tableWrap}>
