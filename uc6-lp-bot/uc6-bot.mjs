@@ -22,6 +22,10 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { verifyMessage } from "ethers";
 import { createRegimeState, estimateOU, getRegimeAdvice, ingestSample } from "./lib/regime.mjs";
+import {
+  loadPoolComparisonCache as loadPoolComparisonCacheFile,
+  runPoolComparisonJob,
+} from "./lib/pool_compare/job.mjs";
 
 const VERSION = "uc6-lp-bot/0.1";
 const USDC_DECIMALS = 6;
@@ -73,10 +77,14 @@ const SETTINGS_PATH = path.join(ENV.dataDir, "settings.json");
 const STATE_PATH = path.join(ENV.dataDir, "state.json");
 const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
 const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
+const POOL_RANKINGS_PATH = path.join(ENV.dataDir, "pool_rankings.json");
+const POOL_TVL_HISTORY_PATH = path.join(ENV.dataDir, "pool_tvl_history.jsonl");
 const POSITION_SUMMARY_LIMIT = 20;
 const POSITION_PAGE_SIZE_DEFAULT = 10;
 const POSITION_PAGE_SIZE_MAX = 100;
 const REGIME_WARN_MIN_INTERVAL_MS = 60_000;
+const POOL_COMPARISON_CHECK_INTERVAL_MS = 60 * 60 * 1000;
+const POOL_COMPARISON_STALE_MS = 24 * 60 * 60 * 1000;
 
 const POOL_ABI = [
   {
@@ -526,6 +534,13 @@ const DEFAULT_SETTINGS = {
     maxBandAdjBps: 50,
     maxCooldownAdjSec: 900,
   },
+  poolComparison: {
+    enabled: true,
+    computeHourUtc: 8,
+    maxCandidatesPerDex: 50,
+    topN: 5,
+    rebalanceSwapNotionalPct: 0.1,
+  },
 };
 
 function sleep(ms) {
@@ -569,6 +584,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
   const src = input && typeof input === "object" ? input : {};
   const baseRegime = baseSettings.regime && typeof baseSettings.regime === "object" ? baseSettings.regime : DEFAULT_SETTINGS.regime;
   const srcRegime = src.regime && typeof src.regime === "object" ? src.regime : {};
+  const basePoolComparison =
+    baseSettings.poolComparison && typeof baseSettings.poolComparison === "object"
+      ? baseSettings.poolComparison
+      : DEFAULT_SETTINGS.poolComparison;
+  const srcPoolComparison = src.poolComparison && typeof src.poolComparison === "object" ? src.poolComparison : {};
   const killSwitch = toBool(src.killSwitch, baseSettings.killSwitch);
   const reserveMinUsdc = clamp(
     toNumber(src.reserveMinUsdc ?? src.keepUsdcReserve, baseSettings.reserveMinUsdc),
@@ -690,6 +710,25 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         ),
         0,
         86_400
+      ),
+    },
+    poolComparison: {
+      enabled: toBool(srcPoolComparison.enabled, basePoolComparison.enabled),
+      computeHourUtc: clamp(
+        Math.round(toNumber(srcPoolComparison.computeHourUtc, basePoolComparison.computeHourUtc)),
+        0,
+        23
+      ),
+      maxCandidatesPerDex: clamp(
+        Math.round(toNumber(srcPoolComparison.maxCandidatesPerDex, basePoolComparison.maxCandidatesPerDex)),
+        5,
+        100
+      ),
+      topN: clamp(Math.round(toNumber(srcPoolComparison.topN, basePoolComparison.topN)), 1, 20),
+      rebalanceSwapNotionalPct: clamp(
+        toNumber(srcPoolComparison.rebalanceSwapNotionalPct, basePoolComparison.rebalanceSwapNotionalPct),
+        0,
+        1
       ),
     },
   };
@@ -1346,6 +1385,10 @@ class Uc6Bot {
     this.regimeState = null;
     this.regimeStateConfigKey = "";
     this.lastRegimeWarnAtMs = 0;
+    this.poolComparisonCache = null;
+    this.poolComparisonLastError = null;
+    this.poolComparisonLastCheckAtMs = 0;
+    this.poolComparisonJobPromise = null;
   }
 
   async init() {
@@ -1373,6 +1416,13 @@ class Uc6Bot {
       this.lifecycleCurrentTokenByRunId = new Map();
       this.lifecyclePendingOpenByRunId = new Map();
       this.setLastError(err);
+    }
+
+    try {
+      await this.loadPoolComparisonCache();
+    } catch (err) {
+      this.poolComparisonCache = null;
+      this.setPoolComparisonError(err);
     }
 
     try {
@@ -1937,6 +1987,161 @@ class Uc6Bot {
     // reflects the current reducer logic (including historical backfills that
     // may be reconstructed during replay before the explicit repair pass).
     await this.persistPositionRecords();
+  }
+
+  async loadPoolComparisonCache() {
+    const cached = await loadPoolComparisonCacheFile(POOL_RANKINGS_PATH);
+    this.poolComparisonCache = cached && typeof cached === "object" ? cached : null;
+    return this.poolComparisonCache;
+  }
+
+  setPoolComparisonError(err) {
+    const message = err instanceof Error ? err.message : String(err || "unknown");
+    this.poolComparisonLastError = {
+      atIso: nowIso(),
+      message,
+    };
+  }
+
+  clearPoolComparisonError() {
+    this.poolComparisonLastError = null;
+  }
+
+  getPoolComparisonGasBaselineUsd() {
+    try {
+      const now = Date.now();
+      const stats7d = this.summarizeEvents(this.getEventsSince(now - 7 * 24 * 60 * 60 * 1000));
+      const rebalances = Math.max(0, Number(stats7d?.rebalances || 0));
+      const gasUsd = Math.max(0, Number(stats7d?.gasUsd || 0));
+      if (rebalances > 0 && Number.isFinite(gasUsd)) {
+        return Math.max(0.001, gasUsd / rebalances);
+      }
+    } catch {
+      // ignore and use fallback
+    }
+    return 0.03;
+  }
+
+  symbolForPoolCompareAddress(addr) {
+    if (!addr) return null;
+    if (sameAddress(addr, this.weth)) return "WETH";
+    if (sameAddress(addr, this.usdc)) return "USDC";
+    return null;
+  }
+
+  buildPoolComparisonCurrentRef() {
+    const latest = this.state.latest || {};
+    const primary = latest.primary || null;
+    const fallback = latest.fallback || null;
+    const venueActive = this.settings.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const activePool = venueActive === "uniswapv3" ? fallback || primary : primary || fallback;
+    const selectorType = venueActive === "uniswapv3" ? "feeTier" : "tickSpacing";
+    const selectorValue =
+      selectorType === "feeTier"
+        ? (Number.isFinite(Number(activePool?.fee)) ? Number(activePool.fee) : null)
+        : (Number.isFinite(Number(activePool?.tickSpacing)) ? Number(activePool.tickSpacing) : null);
+    const refCapitalUsd = this.estimateAggregatedLpUsdValueFromLatest();
+    const gasBaselineUsd = this.getPoolComparisonGasBaselineUsd();
+
+    const token0 = activePool?.token0 || this.weth;
+    const token1 = activePool?.token1 || this.usdc;
+    const baseSymbol = this.symbolForPoolCompareAddress(token0) || "WETH";
+    const quoteSymbol = this.symbolForPoolCompareAddress(token1) || "USDC";
+
+    return {
+      poolAddress: String(activePool?.pool || ENV.slipstreamPool || "").toLowerCase() || null,
+      dexId: null,
+      dexName: venueActive === "uniswapv3" ? "Uniswap v3 (Base)" : "Aerodrome Slipstream",
+      pair: {
+        baseSymbol,
+        quoteSymbol,
+        baseAddress: token0 || null,
+        quoteAddress: token1 || null,
+        pairKey: `${baseSymbol}/${quoteSymbol}`,
+      },
+      selector: {
+        type: selectorType,
+        value: selectorValue,
+      },
+      band: {
+        bandHalfBps: Number(this.settings.bandHalfBps || 0),
+        edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
+      },
+      refCapitalUsd: Math.max(0, Number(refCapitalUsd || 0)),
+      gasBaselineUsd,
+    };
+  }
+
+  isPoolComparisonDue(nowMs = Date.now()) {
+    const cfg = this.settings?.poolComparison;
+    if (!cfg || cfg.enabled === false) return false;
+    const computedMs = Date.parse(this.poolComparisonCache?.computedAtIso || "");
+    if (!Number.isFinite(computedMs)) return true;
+    if (nowMs - computedMs >= POOL_COMPARISON_STALE_MS) return true;
+    const cacheDay = utcDayKey(computedMs);
+    const nowDay = utcDayKey(nowMs);
+    if (cacheDay !== nowDay) {
+      const hour = new Date(nowMs).getUTCHours();
+      const computeHourUtc = clamp(Math.round(Number(cfg.computeHourUtc || 8)), 0, 23);
+      if (hour >= computeHourUtc) return true;
+    }
+    return false;
+  }
+
+  maybeStartPoolComparisonJob() {
+    const now = Date.now();
+    if (this.poolComparisonJobPromise) return;
+    if (now - this.poolComparisonLastCheckAtMs < POOL_COMPARISON_CHECK_INTERVAL_MS) return;
+    this.poolComparisonLastCheckAtMs = now;
+    if (!this.isPoolComparisonDue(now)) return;
+
+    const settings = this.settings?.poolComparison || DEFAULT_SETTINGS.poolComparison;
+    const currentRef = this.buildPoolComparisonCurrentRef();
+    this.poolComparisonJobPromise = (async () => {
+      try {
+        const result = await runPoolComparisonJob({
+          rankingsPath: POOL_RANKINGS_PATH,
+          tvlHistoryPath: POOL_TVL_HISTORY_PATH,
+          currentRef,
+          settings,
+          logger: console,
+          fetchFn: globalThis.fetch,
+        });
+        if (result && typeof result === "object") {
+          this.poolComparisonCache = result;
+          if (result.lastError) {
+            this.poolComparisonLastError = {
+              atIso: result.computedAtIso || nowIso(),
+              message: String(result.lastError),
+            };
+          } else {
+            this.clearPoolComparisonError();
+          }
+        }
+      } catch (err) {
+        this.setPoolComparisonError(err);
+      } finally {
+        this.poolComparisonJobPromise = null;
+      }
+    })();
+    this.poolComparisonJobPromise.catch(() => {});
+  }
+
+  getPoolComparisonStatusPayload() {
+    const cached = this.poolComparisonCache && typeof this.poolComparisonCache === "object" ? this.poolComparisonCache : null;
+    const currentRef = this.buildPoolComparisonCurrentRef();
+    return {
+      ok: Boolean(cached?.ok),
+      computedAtIso: cached?.computedAtIso || null,
+      current: cached?.current || null,
+      top5: Array.isArray(cached?.top5) ? cached.top5 : [],
+      ref: cached?.ref || {
+        currentPool: currentRef,
+      },
+      network: cached?.network || { id: "base", name: "Base", chainId: 8453 },
+      notes: cached?.notes || null,
+      lastError: this.poolComparisonLastError || (cached?.lastError ? { atIso: cached?.computedAtIso || null, message: String(cached.lastError) } : null),
+    };
   }
 
   getLifecycleRecordById(id, { createFromEvent = null } = {}) {
@@ -6351,6 +6556,7 @@ class Uc6Bot {
     this.updateRangeStats(Date.now());
 
     await this.evaluateAndAct();
+    this.maybeStartPoolComparisonJob();
   }
 
   async mainLoop() {
@@ -6496,6 +6702,7 @@ class Uc6Bot {
         collectableRefreshEverySec: this.settings.collectableRefreshEverySec,
         dashboardRecommendedPollMs: this.settings.dashboardRecommendedPollMs,
         regime: this.settings.regime,
+        poolComparison: this.settings.poolComparison,
         maxDeployUsdc: this.settings.maxDeployUsdc,
         maxInitialMintUsdc: this.settings.maxInitialMintUsdc,
         minTopUpUsd: this.settings.minTopUpUsd,
@@ -6618,6 +6825,7 @@ class Uc6Bot {
       positionsTaxSummary: this.getPositionsTaxSummary(),
       activePositionId: this.state.position?.tokenId ? String(this.state.position.tokenId) : null,
       activePositionRecord: this.getActivePositionRecord(),
+      poolComparison: this.getPoolComparisonStatusPayload(),
       providers: {
         http: this.httpPool.snapshotStatus(),
         ws: this.wsHeadWatcher.status(),

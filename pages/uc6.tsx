@@ -170,6 +170,74 @@ type PositionRecordsPage = {
   totalPages: number;
 };
 
+type PoolComparisonRow = {
+  rank?: number;
+  isCurrent?: boolean;
+  dex?: { id?: string; name?: string };
+  chain?: { id?: string; chainId?: number };
+  pool?: { address?: string; name?: string | null };
+  pair?: {
+    baseSymbol?: string;
+    quoteSymbol?: string;
+    baseAddress?: string;
+    quoteAddress?: string;
+    pairKey?: string;
+  };
+  selector?: {
+    type?: "feeTier" | "tickSpacing" | "unknown" | string;
+    value?: number | null;
+    feeRate?: number;
+    feeIsEstimated?: boolean;
+  };
+  stats?: {
+    tvlUsd?: number;
+    tvlAvg7dUsd?: number;
+    tvlAvg30dUsd?: number;
+    tvlHistoryDays?: number;
+    volAvg7dUsd?: number;
+    volAvg30dUsd?: number;
+    feePower7d?: number;
+    feePower30d?: number;
+    dailyRangePct7d?: number;
+    volumeStability30d?: number;
+  };
+  economics?: {
+    expectedFeesDayUsd?: number;
+    expectedCostsDayUsd?: number;
+    expectedNetDayUsd?: number;
+    expectedRebalancesPerDay?: number;
+    expectedCostPerRebalanceUsd?: number;
+    gasBaselineUsd?: number;
+    rebalanceSwapNotionalPct?: number;
+  };
+  compareToCurrent?: {
+    rating?: "More" | "Similar" | "Less" | string;
+    reason?: string;
+    expectedNetDiffDayUsd?: number;
+    switchCostUsd?: number;
+    breakEvenDays?: number | null;
+  };
+};
+
+type PoolComparisonStatus = {
+  ok?: boolean;
+  computedAtIso?: string | null;
+  current?: PoolComparisonRow | null;
+  top5?: PoolComparisonRow[];
+  ref?: {
+    currentPool?: {
+      poolAddress?: string | null;
+      dexName?: string | null;
+      pairKey?: string | null;
+      refCapitalUsd?: number;
+      band?: { bandHalfBps?: number; edgeRebalancePct?: number };
+    };
+  };
+  network?: { id?: string; name?: string; chainId?: number };
+  notes?: { limitations?: string[] } | null;
+  lastError?: { atIso?: string | null; message?: string } | null;
+};
+
 type Uc6Status = {
   ok?: boolean;
   ts?: string;
@@ -419,6 +487,7 @@ type Uc6Status = {
   };
   activePositionId?: string | null;
   activePositionRecord?: PositionLifecycleRecord | null;
+  poolComparison?: PoolComparisonStatus;
   counters?: { reason?: string };
   events?: {
     lastN?: Array<{
@@ -629,6 +698,16 @@ function fmtUsd(v: number | null | undefined): string {
   return `$${fmtNum(n, 2)}`;
 }
 
+function fmtUsdCompact(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const x = Number(v);
+  const abs = Math.abs(x);
+  if (abs >= 1_000_000_000) return `$${(x / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `$${(x / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `$${(x / 1_000).toFixed(1)}k`;
+  return fmtUsd(x);
+}
+
 function fmtSignedUsd(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v)) return "—";
   const n = Number(v);
@@ -646,6 +725,43 @@ function fmtPct(v: number | null | undefined, digits = 2): string {
 function fmtRatioPct(ratio: number | null | undefined): string {
   if (ratio == null || Number.isNaN(ratio)) return "—";
   return fmtPct(Number(ratio) * 100, 2);
+}
+
+function fmtDays(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v) || !Number.isFinite(Number(v))) return "—";
+  const x = Number(v);
+  if (x < 0) return "—";
+  if (x === 0) return "0.0d";
+  if (x > 9999) return ">9999d";
+  return `${fmtNum(x, x < 10 ? 1 : 0)}d`;
+}
+
+function poolComparisonSelectorLabel(row?: PoolComparisonRow | null): string {
+  const feeRate = n(row?.selector?.feeRate, NaN);
+  const selectorType = String(row?.selector?.type || "unknown");
+  const selectorValue = row?.selector?.value;
+  const feePct = Number.isFinite(feeRate) && feeRate >= 0 ? `${fmtNum(feeRate * 100, 3)}%` : "—";
+  if (selectorType === "feeTier" && Number.isFinite(Number(selectorValue))) {
+    return `${feePct} (tier ${Number(selectorValue)})`;
+  }
+  if (selectorType === "tickSpacing" && Number.isFinite(Number(selectorValue))) {
+    return `${feePct} (tickSpacing ${Number(selectorValue)})`;
+  }
+  return feePct;
+}
+
+function pairLabel(row?: PoolComparisonRow | null): string {
+  const pair = row?.pair;
+  if (!pair) return "—";
+  return pair.pairKey || `${pair.baseSymbol || "?"}/${pair.quoteSymbol || "?"}`;
+}
+
+function ratingTone(rating?: string): "good" | "warn" | "bad" | "muted" {
+  if (!rating) return "muted";
+  if (rating === "More") return "good";
+  if (rating === "Similar") return "warn";
+  if (rating === "Less") return "bad";
+  return "muted";
 }
 
 function fmtIsoLocal(iso?: string | null): string {
@@ -1067,6 +1183,9 @@ export default function Uc6Page() {
   ]);
   const activeLifecycleRecord = status?.activePositionRecord || null;
   const positionsTaxSummary = status?.positionsTaxSummary || null;
+  const poolComparison = status?.poolComparison || null;
+  const poolComparisonCurrent = poolComparison?.current || null;
+  const poolComparisonTop5 = poolComparison?.top5 || [];
   const closedPositionRecords = positionsPage?.items || [];
   const positionsPageCount = Math.max(1, Number(positionsPage?.totalPages || 1));
   const positionsCurrentPage = Math.max(1, Number(positionsPage?.page || positionsPageNum));
@@ -1094,6 +1213,53 @@ export default function Uc6Page() {
     regimeDecisionView?.effectiveThresholds?.bandHalfBps,
     n(status?.settings?.bandHalfBps, 0)
   );
+  const poolComparisonCurrentRow = poolComparisonCurrent
+    ? ([
+        poolComparisonCurrent.dex?.name || "—",
+        `${poolComparison?.network?.name || "Base"} (${poolComparisonCurrent.chain?.chainId || BASE_CHAIN_ID_DEC})`,
+        pairLabel(poolComparisonCurrent),
+        <span
+          title={poolComparisonCurrent.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}
+        >
+          {poolComparisonSelectorLabel(poolComparisonCurrent)}
+          {poolComparisonCurrent.selector?.feeIsEstimated ? " *" : ""}
+        </span>,
+        `${fmtUsdCompact(poolComparisonCurrent.stats?.tvlAvg7dUsd)} / ${fmtUsdCompact(poolComparisonCurrent.stats?.tvlAvg30dUsd)}`,
+        `${fmtUsdCompact(poolComparisonCurrent.stats?.volAvg7dUsd)} / ${fmtUsdCompact(poolComparisonCurrent.stats?.volAvg30dUsd)}`,
+        <span title="Approx fee/day per $TVL = avgVolume * feeRate / avgTVL">
+          {`${fmtPct(n(poolComparisonCurrent.stats?.feePower7d, 0) * 100, 3)} / ${fmtPct(
+            n(poolComparisonCurrent.stats?.feePower30d, 0) * 100,
+            3
+          )}`}
+        </span>,
+        <span title="Heuristic expected net/day for current UC6 capital and current band settings">
+          {fmtSignedUsd(poolComparisonCurrent.economics?.expectedNetDayUsd)}
+        </span>,
+      ] as Array<ReactNode>)
+    : null;
+  const poolComparisonTopRows = poolComparisonTop5.map((row) => [
+    row.dex?.name || "—",
+    pairLabel(row),
+    <span title={row.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}>
+      {poolComparisonSelectorLabel(row)}
+      {row.selector?.feeIsEstimated ? " *" : ""}
+    </span>,
+    `${fmtUsdCompact(row.stats?.tvlAvg7dUsd)} / ${fmtUsdCompact(row.stats?.tvlAvg30dUsd)}`,
+    `${fmtUsdCompact(row.stats?.volAvg7dUsd)} / ${fmtUsdCompact(row.stats?.volAvg30dUsd)}`,
+    <span title="Approx fee/day per $TVL = avgVolume * feeRate / avgTVL">
+      {`${fmtPct(n(row.stats?.feePower7d, 0) * 100, 3)} / ${fmtPct(n(row.stats?.feePower30d, 0) * 100, 3)}`}
+    </span>,
+    <span title="Heuristic expected net/day for your current UC6 capital, band, and edge threshold">
+      {fmtSignedUsd(row.economics?.expectedNetDayUsd)}
+    </span>,
+    <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap" }}>
+      <Pill label={String(row.compareToCurrent?.rating || "—")} tone={ratingTone(row.compareToCurrent?.rating)} />
+      <span style={{ color: "#4a5a70", fontSize: 12 }} title={row.compareToCurrent?.reason || ""}>
+        {row.compareToCurrent?.reason || "—"}
+      </span>
+    </div>,
+    fmtDays(row.compareToCurrent?.breakEvenDays ?? null),
+  ]);
 
   return (
     <>
@@ -1548,6 +1714,50 @@ export default function Uc6Page() {
               ])}
             />
             <div style={styles.note}>Swap costs and slippage use quote vs actual wallet balance deltas.</div>
+          </Card>
+
+          <Card title="Pool Comparison (Base)" fullWidth>
+            <div style={styles.note}>
+              Daily GeckoTerminal-based comparison for Base majors/stables pools (Aerodrome Slipstream, Uniswap v3, PancakeSwap v3, SushiSwap v3). Heuristic score estimates expected net/day for your current UC6 capital and settings; use as a screening tool, not a guarantee.
+            </div>
+            {poolComparison?.lastError?.message && (
+              <div style={{ ...styles.note, color: "#7a2830", marginTop: 6 }}>
+                Last compute warning ({fmtIsoLocal(poolComparison?.lastError?.atIso)}): {poolComparison.lastError.message}
+              </div>
+            )}
+            <div style={{ ...styles.note, marginTop: 6 }}>
+              Computed: {fmtIsoLocal(poolComparison?.computedAtIso)} | Network: {poolComparison?.network?.name || "Base"} | Ref capital:{" "}
+              {fmtUsd(poolComparison?.ref?.currentPool?.refCapitalUsd)}
+            </div>
+
+            <div style={{ marginTop: 10, fontWeight: 600 }}>Current pool</div>
+            <SimpleTable
+              headers={["Venue", "Chain", "Pair", "Fee/Tier", "TVL (7d / 30d)", "Volume (7d / 30d)", "FeePower (7d / 30d)", "Exp Net/day"]}
+              rows={poolComparisonCurrentRow ? [poolComparisonCurrentRow] : [["—", "—", "—", "—", "—", "—", "—", "—"]]}
+            />
+
+            <div style={{ marginTop: 12, fontWeight: 600 }}>Top 5 candidate pools</div>
+            <SimpleTable
+              headers={[
+                "Venue",
+                "Pair",
+                "Fee/Tier",
+                "TVL (7d / 30d)",
+                "Volume (7d / 30d)",
+                "FeePower (7d / 30d)",
+                "Exp Net/day",
+                "Rating vs current",
+                "Break-even",
+              ]}
+              rows={
+                poolComparisonTopRows.length > 0
+                  ? poolComparisonTopRows
+                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—"]]
+              }
+            />
+            <div style={{ ...styles.note, marginTop: 8 }}>
+              Rating compares expected net/day over the next 1–2 weeks vs the current pool using recent 7d/30d volume, TVL, fee-power, and a simple rebalance-cost proxy. “*” marks fee-rate estimates.
+            </div>
           </Card>
         </section>
 
