@@ -1848,10 +1848,11 @@ class Uc6Bot {
         // skip malformed historical lifecycle rows
       }
     }
-    const repaired = this.repairLifecycleRecordsMissingEntrySnapshots();
-    if (repaired > 0) {
-      await this.persistPositionRecords();
-    }
+    this.repairLifecycleRecordsMissingEntrySnapshots();
+    // Always persist the rebuilt derived records on startup so positions.json
+    // reflects the current reducer logic (including historical backfills that
+    // may be reconstructed during replay before the explicit repair pass).
+    await this.persistPositionRecords();
   }
 
   getLifecycleRecordById(id, { createFromEvent = null } = {}) {
@@ -2330,7 +2331,27 @@ class Uc6Bot {
     for (const rec of Array.isArray(this.positionRecords) ? this.positionRecords : []) {
       if (!rec || rec.status !== "CLOSED") continue;
       if (!this.isEntrySnapshotMissing(rec)) continue;
-      const changed = this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
+      let changed = this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
+      if (!changed) {
+        const valueOnly = this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
+        if (valueOnly) changed = this.applyEntryBaselineFallbackToRecord(rec, valueOnly);
+      }
+      if (!changed) {
+        const rawMintValueUsd = Number(rec?.entry?.rawMintValueUsd || 0);
+        const closeAtIso = rec?.exit?.closedAtIso || null;
+        const exitSpot = Number(rec?.exit?.spotPriceUsdcPerWeth || 0);
+        if (rawMintValueUsd > 0) {
+          changed = this.applyEntryBaselineFallbackToRecord(rec, {
+            entrySnapshotAtIso: rec?.entry?.openedAtIso || closeAtIso || nowIso(),
+            entryTokens: { weth: 0, usdc: 0 },
+            entryValueUsd: rawMintValueUsd,
+            spotPriceUsdcPerWeth: Math.max(0, exitSpot),
+            rawMintValueUsd,
+            approx: true,
+            note: "entry snapshot fallback (raw mint value only, startup repair)",
+          });
+        }
+      }
       if (!changed) continue;
       this.recomputeLifecycleRecordDerived(rec);
       repaired += 1;
