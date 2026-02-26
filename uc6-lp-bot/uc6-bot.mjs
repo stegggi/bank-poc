@@ -36,6 +36,8 @@ const CAPITAL_SAMPLE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000;
 const CAPITAL_SAMPLE_MAX_GAP_MS = 30 * 60 * 1000;
 const CAPITAL_SAMPLE_MAX_POINTS = 15_000;
 const ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS = 5 * 60 * 1000;
+const LAST_ERROR_AUTO_CLEAR_AFTER_MS = 5 * 60 * 1000;
+const LAST_ERROR_AUTO_CLEAR_SUCCESS_LOOPS = 5;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -1276,6 +1278,8 @@ class Uc6Bot {
     this.lifecyclePendingOpenByRunId = new Map();
     this.pendingLifecycleContext = null;
     this.lifecyclePhaseContext = null;
+    this.successfulLoopStreak = 0;
+    this.lastSuccessfulLoopAtMs = 0;
   }
 
   async init() {
@@ -1585,6 +1589,19 @@ class Uc6Bot {
   setLastError(err) {
     const msg = err instanceof Error ? err.message : String(err || "unknown error");
     this.state.lastError = `${nowIso()} ${msg}`;
+    this.successfulLoopStreak = 0;
+  }
+
+  markSuccessfulLoop(nowMs = Date.now()) {
+    this.lastSuccessfulLoopAtMs = nowMs;
+    this.successfulLoopStreak = Number(this.successfulLoopStreak || 0) + 1;
+    if (!this.state.lastError) return;
+    if (this.successfulLoopStreak < LAST_ERROR_AUTO_CLEAR_SUCCESS_LOOPS) return;
+    const parsed = this.parseLastErrorObject();
+    const errMs = Date.parse(parsed?.atIso || "");
+    if (!Number.isFinite(errMs)) return;
+    if (nowMs - errMs < LAST_ERROR_AUTO_CLEAR_AFTER_MS) return;
+    this.state.lastError = null;
   }
 
   setDecision(decision) {
@@ -6012,16 +6029,24 @@ class Uc6Bot {
   async mainLoop() {
     while (!this.stopRequested) {
       const started = Date.now();
+      let loopOk = false;
+      let persistOk = false;
       try {
         await this.loopOnce();
+        loopOk = true;
       } catch (err) {
         this.setLastError(err);
       }
 
       try {
         await this.persistState();
+        persistOk = true;
       } catch (err) {
         this.setLastError(err);
+      }
+
+      if (loopOk && persistOk) {
+        this.markSuccessfulLoop();
       }
 
       const elapsed = Date.now() - started;
