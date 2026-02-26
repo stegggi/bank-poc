@@ -152,12 +152,12 @@ export function createGeckoTerminalClient({
       return requestJson(`/networks/${network}/pools`, { params });
     },
     getPool(poolAddress, { include = "base_token,quote_token,dex" } = {}) {
-      return requestJson(`/networks/${network}/pools/${poolAddress}`, {
+      return requestJson(`/networks/${network}/pools/${encodeURIComponent(String(poolAddress))}`, {
         params: { include },
       });
     },
     getOhlcvDay(poolAddress, { limit = 30, aggregate = 1, currency = "usd" } = {}) {
-      return requestJson(`/networks/${network}/pools/${poolAddress}/ohlcv/day`, {
+      return requestJson(`/networks/${network}/pools/${encodeURIComponent(String(poolAddress))}/ohlcv/day`, {
         params: { aggregate, limit, currency },
       });
     },

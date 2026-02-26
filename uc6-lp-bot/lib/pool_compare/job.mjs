@@ -68,6 +68,25 @@ function uniqueBy(arr, keyFn) {
   return out;
 }
 
+function canonicalPairKey(pair) {
+  const a = String(pair?.baseSymbol || "").trim().toUpperCase();
+  const b = String(pair?.quoteSymbol || "").trim().toUpperCase();
+  if (!a && !b) return "";
+  return [a, b].filter(Boolean).sort().join("/");
+}
+
+function topPoolDedupeKey(row) {
+  if (!row) return null;
+  const dexId = String(row?.dex?.id || "").toLowerCase();
+  const pairKey = canonicalPairKey(row?.pair);
+  const selectorType = String(row?.selector?.type || "unknown").toLowerCase();
+  const selectorValueRaw = row?.selector?.value;
+  const selectorValue = Number.isFinite(Number(selectorValueRaw))
+    ? String(Math.round(Number(selectorValueRaw)))
+    : `fee~${num(row?.selector?.feeRate, 0).toFixed(6)}`;
+  return `${dexId}|${pairKey}|${selectorType}|${selectorValue}`;
+}
+
 function resourceKey(type, id) {
   return `${String(type || "")}:${String(id || "")}`;
 }
@@ -469,6 +488,38 @@ async function fetchPoolByAddress(client, poolAddress, { logger }) {
   return pool;
 }
 
+async function fetchOhlcvRowsForCandidate(client, candidate, { logger }) {
+  const idsToTry = uniqueBy(
+    [candidate?.address, candidate?.raw?.id].filter(Boolean).map((v) => String(v)),
+    (v) => v.toLowerCase()
+  );
+  let lastErr = null;
+  for (const poolId of idsToTry) {
+    try {
+      const ohlcvJson = await client.getOhlcvDay(poolId, { limit: MAX_OHLCV_DAYS, aggregate: 1, currency: "usd" });
+      const rows = parseOhlcvDaily(ohlcvJson);
+      if (rows.length > 0) {
+        if (poolId !== candidate?.address && logger?.info) {
+          logger.info(`[pool_compare] OHLCV fallback succeeded for ${candidate?.address} using ${poolId}`);
+        }
+        return rows;
+      }
+      if (logger?.warn) {
+        logger.warn(`[pool_compare] OHLCV empty for ${poolId} (${candidate?.pairKey || candidate?.address})`);
+      }
+    } catch (err) {
+      lastErr = err;
+      if (logger?.warn) {
+        logger.warn(
+          `[pool_compare] OHLCV fetch failed for ${poolId}: ${err instanceof Error ? err.message : String(err)}`
+        );
+      }
+    }
+  }
+  if (lastErr) return [];
+  return [];
+}
+
 function buildPoolRowBase(candidate) {
   const sym = pairDisplaySymbols(candidate);
   return {
@@ -606,13 +657,7 @@ export async function runPoolComparisonJob({
   const edgeRebalancePct = clamp(num(currentRef?.band?.edgeRebalancePct, 0.85), 0.1, 0.99);
 
   for (const candidate of candidates) {
-    let ohlcvRows = [];
-    try {
-      const ohlcvJson = await client.getOhlcvDay(candidate.address, { limit: MAX_OHLCV_DAYS, aggregate: 1, currency: "usd" });
-      ohlcvRows = parseOhlcvDaily(ohlcvJson);
-    } catch (err) {
-      if (logger?.warn) logger.warn(`[pool_compare] OHLCV fetch failed for ${candidate.address}: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    const ohlcvRows = await fetchOhlcvRowsForCandidate(client, candidate, { logger });
 
     const ohlcvStats = computeOhlcvStats(ohlcvRows);
     const tvlRow = {
@@ -709,9 +754,13 @@ export async function runPoolComparisonJob({
     row.compareToCurrent = compareToCurrentPool(row, currentRow, { switchCostUsd: estimatedSwitchCostUsd });
   }
 
-  const top5 = rows
+  const top5 = uniqueBy(
+    rows
     .filter((r) => !r.isCurrent || normAddr(r.pool?.address) !== currentPoolAddress)
     .sort((a, b) => num(b.economics?.expectedNetDayUsd, -Infinity) - num(a.economics?.expectedNetDayUsd, -Infinity))
+    ,
+    (r) => topPoolDedupeKey(r)
+  )
     .slice(0, cfg.topN)
     .map((r, idx) => ({ ...r, rank: idx + 1 }));
 
@@ -773,4 +822,3 @@ export async function loadPoolComparisonCache(rankingsPath) {
   if (!parsed || typeof parsed !== "object") return null;
   return parsed;
 }
-
