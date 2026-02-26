@@ -1454,13 +1454,13 @@ export default function Uc6Page() {
                 Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}).
               </div>
               <SimpleTable
-                headers={["Tax Year", "Closed Positions", "Fees Collected", "Capital Gain/Loss"]}
+                headers={["Tax Year", "Closed Positions", "Net Fees", "Capital Gain/Loss"]}
                 rows={
                   Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
                     ? positionsTaxSummary!.years!.map((row) => [
                         String(Math.round(n(row?.year, 0))),
                         String(Math.round(n(row?.closedPositions, 0))),
-                        fmtUsd(row?.feesCollectedUsd),
+                        fmtSignedUsd(row?.feesNetUsd),
                         fmtSignedUsd(row?.capitalGainLossUsd),
                       ])
                     : [["—", "0", "—", "—"]]
