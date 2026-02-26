@@ -1123,46 +1123,17 @@ export default function Uc6Page() {
               <div style={{ ...styles.note, marginBottom: 10 }}>
                 Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}).
               </div>
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
-                <Metric
-                  label="Fees Collected (All Closed)"
-                  value={fmtUsd(positionsTaxSummary?.totals?.feesCollectedUsd)}
-                />
-                <Metric
-                  label="Total Costs (All Closed)"
-                  value={fmtUsd(positionsTaxSummary?.totals?.totalCostsUsd)}
-                />
-                <Metric
-                  label="Fees Net (All Closed)"
-                  value={fmtSignedUsd(positionsTaxSummary?.totals?.feesNetUsd)}
-                />
-                <Metric
-                  label="Capital Gain/Loss (All Closed)"
-                  value={fmtSignedUsd(positionsTaxSummary?.totals?.capitalGainLossUsd)}
-                />
-                <Metric
-                  label="Realized Net Profit (All Closed)"
-                  value={fmtSignedUsd(positionsTaxSummary?.totals?.realizedNetProfitUsd)}
-                />
-                <Metric
-                  label="Closed Positions (All)"
-                  value={String(Math.round(n(positionsTaxSummary?.totals?.closedPositions, 0)))}
-                />
-              </div>
               <SimpleTable
-                headers={["Tax Year", "Closed Positions", "Fees Collected", "Total Costs", "Fees Net", "Capital Gain/Loss", "Realized Net Profit"]}
+                headers={["Tax Year", "Closed Positions", "Fees Collected", "Capital Gain/Loss"]}
                 rows={
                   Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
                     ? positionsTaxSummary!.years!.map((row) => [
                         String(Math.round(n(row?.year, 0))),
                         String(Math.round(n(row?.closedPositions, 0))),
                         fmtUsd(row?.feesCollectedUsd),
-                        fmtUsd(row?.totalCostsUsd),
-                        fmtSignedUsd(row?.feesNetUsd),
                         fmtSignedUsd(row?.capitalGainLossUsd),
-                        fmtSignedUsd(row?.realizedNetProfitUsd),
                       ])
-                    : [["—", "0", "—", "—", "—", "—", "—"]]
+                    : [["—", "0", "—", "—"]]
                 }
               />
             </div>

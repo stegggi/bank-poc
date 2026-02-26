@@ -35,6 +35,7 @@ const CAPITAL_SAMPLE_MIN_INTERVAL_MS = 5 * 60 * 1000;
 const CAPITAL_SAMPLE_RETENTION_MS = 45 * 24 * 60 * 60 * 1000;
 const CAPITAL_SAMPLE_MAX_GAP_MS = 30 * 60 * 1000;
 const CAPITAL_SAMPLE_MAX_POINTS = 15_000;
+const ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS = 5 * 60 * 1000;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -1847,6 +1848,10 @@ class Uc6Bot {
         // skip malformed historical lifecycle rows
       }
     }
+    const repaired = this.repairLifecycleRecordsMissingEntrySnapshots();
+    if (repaired > 0) {
+      await this.persistPositionRecords();
+    }
   }
 
   getLifecycleRecordById(id, { createFromEvent = null } = {}) {
@@ -1992,14 +1997,184 @@ class Uc6Bot {
 
     const baselineWeth = Number(rec._internal?.baselineWeth || 0);
     const baselineUsdc = Number(rec._internal?.baselineUsdc || 0);
+    const hasBaseline = Boolean(rec?._internal?.entryCaptured) && (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0);
     const pExit = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
-    if (pExit > 0) {
+    if (pExit > 0 && hasBaseline) {
       const hodlExit = baselineWeth * pExit + baselineUsdc;
       const lpExitPrincipal = exitTokens.weth * pExit + exitTokens.usdc;
       if (Number.isFinite(hodlExit) && Number.isFinite(lpExitPrincipal)) {
         rec.performance.impermanentLossUsd = lpExitPrincipal - hodlExit;
       }
     }
+  }
+
+  appendLifecycleRecordNote(rec, note) {
+    if (!rec || !note) return;
+    const next = String(note).trim();
+    if (!next) return;
+    const current = String(rec.notes || "").trim();
+    if (!current) {
+      rec.notes = next;
+      return;
+    }
+    if (current.includes(next)) return;
+    rec.notes = `${current}; ${next}`;
+  }
+
+  isEntrySnapshotMissing(rec) {
+    if (!rec) return true;
+    if (!rec.entry?.entrySnapshotAtIso) return true;
+    if (!(Number(rec.entry?.entryValueUsd || 0) > 0)) return true;
+    if (!(Number(rec.entry?.spotPriceUsdcPerWeth || 0) > 0)) return true;
+    return false;
+  }
+
+  mintPrincipalForLifecycleEvent(ev) {
+    if (!ev || (ev.type !== "OPEN_MINT" && ev.type !== "REBALANCE_MINT")) return null;
+    let amount0Used = 0n;
+    let amount1Used = 0n;
+    try {
+      amount0Used = BigInt(ev.details?.amount0Used || 0);
+      amount1Used = BigInt(ev.details?.amount1Used || 0);
+    } catch {
+      return null;
+    }
+    const wethLower = String(this.weth || "").toLowerCase();
+    const usdcLower = String(this.usdc || "").toLowerCase();
+    const token0IsWeth = wethLower < usdcLower;
+    const wethRaw = token0IsWeth ? amount0Used : amount1Used;
+    const usdcRaw = token0IsWeth ? amount1Used : amount0Used;
+    return {
+      weth: Number(formatUnits(wethRaw, WETH_DECIMALS)),
+      usdc: Number(formatUnits(usdcRaw, USDC_DECIMALS)),
+    };
+  }
+
+  deriveFallbackEntryBaselineForRecord(rec, { closeAtIso = null } = {}) {
+    if (!rec?.tokenId) return null;
+    const tokenId = String(rec.tokenId);
+    const events = (Array.isArray(this.positionLifecycleEvents) ? this.positionLifecycleEvents : [])
+      .filter((ev) => {
+        const candidates = [
+          ev?.tokenId,
+          ev?.details?.mintedTokenId,
+          ev?.details?.closedTokenId,
+        ].filter(Boolean).map((v) => String(v));
+        return candidates.includes(tokenId);
+      })
+      .slice()
+      .sort((a, b) => Date.parse(a?.atIso || "") - Date.parse(b?.atIso || ""));
+    if (!events.length) return null;
+
+    const mintEv = events.find((ev) => ev?.type === "OPEN_MINT" || ev?.type === "REBALANCE_MINT");
+    if (!mintEv) return null;
+    const mintMs = Date.parse(mintEv.atIso || "");
+    if (!Number.isFinite(mintMs)) return null;
+
+    const mintPrincipal = this.mintPrincipalForLifecycleEvent(mintEv);
+    let entryWeth = Number(mintPrincipal?.weth || 0);
+    let entryUsdc = Number(mintPrincipal?.usdc || 0);
+    let rawMintValueUsd = Number(rec.entry?.rawMintValueUsd || mintEv?.details?.rawMintValueUsd || 0);
+
+    let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
+    const closeMs = Date.parse(closeAtIso || rec?.exit?.closedAtIso || "");
+    if (Number.isFinite(closeMs)) cutoffMs = Math.min(cutoffMs, closeMs);
+
+    let lastIncludedEv = mintEv;
+    for (const ev of events) {
+      const evMs = Date.parse(ev?.atIso || "");
+      if (!Number.isFinite(evMs) || evMs < mintMs || evMs > cutoffMs) continue;
+      if (ev === mintEv) continue;
+      if (ev?.type === "TOP_UP") {
+        const p = ev?.details?.principalAdded || {};
+        entryWeth += Number(p.weth || 0);
+        entryUsdc += Number(p.usdc || 0);
+        lastIncludedEv = ev;
+      }
+    }
+
+    const spotCandidates = [
+      Number(lastIncludedEv?.details?.spotPriceUsdcPerWeth || 0),
+      Number(lastIncludedEv?.spotPriceUsdcPerWeth || 0),
+      Number(mintEv?.details?.spotPriceUsdcPerWeth || 0),
+      Number(mintEv?.spotPriceUsdcPerWeth || 0),
+      Number(rec?.exit?.spotPriceUsdcPerWeth || 0),
+    ];
+    const spot = spotCandidates.find((v) => Number.isFinite(v) && v > 0) || 0;
+    const entryValueUsd = spot > 0 ? (entryUsdc + (entryWeth * spot)) : Math.max(0, rawMintValueUsd);
+    const entryAtIso = lastIncludedEv?.atIso || mintEv?.atIso || closeAtIso || null;
+
+    if (!(entryValueUsd > 0) && !(entryWeth > 0 || entryUsdc > 0)) return null;
+    return {
+      entrySnapshotAtIso: entryAtIso,
+      entryTokens: { weth: Math.max(0, entryWeth), usdc: Math.max(0, entryUsdc) },
+      entryValueUsd: Math.max(0, entryValueUsd),
+      spotPriceUsdcPerWeth: Math.max(0, Number(spot || 0)),
+      rawMintValueUsd: rawMintValueUsd > 0 ? rawMintValueUsd : null,
+      approx: true,
+      note:
+        Number.isFinite(closeMs) && closeMs - mintMs < 60_000
+          ? "entry snapshot fallback (position closed before delayed entry snapshot)"
+          : "entry snapshot fallback (reconstructed from mint/top-up events)",
+    };
+  }
+
+  applyEntryBaselineFallbackToRecord(rec, baseline) {
+    if (!rec || !baseline) return false;
+    const beforeKey = JSON.stringify({
+      at: rec.entry?.entrySnapshotAtIso || null,
+      v: Number(rec.entry?.entryValueUsd || 0),
+      w: Number(rec.entry?.entryTokens?.weth || 0),
+      u: Number(rec.entry?.entryTokens?.usdc || 0),
+      p: Number(rec.entry?.spotPriceUsdcPerWeth || 0),
+    });
+    rec.entry.entrySnapshotAtIso = baseline.entrySnapshotAtIso || rec.entry.entrySnapshotAtIso || rec.entry.openedAtIso || nowIso();
+    rec.entry.entryValueUsd = Number(baseline.entryValueUsd || rec.entry.entryValueUsd || 0);
+    rec.entry.entryTokens = {
+      weth: Number(baseline.entryTokens?.weth || rec.entry.entryTokens?.weth || 0),
+      usdc: Number(baseline.entryTokens?.usdc || rec.entry.entryTokens?.usdc || 0),
+    };
+    rec.entry.spotPriceUsdcPerWeth = Number(
+      baseline.spotPriceUsdcPerWeth || rec.entry.spotPriceUsdcPerWeth || 0
+    );
+    if (baseline.rawMintValueUsd != null && Number(baseline.rawMintValueUsd) > 0) {
+      rec.entry.rawMintValueUsd = Number(baseline.rawMintValueUsd);
+    }
+    rec.entry.entrySnapshotApprox = Boolean(baseline.approx);
+    if (baseline.note) rec.entry.entrySnapshotNote = String(baseline.note);
+    rec._internal.baselineWeth = Number(rec.entry.entryTokens?.weth || 0);
+    rec._internal.baselineUsdc = Number(rec.entry.entryTokens?.usdc || 0);
+    rec._internal.entryCaptured = (Math.abs(rec._internal.baselineWeth) > 0 || Math.abs(rec._internal.baselineUsdc) > 0);
+    rec._internal.openPhaseDone = true;
+    this.appendLifecycleRecordNote(rec, baseline.note || "entry snapshot fallback applied");
+    const afterKey = JSON.stringify({
+      at: rec.entry?.entrySnapshotAtIso || null,
+      v: Number(rec.entry?.entryValueUsd || 0),
+      w: Number(rec.entry?.entryTokens?.weth || 0),
+      u: Number(rec.entry?.entryTokens?.usdc || 0),
+      p: Number(rec.entry?.spotPriceUsdcPerWeth || 0),
+    });
+    return beforeKey !== afterKey;
+  }
+
+  ensureEntryBaselineBeforeClose(rec, { closeAtIso = null } = {}) {
+    if (!rec || !this.isEntrySnapshotMissing(rec)) return false;
+    const baseline = this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso });
+    if (!baseline) return false;
+    return this.applyEntryBaselineFallbackToRecord(rec, baseline);
+  }
+
+  repairLifecycleRecordsMissingEntrySnapshots() {
+    let repaired = 0;
+    for (const rec of Array.isArray(this.positionRecords) ? this.positionRecords : []) {
+      if (!rec || rec.status !== "CLOSED") continue;
+      if (!this.isEntrySnapshotMissing(rec)) continue;
+      const changed = this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
+      if (!changed) continue;
+      this.recomputeLifecycleRecordDerived(rec);
+      repaired += 1;
+    }
+    return repaired;
   }
 
   updateBaselineFromSwap(rec, details = {}) {
@@ -2218,6 +2393,7 @@ class Uc6Bot {
         touchRecordCommon(rec);
         this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
         const principalOut = ev.details?.principalOut || {};
+        this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: ev.atIso || null });
         this.closeLifecycleRecordFromPrincipalOut(rec, {
           atIso: ev.atIso || null,
           principalOut,
@@ -2243,6 +2419,7 @@ class Uc6Bot {
         touchRecordCommon(rec);
         this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
         const principalOut = ev.details?.principalOut || {};
+        this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: ev.atIso || null });
         this.closeLifecycleRecordFromPrincipalOut(rec, {
           atIso: ev.atIso || null,
           principalOut,
@@ -2259,6 +2436,7 @@ class Uc6Bot {
       const rec = getRecordForToken(tokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
+        this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: ev.atIso || null });
         const exitTokens = ev.details?.exitTokens || rec.exit.exitTokens || {};
         this.closeLifecycleRecordFromPrincipalOut(rec, {
           atIso: ev.atIso || null,
