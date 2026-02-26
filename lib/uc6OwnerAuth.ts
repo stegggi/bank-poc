@@ -5,6 +5,18 @@ const OWNER_HEADER = "xBank UC6 Owner Authorization";
 const DEFAULT_RATE_WINDOW_MS = 60_000;
 
 type Primitive = null | string | number | boolean;
+type RegimeSettingsPayload = {
+  enabled?: boolean;
+  windowSec?: number;
+  sampleEverySec?: number;
+  minSamples?: number;
+  mrHalfLifeMaxSec?: number;
+  trendHalfLifeMinSec?: number;
+  maxEdgeAdj?: number;
+  maxBandAdjBps?: number;
+  maxCooldownAdjSec?: number;
+};
+type OwnerSettingsValue = Primitive | RegimeSettingsPayload;
 
 type RateBucket = { count: number; resetAt: number };
 type ChallengeStore = Map<string, Uc6ChallengeRecord>;
@@ -276,13 +288,59 @@ export function getClientIp(input: {
   return input.remoteAddress || "unknown";
 }
 
-export function normalizeOwnerSettings(input: unknown): Record<string, Primitive> {
+const REGIME_SETTING_TYPES: Record<keyof Required<RegimeSettingsPayload>, "boolean" | "number"> = {
+  enabled: "boolean",
+  windowSec: "number",
+  sampleEverySec: "number",
+  minSamples: "number",
+  mrHalfLifeMaxSec: "number",
+  trendHalfLifeMinSec: "number",
+  maxEdgeAdj: "number",
+  maxBandAdjBps: "number",
+  maxCooldownAdjSec: "number",
+};
+
+function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
+  if (!asObject(input)) {
+    throw new Error('Invalid settings value for "regime"');
+  }
+  const out: RegimeSettingsPayload = {};
+  const outMutable = out as Record<string, unknown>;
+  for (const [rawKey, value] of Object.entries(input)) {
+    const key = rawKey as keyof Required<RegimeSettingsPayload>;
+    const expectedType = REGIME_SETTING_TYPES[key];
+    if (!expectedType) {
+      throw new Error(`Invalid settings value for "regime.${rawKey}"`);
+    }
+    if (expectedType === "boolean") {
+      if (typeof value !== "boolean") {
+        throw new Error(`Invalid settings value for "regime.${rawKey}"`);
+      }
+      outMutable[rawKey] = value;
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`Invalid settings value for "regime.${rawKey}"`);
+    }
+    outMutable[rawKey] = value;
+  }
+  return out;
+}
+
+export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSettingsValue> {
   if (!asObject(input)) {
     throw new Error("Settings payload must be an object");
   }
-  const out: Record<string, Primitive> = {};
+  const out: Record<string, OwnerSettingsValue> = {};
   for (const [key, value] of Object.entries(input)) {
-    if (value === null || typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    if (key === "regime") {
+      out[key] = normalizeRegimeSettings(value);
+    } else if (
+      value === null ||
+      typeof value === "string" ||
+      typeof value === "boolean" ||
+      (typeof value === "number" && Number.isFinite(value))
+    ) {
       out[key] = value;
     } else {
       throw new Error(`Invalid settings value for "${key}"`);
