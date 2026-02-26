@@ -1213,6 +1213,10 @@ export default function Uc6Page() {
     regimeDecisionView?.effectiveThresholds?.bandHalfBps,
     n(status?.settings?.bandHalfBps, 0)
   );
+  const activeMintTargetBandBpsRaw = activeLifecycleRecord?.band?.bandHalfBps;
+  const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
+    ? Math.round(Number(activeMintTargetBandBpsRaw))
+    : null;
   const poolComparisonCurrentRow = poolComparisonCurrent
     ? ([
         poolComparisonCurrent.dex?.name || "—",
@@ -1423,7 +1427,12 @@ export default function Uc6Page() {
               <Metric label="Pool Tier / Selector" value={selectorLabel} />
               <Metric label="Current Pool Tick (internal)" value={String(status?.market?.tick?.current ?? "—")} />
               <Metric label="Pool Tick Spacing (grid)" value={String(status?.market?.tick?.spacing ?? "—")} />
-              <Metric label="Configured Band Target" value={`±${fmtPct(configuredBandHalfPct)}`} />
+              <Metric label="Base Band Setting" value={`±${fmtPct(configuredBandHalfPct)}`} />
+              <Metric label="Regime Effective Band (current decision)" value={`±${fmtPct(regimeEffectiveBandBps / 100)}`} />
+              <Metric
+                label="Mint Target Used (current LP)"
+                value={activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`}
+              />
               <Metric
                 label="Actual Band Width"
                 value={

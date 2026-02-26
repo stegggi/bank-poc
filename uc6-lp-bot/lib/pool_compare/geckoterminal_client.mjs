@@ -156,9 +156,10 @@ export function createGeckoTerminalClient({
         params: { include },
       });
     },
-    getOhlcvDay(poolAddress, { limit = 30, aggregate = 1, currency = "usd" } = {}) {
+    getOhlcvDay(poolAddress, { limit = 30, aggregate = 1, currency = "usd", retries = maxRetries } = {}) {
       return requestJson(`/networks/${network}/pools/${encodeURIComponent(String(poolAddress))}/ohlcv/day`, {
         params: { aggregate, limit, currency },
+        retries,
       });
     },
     async getPoolsMulti(addresses = [], { include = "base_token,quote_token,dex" } = {}) {

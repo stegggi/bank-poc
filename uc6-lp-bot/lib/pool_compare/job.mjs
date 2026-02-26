@@ -9,6 +9,7 @@ const NETWORK_META = { id: "base", name: "Base", chainId: 8453 };
 const TINY = 1e-9;
 const DEFAULT_FEE_RATE_GUESS = 0.0005; // 0.05%
 const MAX_OHLCV_DAYS = 30;
+const DEFAULT_MAX_OHLCV_POOLS_PER_RUN = 12;
 
 const TOKEN_ALLOWLIST = [
   { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", stable: false },
@@ -42,6 +43,24 @@ function clamp(v, min, max) {
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
+}
+
+function getNested(obj, path) {
+  let cur = obj;
+  for (const key of Array.isArray(path) ? path : []) {
+    if (!isObject(cur) && !Array.isArray(cur)) return undefined;
+    cur = cur[key];
+    if (cur == null) return cur;
+  }
+  return cur;
+}
+
+function firstFinite(...vals) {
+  for (const v of vals) {
+    const n = Number(v);
+    if (Number.isFinite(n)) return n;
+  }
+  return NaN;
 }
 
 function isObject(v) {
@@ -177,6 +196,20 @@ function parseFeeAndSelector({ attrs, dexName }) {
   };
 }
 
+function parseVolume24hUsd(attrs) {
+  const v = firstFinite(
+    getNested(attrs, ["volume_usd", "h24"]),
+    getNested(attrs, ["volume_usd", "24h"]),
+    getNested(attrs, ["volume_usd", "day"]),
+    attrs?.volume_usd_h24,
+    attrs?.volume_24h_usd,
+    attrs?.h24_volume_usd,
+    attrs?.volume24hUsd,
+    attrs?.volume_usd
+  );
+  return Math.max(0, num(v, 0));
+}
+
 function parsePoolEntry(poolResource, includedIdx) {
   if (!poolResource) return null;
   const attrs = poolResource.attributes || {};
@@ -215,6 +248,7 @@ function parsePoolEntry(poolResource, includedIdx) {
     pairKey,
     selector,
     tvlUsd,
+    volume24hUsd: parseVolume24hUsd(attrs),
     attrs,
   };
 }
@@ -496,7 +530,12 @@ async function fetchOhlcvRowsForCandidate(client, candidate, { logger }) {
   let lastErr = null;
   for (const poolId of idsToTry) {
     try {
-      const ohlcvJson = await client.getOhlcvDay(poolId, { limit: MAX_OHLCV_DAYS, aggregate: 1, currency: "usd" });
+      const ohlcvJson = await client.getOhlcvDay(poolId, {
+        limit: MAX_OHLCV_DAYS,
+        aggregate: 1,
+        currency: "usd",
+        retries: 0,
+      });
       const rows = parseOhlcvDaily(ohlcvJson);
       if (rows.length > 0) {
         if (poolId !== candidate?.address && logger?.info) {
@@ -509,6 +548,12 @@ async function fetchOhlcvRowsForCandidate(client, candidate, { logger }) {
       }
     } catch (err) {
       lastErr = err;
+      if (Number(err?.status) === 429) {
+        if (logger?.warn) {
+          logger.warn(`[pool_compare] OHLCV rate-limited for ${poolId}; skipping remaining ID variants`);
+        }
+        return { rows: [], rateLimited: true };
+      }
       if (logger?.warn) {
         logger.warn(
           `[pool_compare] OHLCV fetch failed for ${poolId}: ${err instanceof Error ? err.message : String(err)}`
@@ -516,8 +561,16 @@ async function fetchOhlcvRowsForCandidate(client, candidate, { logger }) {
       }
     }
   }
-  if (lastErr) return [];
-  return [];
+  if (lastErr) return { rows: [], rateLimited: false };
+  return { rows: [], rateLimited: false };
+}
+
+function roughCandidateFeePowerScore(candidate) {
+  const tvlUsd = Math.max(TINY, num(candidate?.tvlUsd, 0));
+  const feeRate = Math.max(0, num(candidate?.selector?.feeRate, DEFAULT_FEE_RATE_GUESS));
+  const vol24hUsd = Math.max(0, num(candidate?.volume24hUsd, 0));
+  if (vol24hUsd > 0 && feeRate > 0) return (vol24hUsd * feeRate) / tvlUsd;
+  return (Math.max(0, num(candidate?.tvlUsd, 0)) * Math.max(feeRate, DEFAULT_FEE_RATE_GUESS)) / 1_000_000;
 }
 
 function buildPoolRowBase(candidate) {
@@ -646,6 +699,20 @@ export async function runPoolComparisonJob({
 
   candidates = uniqueBy(candidates, (c) => normAddr(c.address));
 
+  const ohlcvPriority = uniqueBy(
+    [currentCandidate, ...candidates.slice().sort((a, b) => roughCandidateFeePowerScore(b) - roughCandidateFeePowerScore(a))].filter(
+      Boolean
+    ),
+    (c) => normAddr(c.address)
+  );
+  const maxOhlcvPools = clamp(Math.max(cfg.topN * 2 + 1, 8), 6, DEFAULT_MAX_OHLCV_POOLS_PER_RUN);
+  const ohlcvFetchSet = new Set(
+    ohlcvPriority
+      .slice(0, maxOhlcvPools)
+      .map((c) => normAddr(c.address))
+      .filter(Boolean)
+  );
+
   const rawHistory = await readJsonLinesIfExists(tvlHistoryPath);
   const tvlHistoryIndex = buildTvlHistoryIndex(rawHistory);
   const tvlAppends = [];
@@ -655,11 +722,45 @@ export async function runPoolComparisonJob({
   const gasBaselineUsd = Math.max(0, num(currentRef?.gasBaselineUsd, 0.03));
   const bandHalfBps = Math.max(25, Math.round(num(currentRef?.band?.bandHalfBps, 100)));
   const edgeRebalancePct = clamp(num(currentRef?.band?.edgeRebalancePct, 0.85), 0.1, 0.99);
+  let ohlcvRateLimited = false;
+  let ohlcv429Count = 0;
+  let ohlcvFallbackVolumeCount = 0;
+  let ohlcvSkippedByBudgetCount = 0;
+  let ohlcvSkippedAfterRateLimitCount = 0;
 
   for (const candidate of candidates) {
-    const ohlcvRows = await fetchOhlcvRowsForCandidate(client, candidate, { logger });
+    let ohlcvRows = [];
+    const candidateAddr = normAddr(candidate.address);
+    const shouldFetchOhlcv = !!candidateAddr && ohlcvFetchSet.has(candidateAddr);
+    if (shouldFetchOhlcv) {
+      if (!ohlcvRateLimited) {
+        const ohlcvRes = await fetchOhlcvRowsForCandidate(client, candidate, { logger });
+        ohlcvRows = Array.isArray(ohlcvRes?.rows) ? ohlcvRes.rows : [];
+        if (ohlcvRes?.rateLimited) {
+          ohlcvRateLimited = true;
+          ohlcv429Count += 1;
+          if (logger?.warn) {
+            logger.warn("[pool_compare] GeckoTerminal OHLCV rate limit hit; skipping OHLCV for remaining candidates this run");
+          }
+        }
+      } else {
+        ohlcvSkippedAfterRateLimitCount += 1;
+      }
+    } else {
+      ohlcvSkippedByBudgetCount += 1;
+    }
 
-    const ohlcvStats = computeOhlcvStats(ohlcvRows);
+    let ohlcvStats = computeOhlcvStats(ohlcvRows);
+    const volume24hFallback = Math.max(0, num(candidate.volume24hUsd, 0));
+    if (ohlcvStats.volAvg7dUsd <= 0 && volume24hFallback > 0) {
+      ohlcvFallbackVolumeCount += 1;
+      ohlcvStats = {
+        ...ohlcvStats,
+        volAvg7dUsd: volume24hFallback,
+        volAvg30dUsd: volume24hFallback,
+        volumeStability30d: ohlcvStats.volumeStability30d > 0 ? ohlcvStats.volumeStability30d : 1,
+      };
+    }
     const tvlRow = {
       dateKey,
       poolAddress: candidate.address,
@@ -804,12 +905,22 @@ export async function runPoolComparisonJob({
         "Daily ranking uses GeckoTerminal public API snapshots and daily OHLCV; not real-time.",
         "FeePower and expected net/day are heuristics based on avg volume/TVL and a simple churn proxy.",
         "TVL averages use local daily snapshots and may fall back to current TVL for newly observed pools.",
+        "OHLCV requests are rate-limit constrained on GeckoTerminal free tier; some rows may use 24h volume fallback or incomplete OHLCV coverage.",
       ],
     },
     debug: {
       gecko: client.snapshot(),
       candidatesConsidered: rows.length,
       generatedDateKey: dateKey,
+      ohlcv: {
+        maxPoolsRequested: maxOhlcvPools,
+        selectedPools: ohlcvFetchSet.size,
+        rateLimited: ohlcvRateLimited,
+        rateLimitHits: ohlcv429Count,
+        fallbackVolumeRows: ohlcvFallbackVolumeCount,
+        skippedByBudget: ohlcvSkippedByBudgetCount,
+        skippedAfterRateLimit: ohlcvSkippedAfterRateLimitCount,
+      },
     },
   };
 
