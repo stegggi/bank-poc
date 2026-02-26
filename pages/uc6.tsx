@@ -115,7 +115,11 @@ type PositionLifecycleRecord = {
     swapCostUsd?: number;
     mintBurnUsd?: number;
     totalCostsUsd?: number;
+    feesNetUsd?: number;
+    capitalGainLossUsd?: number;
     impermanentLossUsd?: number;
+    divergenceVsHodlUsd?: number;
+    alphaVsHodlUsd?: number;
     netProfitUsd?: number;
     costToFeeRatio?: number;
     avgDeployedUsd?: number;
@@ -337,11 +341,19 @@ type Uc6Status = {
     dateRangeRule?: string;
     totals?: {
       closedPositions?: number;
+      feesCollectedUsd?: number;
+      totalCostsUsd?: number;
+      feesNetUsd?: number;
+      capitalGainLossUsd?: number;
       realizedNetProfitUsd?: number;
     };
     years?: Array<{
       year?: number;
       closedPositions?: number;
+      feesCollectedUsd?: number;
+      totalCostsUsd?: number;
+      feesNetUsd?: number;
+      capitalGainLossUsd?: number;
       realizedNetProfitUsd?: number;
       firstClosedAtIso?: string | null;
       lastClosedAtIso?: string | null;
@@ -1113,6 +1125,22 @@ export default function Uc6Page() {
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
                 <Metric
+                  label="Fees Collected (All Closed)"
+                  value={fmtUsd(positionsTaxSummary?.totals?.feesCollectedUsd)}
+                />
+                <Metric
+                  label="Total Costs (All Closed)"
+                  value={fmtUsd(positionsTaxSummary?.totals?.totalCostsUsd)}
+                />
+                <Metric
+                  label="Fees Net (All Closed)"
+                  value={fmtSignedUsd(positionsTaxSummary?.totals?.feesNetUsd)}
+                />
+                <Metric
+                  label="Capital Gain/Loss (All Closed)"
+                  value={fmtSignedUsd(positionsTaxSummary?.totals?.capitalGainLossUsd)}
+                />
+                <Metric
                   label="Realized Net Profit (All Closed)"
                   value={fmtSignedUsd(positionsTaxSummary?.totals?.realizedNetProfitUsd)}
                 />
@@ -1122,15 +1150,19 @@ export default function Uc6Page() {
                 />
               </div>
               <SimpleTable
-                headers={["Tax Year", "Closed Positions", "Realized Net Profit"]}
+                headers={["Tax Year", "Closed Positions", "Fees Collected", "Total Costs", "Fees Net", "Capital Gain/Loss", "Realized Net Profit"]}
                 rows={
                   Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
                     ? positionsTaxSummary!.years!.map((row) => [
                         String(Math.round(n(row?.year, 0))),
                         String(Math.round(n(row?.closedPositions, 0))),
+                        fmtUsd(row?.feesCollectedUsd),
+                        fmtUsd(row?.totalCostsUsd),
+                        fmtSignedUsd(row?.feesNetUsd),
+                        fmtSignedUsd(row?.capitalGainLossUsd),
                         fmtSignedUsd(row?.realizedNetProfitUsd),
                       ])
-                    : [["—", "0", "—"]]
+                    : [["—", "0", "—", "—", "—", "—", "—"]]
                 }
               />
             </div>
@@ -1161,7 +1193,9 @@ export default function Uc6Page() {
                   <Metric label="Entry Value" value={fmtUsd(activeLifecycleRecord.entry?.entryValueUsd)} />
                   <Metric label="Fees Collected" value={fmtUsd(activeLifecycleRecord.performance?.feesCollectedUsd)} />
                   <Metric label="Total Costs" value={fmtUsd(activeLifecycleRecord.performance?.totalCostsUsd)} />
-                  <Metric label="IL" value={fmtSignedUsd(activeLifecycleRecord.performance?.impermanentLossUsd)} />
+                  <Metric label="Fees Net" value={fmtSignedUsd(activeLifecycleRecord.performance?.feesNetUsd)} />
+                  <Metric label="Capital Gain/Loss" value={fmtSignedUsd(activeLifecycleRecord.performance?.capitalGainLossUsd)} />
+                  <Metric label="Divergence vs HODL" value={fmtSignedUsd(activeLifecycleRecord.performance?.divergenceVsHodlUsd)} />
                   <Metric label="Net Profit" value={fmtSignedUsd(activeLifecycleRecord.performance?.netProfitUsd)} />
                   <Metric label="Tx Count" value={String(activeLifecycleRecord.activity?.txCount ?? 0)} />
                   <Metric label="Status" value={activeLifecycleRecord.status || "OPEN"} />
@@ -1172,7 +1206,7 @@ export default function Uc6Page() {
             </div>
 
             <div style={{ ...styles.note, marginTop: 12 }}>
-              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs.
+              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs. Net Profit = Fees Net + Capital Gain/Loss. Divergence vs HODL is a benchmark delta (principal LP vs HODL), not a cash cost.
             </div>
 
             <div style={styles.tableWrap}>
@@ -1190,7 +1224,9 @@ export default function Uc6Page() {
                       "Entry Value",
                       "Fees Collected",
                       "Total Costs",
-                      "IL",
+                      "Fees Net",
+                      "Capital G/L",
+                      "Div. vs HODL",
                       "Net Profit",
                       "Cost/Fee",
                       "APR",
@@ -1205,7 +1241,7 @@ export default function Uc6Page() {
                 <tbody>
                   {closedPositionRecords.length === 0 ? (
                     <tr>
-                      <td style={styles.td} colSpan={15}>
+                      <td style={styles.td} colSpan={17}>
                         No closed position records yet.
                       </td>
                     </tr>
@@ -1214,7 +1250,9 @@ export default function Uc6Page() {
                       const selectorLabel = rec.selector?.humanLabel || `${rec.selector?.type || "—"}:${String(rec.selector?.value ?? "—")}`;
                       const bandLabel = `±${(n(rec.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
                       const ticksLabel = `${rec.band?.tickLower ?? "—"} .. ${rec.band?.tickUpper ?? "—"}`;
-                      const ilUsd = n(rec.performance?.impermanentLossUsd, 0);
+                      const divVsHodlUsd = n(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd, 0);
+                      const feesNetUsd = n(rec.performance?.feesNetUsd, 0);
+                      const capitalGainLossUsd = n(rec.performance?.capitalGainLossUsd, 0);
                       const netUsd = n(rec.performance?.netProfitUsd, 0);
                       return (
                         <tr key={rec.id}>
@@ -1234,7 +1272,9 @@ export default function Uc6Page() {
                           <td style={styles.td}>{fmtUsd(rec.entry?.entryValueUsd)}</td>
                           <td style={styles.td}>{fmtUsd(rec.performance?.feesCollectedUsd)}</td>
                           <td style={styles.td}>{fmtUsd(rec.performance?.totalCostsUsd)}</td>
-                          <td style={{ ...styles.td, color: ilUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.impermanentLossUsd)}</td>
+                          <td style={{ ...styles.td, color: feesNetUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.feesNetUsd)}</td>
+                          <td style={{ ...styles.td, color: capitalGainLossUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.capitalGainLossUsd)}</td>
+                          <td style={{ ...styles.td, color: divVsHodlUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd)}</td>
                           <td style={{ ...styles.td, color: netUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.netProfitUsd)}</td>
                           <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
                           <td style={styles.td}>{fmtPct(rec.performance?.apr)}</td>
@@ -1303,6 +1343,9 @@ export default function Uc6Page() {
                 ],
               ]}
             />
+            <div style={{ ...styles.note, marginTop: 8 }}>
+              Net = Fees Net (fees + rewards - costs). Divergence vs HODL is shown in LP Position Records as a separate benchmark metric and is not deducted as a cash cost.
+            </div>
             <div style={styles.note}>
               Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
               {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
@@ -1531,8 +1574,11 @@ function PositionRecordDrawer({
             <Metric label="Swap Cost" value={fmtUsd(perf.swapCostUsd)} />
             <Metric label="Mint/Burn (subset)" value={fmtUsd(perf.mintBurnUsd)} />
             <Metric label="Total Costs" value={fmtUsd(perf.totalCostsUsd)} />
-            <Metric label="IL" value={fmtSignedUsd(perf.impermanentLossUsd)} />
+            <Metric label="Fees Net" value={fmtSignedUsd(perf.feesNetUsd)} />
+            <Metric label="Capital Gain/Loss" value={fmtSignedUsd(perf.capitalGainLossUsd)} />
+            <Metric label="Divergence vs HODL" value={fmtSignedUsd(perf.divergenceVsHodlUsd ?? perf.impermanentLossUsd)} />
             <Metric label="Net Profit" value={fmtSignedUsd(perf.netProfitUsd)} />
+            <Metric label="Alpha vs HODL" value={fmtSignedUsd(perf.alphaVsHodlUsd)} />
             <Metric label="Cost / Fee" value={fmtRatioPct(perf.costToFeeRatio)} />
             <Metric label="APR" value={fmtPct(perf.apr)} />
           </div>

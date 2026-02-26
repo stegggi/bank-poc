@@ -1718,7 +1718,11 @@ class Uc6Bot {
         swapCostUsd: 0,
         mintBurnUsd: 0,
         totalCostsUsd: 0,
+        feesNetUsd: 0,
+        capitalGainLossUsd: 0,
         impermanentLossUsd: 0,
+        divergenceVsHodlUsd: 0,
+        alphaVsHodlUsd: 0,
         netProfitUsd: 0,
         costToFeeRatio: 0,
         avgDeployedUsd: 0,
@@ -2032,17 +2036,25 @@ class Uc6Bot {
     if (!rec) return;
     const perf = rec.performance;
     perf.totalCostsUsd = Number(perf.gasUsd || 0) + Number(perf.swapCostUsd || 0);
-    perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
-    // User requested formula. `impermanentLossUsd` is stored as signed delta from LP - HODL.
-    perf.netProfitUsd =
+    perf.feesNetUsd =
       Number(perf.feesCollectedUsd || 0) +
       Number(perf.rewardsUsd || 0) -
-      Number(perf.totalCostsUsd || 0) -
-      Number(perf.impermanentLossUsd || 0);
+      Number(perf.totalCostsUsd || 0);
+    perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
+    // Signed benchmark delta: LP principal value minus HODL principal value at exit.
+    perf.divergenceVsHodlUsd = Number(perf.impermanentLossUsd || 0);
     perf.costToFeeRatio =
       Number(perf.totalCostsUsd || 0) / Math.max(Number(perf.feesCollectedUsd || 0), 1e-9);
     const entryValueUsd = Number(rec.entry?.entryValueUsd || 0);
     const exitValueUsd = Number(rec.exit?.exitValueUsd || 0);
+    perf.capitalGainLossUsd =
+      rec.status === "CLOSED" && entryValueUsd > 0 && Number.isFinite(exitValueUsd)
+        ? (exitValueUsd - entryValueUsd)
+        : Number(perf.capitalGainLossUsd || 0) || 0;
+    // Absolute realized PnL (for tax/economic view) = principal move + net fees income.
+    perf.netProfitUsd = Number(perf.feesNetUsd || 0) + Number(perf.capitalGainLossUsd || 0);
+    // Benchmark-relative result vs HODL principal + fees net (optional analytic field).
+    perf.alphaVsHodlUsd = Number(perf.feesNetUsd || 0) + Number(perf.divergenceVsHodlUsd || 0);
     perf.avgDeployedUsd = rec.status === "CLOSED" && exitValueUsd > 0
       ? (entryValueUsd + exitValueUsd) / 2
       : entryValueUsd;
@@ -2311,6 +2323,10 @@ class Uc6Bot {
     const byYear = new Map();
     let totalClosedPositions = 0;
     let totalRealizedNetProfitUsd = 0;
+    let totalFeesCollectedUsd = 0;
+    let totalTotalCostsUsd = 0;
+    let totalFeesNetUsd = 0;
+    let totalCapitalGainLossUsd = 0;
 
     for (const rec of closed) {
       const closedAtIso = rec?.exit?.closedAtIso || null;
@@ -2318,15 +2334,28 @@ class Uc6Bot {
       if (!Number.isFinite(closedAtMs)) continue;
       const year = new Date(closedAtMs).getUTCFullYear();
       if (!Number.isFinite(year)) continue;
-      const net = Number(rec?.performance?.netProfitUsd || 0);
+      const perf = rec?.performance || {};
+      const net = Number(perf.netProfitUsd || 0);
+      const feesCollected = Number(perf.feesCollectedUsd || 0);
+      const totalCosts = Number(perf.totalCostsUsd || 0);
+      const feesNet = Number(perf.feesNetUsd || 0);
+      const capitalGainLoss = Number(perf.capitalGainLossUsd || 0);
       totalClosedPositions += 1;
       totalRealizedNetProfitUsd += Number.isFinite(net) ? net : 0;
+      totalFeesCollectedUsd += Number.isFinite(feesCollected) ? feesCollected : 0;
+      totalTotalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
+      totalFeesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
+      totalCapitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
       let row = byYear.get(year);
       if (!row) {
         row = {
           year,
           closedPositions: 0,
           realizedNetProfitUsd: 0,
+          feesCollectedUsd: 0,
+          totalCostsUsd: 0,
+          feesNetUsd: 0,
+          capitalGainLossUsd: 0,
           firstClosedAtIso: null,
           lastClosedAtIso: null,
         };
@@ -2334,6 +2363,10 @@ class Uc6Bot {
       }
       row.closedPositions += 1;
       row.realizedNetProfitUsd += Number.isFinite(net) ? net : 0;
+      row.feesCollectedUsd += Number.isFinite(feesCollected) ? feesCollected : 0;
+      row.totalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
+      row.feesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
+      row.capitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
       if (!row.firstClosedAtIso || closedAtIso < row.firstClosedAtIso) row.firstClosedAtIso = closedAtIso;
       if (!row.lastClosedAtIso || closedAtIso > row.lastClosedAtIso) row.lastClosedAtIso = closedAtIso;
     }
@@ -2344,6 +2377,10 @@ class Uc6Bot {
       dateRangeRule: "01-01..12-31",
       totals: {
         closedPositions: totalClosedPositions,
+        feesCollectedUsd: totalFeesCollectedUsd,
+        totalCostsUsd: totalTotalCostsUsd,
+        feesNetUsd: totalFeesNetUsd,
+        capitalGainLossUsd: totalCapitalGainLossUsd,
         realizedNetProfitUsd: totalRealizedNetProfitUsd,
       },
       years,
