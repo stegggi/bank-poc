@@ -21,6 +21,7 @@ import {
 import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { verifyMessage } from "ethers";
+import { createRegimeState, estimateOU, getRegimeAdvice, ingestSample } from "./lib/regime.mjs";
 
 const VERSION = "uc6-lp-bot/0.1";
 const USDC_DECIMALS = 6;
@@ -75,6 +76,7 @@ const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
 const POSITION_SUMMARY_LIMIT = 20;
 const POSITION_PAGE_SIZE_DEFAULT = 10;
 const POSITION_PAGE_SIZE_MAX = 100;
+const REGIME_WARN_MIN_INTERVAL_MS = 60_000;
 
 const POOL_ABI = [
   {
@@ -513,6 +515,17 @@ const DEFAULT_SETTINGS = {
   harvestThresholdUsd: 30,
   churnProtectionEnabled: false,
   churnMaxCostToFeeRatio: 0.4,
+  regime: {
+    enabled: false,
+    windowSec: 1800,
+    sampleEverySec: 12,
+    minSamples: 60,
+    mrHalfLifeMaxSec: 180,
+    trendHalfLifeMinSec: 900,
+    maxEdgeAdj: 0.1,
+    maxBandAdjBps: 50,
+    maxCooldownAdjSec: 900,
+  },
 };
 
 function sleep(ms) {
@@ -554,6 +567,8 @@ function toRatio(v, fallback) {
 
 function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
   const src = input && typeof input === "object" ? input : {};
+  const baseRegime = baseSettings.regime && typeof baseSettings.regime === "object" ? baseSettings.regime : DEFAULT_SETTINGS.regime;
+  const srcRegime = src.regime && typeof src.regime === "object" ? src.regime : {};
   const killSwitch = toBool(src.killSwitch, baseSettings.killSwitch);
   const reserveMinUsdc = clamp(
     toNumber(src.reserveMinUsdc ?? src.keepUsdcReserve, baseSettings.reserveMinUsdc),
@@ -634,7 +649,53 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       0,
       100
     ),
+    regime: {
+      enabled: toBool(srcRegime.enabled ?? src.regimeEnabled, baseRegime.enabled),
+      windowSec: clamp(
+        Math.round(toNumber(srcRegime.windowSec ?? src.regimeWindowSec, baseRegime.windowSec)),
+        60,
+        86_400
+      ),
+      sampleEverySec: clamp(
+        Math.round(toNumber(srcRegime.sampleEverySec ?? src.regimeSampleEverySec, baseRegime.sampleEverySec)),
+        1,
+        3_600
+      ),
+      minSamples: clamp(
+        Math.round(toNumber(srcRegime.minSamples ?? src.regimeMinSamples, baseRegime.minSamples)),
+        5,
+        20_000
+      ),
+      mrHalfLifeMaxSec: clamp(
+        Math.round(toNumber(srcRegime.mrHalfLifeMaxSec ?? src.regimeMrHalfLifeMaxSec, baseRegime.mrHalfLifeMaxSec)),
+        10,
+        86_400
+      ),
+      trendHalfLifeMinSec: clamp(
+        Math.round(
+          toNumber(srcRegime.trendHalfLifeMinSec ?? src.regimeTrendHalfLifeMinSec, baseRegime.trendHalfLifeMinSec)
+        ),
+        10,
+        86_400
+      ),
+      maxEdgeAdj: clamp(toNumber(srcRegime.maxEdgeAdj ?? src.regimeMaxEdgeAdj, baseRegime.maxEdgeAdj), 0, 0.5),
+      maxBandAdjBps: clamp(
+        Math.round(toNumber(srcRegime.maxBandAdjBps ?? src.regimeMaxBandAdjBps, baseRegime.maxBandAdjBps)),
+        0,
+        500
+      ),
+      maxCooldownAdjSec: clamp(
+        Math.round(
+          toNumber(srcRegime.maxCooldownAdjSec ?? src.regimeMaxCooldownAdjSec, baseRegime.maxCooldownAdjSec)
+        ),
+        0,
+        86_400
+      ),
+    },
   };
+  if (out.regime.trendHalfLifeMinSec <= out.regime.mrHalfLifeMaxSec) {
+    out.regime.trendHalfLifeMinSec = out.regime.mrHalfLifeMaxSec + 1;
+  }
   return out;
 }
 
@@ -683,6 +744,8 @@ function defaultState(accountAddress) {
       wallet: null,
       collectableNow: { usdc: 0, weth: 0, usd: 0, isEstimated: true },
       positionInventory: null,
+      regime: null,
+      regimeDecision: null,
       refresh: {},
     },
     events: [],
@@ -1280,6 +1343,9 @@ class Uc6Bot {
     this.lifecyclePhaseContext = null;
     this.successfulLoopStreak = 0;
     this.lastSuccessfulLoopAtMs = 0;
+    this.regimeState = null;
+    this.regimeStateConfigKey = "";
+    this.lastRegimeWarnAtMs = 0;
   }
 
   async init() {
@@ -2840,16 +2906,19 @@ class Uc6Bot {
     };
   }
 
-  ensureActivePositionRun({ reason = "auto", snapshot = null, tokenId = null } = {}) {
+  ensureActivePositionRun({ reason = "auto", snapshot = null, tokenId = null, bandHalfBpsOverride = null } = {}) {
     if (this.state.activePositionRunId) return String(this.state.activePositionRunId);
     const runId = randomUUID();
     this.state.activePositionRunId = runId;
     const band = this.currentBandDescriptor();
+    const plannedBandHalfBps = Number.isFinite(Number(bandHalfBpsOverride))
+      ? Number(bandHalfBpsOverride)
+      : Number(this.settings.bandHalfBps || 0);
     const venue = this.settings.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const details = {
       reason,
       plannedBand: {
-        bandHalfBps: Number(this.settings.bandHalfBps || 0),
+        bandHalfBps: plannedBandHalfBps,
         tickLower: Number(band.tickLower || 0),
         tickUpper: Number(band.tickUpper || 0),
       },
@@ -2866,7 +2935,7 @@ class Uc6Bot {
         positionRunId: runId,
         tokenId,
         band: {
-          bandHalfBps: Number(this.settings.bandHalfBps || 0),
+          bandHalfBps: plannedBandHalfBps,
           tickLower: Number(band.tickLower || 0),
           tickUpper: Number(band.tickUpper || 0),
         },
@@ -3402,6 +3471,11 @@ class Uc6Bot {
     this.state.latest.primary = primary;
     this.state.latest.fallback = fallback;
     this.markRefreshStamp("slot0Ms", "slot0AtIso");
+    try {
+      this.ingestRegimeSampleFromSnapshot(primary);
+    } catch (err) {
+      this.warnRegimeRateLimited(err instanceof Error ? err.message : String(err || "regime sample ingest failed"));
+    }
     return { primary, fallback };
   }
 
@@ -3519,6 +3593,226 @@ class Uc6Bot {
   toNumberOrZero(v) {
     const n = Number(v);
     return Number.isFinite(n) ? n : 0;
+  }
+
+  getRegimeSettings() {
+    const cfg = this.settings?.regime && typeof this.settings.regime === "object" ? this.settings.regime : DEFAULT_SETTINGS.regime;
+    return {
+      enabled: Boolean(cfg.enabled),
+      windowSec: Math.max(60, Math.round(Number(cfg.windowSec || DEFAULT_SETTINGS.regime.windowSec))),
+      sampleEverySec: Math.max(1, Math.round(Number(cfg.sampleEverySec || DEFAULT_SETTINGS.regime.sampleEverySec))),
+      minSamples: Math.max(5, Math.round(Number(cfg.minSamples || DEFAULT_SETTINGS.regime.minSamples))),
+      mrHalfLifeMaxSec: Math.max(10, Math.round(Number(cfg.mrHalfLifeMaxSec || DEFAULT_SETTINGS.regime.mrHalfLifeMaxSec))),
+      trendHalfLifeMinSec: Math.max(
+        11,
+        Math.round(Number(cfg.trendHalfLifeMinSec || DEFAULT_SETTINGS.regime.trendHalfLifeMinSec))
+      ),
+      maxEdgeAdj: clamp(Number(cfg.maxEdgeAdj || DEFAULT_SETTINGS.regime.maxEdgeAdj), 0, 0.5),
+      maxBandAdjBps: clamp(
+        Math.round(Number(cfg.maxBandAdjBps || DEFAULT_SETTINGS.regime.maxBandAdjBps)),
+        0,
+        500
+      ),
+      maxCooldownAdjSec: clamp(
+        Math.round(Number(cfg.maxCooldownAdjSec || DEFAULT_SETTINGS.regime.maxCooldownAdjSec)),
+        0,
+        86_400
+      ),
+    };
+  }
+
+  syncRegimeStateWithSettings() {
+    const cfg = this.getRegimeSettings();
+    const key = stableStringify(cfg);
+    if (!this.regimeState || this.regimeStateConfigKey !== key) {
+      this.regimeState = createRegimeState({
+        windowSec: cfg.windowSec,
+        sampleEverySec: cfg.sampleEverySec,
+        minSamples: cfg.minSamples,
+      });
+      // Keep classification knobs in state config for estimator defaults (optional use).
+      this.regimeState.config = {
+        ...this.regimeState.config,
+        mrHalfLifeMaxSec: cfg.mrHalfLifeMaxSec,
+        trendHalfLifeMinSec: cfg.trendHalfLifeMinSec,
+      };
+      this.regimeStateConfigKey = key;
+    }
+    return cfg;
+  }
+
+  warnRegimeRateLimited(message) {
+    const now = Date.now();
+    if (now - this.lastRegimeWarnAtMs < REGIME_WARN_MIN_INTERVAL_MS) return;
+    this.lastRegimeWarnAtMs = now;
+    try {
+      console.warn(`[UC6] regime warning: ${message}`);
+    } catch {}
+  }
+
+  ingestRegimeSampleFromSnapshot(snapshot) {
+    const cfg = this.syncRegimeStateWithSettings();
+    if (!cfg.enabled) return false;
+    const tick = Number(snapshot?.tick);
+    if (!Number.isFinite(tick)) return false;
+    try {
+      return ingestSample(this.regimeState, {
+        tsSec: Math.floor(Date.now() / 1000),
+        tick,
+      });
+    } catch (err) {
+      this.warnRegimeRateLimited(err instanceof Error ? err.message : String(err || "ingest failed"));
+      return false;
+    }
+  }
+
+  estimateRegimeAndAdvice({ triggerBase, gateBase }) {
+    const latest = this.state.latest || {};
+    const cfg = this.syncRegimeStateWithSettings();
+    const baseThresholds = {
+      edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
+      minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
+      bandHalfBps: Number(this.settings.bandHalfBps || 0),
+    };
+    const baseDecisionView = {
+      baseThresholds,
+      effectiveThresholds: { ...baseThresholds },
+      adviceReason: "regime_disabled",
+      waitRecommended: false,
+    };
+    if (!cfg.enabled) {
+      latest.regime = {
+        enabled: false,
+        ok: false,
+        label: "unknown",
+        theta: null,
+        halfLifeSec: null,
+        sigma: null,
+        mu: null,
+        confidence: 0,
+        updatedAtIso: null,
+        sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        windowSec: cfg.windowSec,
+      };
+      latest.regimeDecision = baseDecisionView;
+      this.state.latest = latest;
+      return {
+        enabled: false,
+        est: null,
+        advice: null,
+        effectiveSettings: baseThresholds,
+      };
+    }
+
+    try {
+      const est = estimateOU(this.regimeState);
+      const now = Date.now();
+      const stats24h = this.summarizeEvents(this.getEventsSince(now - 24 * 60 * 60 * 1000));
+      const recentRebalanceCostUsd =
+        stats24h.rebalances > 0 ? stats24h.totalCostsUsd / stats24h.rebalances : this.estimateRecentRebalanceCostUsd();
+      const feesPerHour = stats24h.feesUsd / 24;
+      const advice = getRegimeAdvice({
+        est,
+        baseSettings: this.settings,
+        edgeProgress: Number(triggerBase?.edgeProgress || 0),
+        outOfRange: String(triggerBase?.reason || "") === "out_of_range",
+        costs: {
+          estimatedActionCostUsd: recentRebalanceCostUsd,
+          gateAllowed: Boolean(gateBase?.allowed),
+        },
+        fees: {
+          trailingFeesPerHourUsd: feesPerHour,
+          fees24hUsd: stats24h.feesUsd,
+        },
+      });
+      const effective = {
+        edgeRebalancePct: baseThresholds.edgeRebalancePct,
+        minRebalanceIntervalSec: baseThresholds.minRebalanceIntervalSec,
+        bandHalfBps: baseThresholds.bandHalfBps,
+      };
+      if (advice?.ok) {
+        effective.edgeRebalancePct = clamp(
+          baseThresholds.edgeRebalancePct + Number(advice.edgeRebalancePctAdj || 0),
+          0.6,
+          0.98
+        );
+        effective.minRebalanceIntervalSec = clamp(
+          Math.round(baseThresholds.minRebalanceIntervalSec + Number(advice.minRebalanceIntervalSecAdj || 0)),
+          60,
+          7200
+        );
+        effective.bandHalfBps = clamp(
+          Math.round(baseThresholds.bandHalfBps + Number(advice.bandHalfBpsAdj || 0)),
+          25,
+          300
+        );
+      }
+      latest.regime = {
+        enabled: true,
+        ok: Boolean(est?.ok),
+        label: est?.label || "unknown",
+        theta: Number.isFinite(Number(est?.theta)) ? Number(est.theta) : null,
+        halfLifeSec: Number.isFinite(Number(est?.halfLifeSec)) ? Number(est.halfLifeSec) : null,
+        sigma: Number.isFinite(Number(est?.sigma)) ? Number(est.sigma) : null,
+        mu: Number.isFinite(Number(est?.mu)) ? Number(est.mu) : null,
+        confidence: Number.isFinite(Number(est?.confidence)) ? Number(est.confidence) : 0,
+        updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
+        sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        windowSec: cfg.windowSec,
+      };
+      latest.regimeDecision = {
+        baseThresholds,
+        effectiveThresholds: effective,
+        adviceReason: String(advice?.reason || (est?.ok ? "no_adjustment" : "estimation_unavailable")),
+        waitRecommended: Boolean(advice?.waitRecommended),
+      };
+      this.state.latest = latest;
+      return {
+        enabled: true,
+        est,
+        advice,
+        effectiveSettings: effective,
+      };
+    } catch (err) {
+      this.warnRegimeRateLimited(err instanceof Error ? err.message : String(err || "estimate failed"));
+      latest.regime = {
+        enabled: true,
+        ok: false,
+        label: "unknown",
+        theta: null,
+        halfLifeSec: null,
+        sigma: null,
+        mu: null,
+        confidence: 0,
+        updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
+        sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        windowSec: cfg.windowSec,
+      };
+      latest.regimeDecision = {
+        ...baseDecisionView,
+        adviceReason: "regime_fallback_on_error",
+      };
+      this.state.latest = latest;
+      return {
+        enabled: true,
+        est: null,
+        advice: null,
+        effectiveSettings: baseThresholds,
+      };
+    }
+  }
+
+  estimateRecentRebalanceCostUsd() {
+    const events = Array.isArray(this.state?.ledgerEvents) ? this.state.ledgerEvents : [];
+    for (let i = events.length - 1; i >= 0; i -= 1) {
+      const ev = events[i];
+      if (!ev || ev.type !== "recenter") continue;
+      const gas = Number(ev.gasUsd || 0);
+      const swap = Number(ev.swapCostUsd || 0);
+      const total = gas + swap;
+      if (Number.isFinite(total) && total > 0) return total;
+    }
+    return 0;
   }
 
   async collectableNowSnapshot() {
@@ -5167,7 +5461,7 @@ class Uc6Bot {
     });
   }
 
-  getRebalanceGate() {
+  getRebalanceGate(overrides = {}) {
     this.ensureDailyCounter();
     const activeSlipstreamPositions = Number(this.state.latest?.positionInventory?.activeCount || 0);
     if (activeSlipstreamPositions > 1) {
@@ -5180,7 +5474,10 @@ class Uc6Bot {
 
     const now = Date.now();
     const lastMs = this.state.lastRebalanceAt ? Date.parse(this.state.lastRebalanceAt) : 0;
-    const cooldownMs = this.settings.minRebalanceIntervalSec * 1000;
+    const cooldownSec = Number.isFinite(Number(overrides.minRebalanceIntervalSec))
+      ? Number(overrides.minRebalanceIntervalSec)
+      : this.settings.minRebalanceIntervalSec;
+    const cooldownMs = cooldownSec * 1000;
     if (lastMs && now - lastMs < cooldownMs) {
       const remainingSec = Math.ceil((cooldownMs - (now - lastMs)) / 1000);
       return { allowed: false, reason: `cooldown ${remainingSec}s`, remainingSec };
@@ -5258,7 +5555,7 @@ class Uc6Bot {
     });
   }
 
-  getPositionTrigger(currentTick) {
+  getPositionTrigger(currentTick, overrides = {}) {
     const p = this.state.position || {};
     if (!p.tokenId) {
       return { trigger: true, reason: "no_position", edgeProgress: 1 };
@@ -5279,7 +5576,10 @@ class Uc6Bot {
     const halfWidth = Math.max(1, Math.abs(upper - center));
     const distance = Math.abs(currentTick - center);
     const edgeProgress = distance / halfWidth;
-    if (edgeProgress >= this.settings.edgeRebalancePct) {
+    const edgeThreshold = Number.isFinite(Number(overrides.edgeRebalancePct))
+      ? Number(overrides.edgeRebalancePct)
+      : this.settings.edgeRebalancePct;
+    if (edgeProgress >= edgeThreshold) {
       return { trigger: true, reason: "near_edge", edgeProgress };
     }
 
@@ -5525,9 +5825,12 @@ class Uc6Bot {
     }
   }
 
-  async rebalanceSlipstream(snapshot) {
+  async rebalanceSlipstream(snapshot, options = {}) {
     const router = this.slipstreamRouter;
     const npm = this.slipstreamNpm;
+    const effectiveBandHalfBps = Number.isFinite(Number(options.bandHalfBps))
+      ? Number(options.bandHalfBps)
+      : Number(this.settings.bandHalfBps || 0);
 
     const currentTokenId = this.state.position?.tokenId;
     const existingBand = currentTokenId
@@ -5538,13 +5841,14 @@ class Uc6Bot {
         }
       : null;
     const plannedBand = {
-      bandHalfBps: Number(this.settings.bandHalfBps || 0),
-      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, this.settings.bandHalfBps) || {}),
+      bandHalfBps: effectiveBandHalfBps,
+      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, effectiveBandHalfBps) || {}),
     };
     const runId = this.ensureActivePositionRun({
       reason: currentTokenId ? "auto_rebalance" : "auto",
       snapshot,
       tokenId: currentTokenId || null,
+      bandHalfBpsOverride: effectiveBandHalfBps,
     });
     if (currentTokenId && runId) {
       await this.appendLifecycleEvent(
@@ -5765,11 +6069,7 @@ class Uc6Bot {
 
     const maxPreflightMintAttempts = 3;
     let mintBasis = snapshot;
-    let targetRange = this.computeTargetRange(
-      mintBasis.tick,
-      mintBasis.tickSpacing,
-      this.settings.bandHalfBps
-    );
+    let targetRange = this.computeTargetRange(mintBasis.tick, mintBasis.tickSpacing, effectiveBandHalfBps);
     let minted;
     let lastMintErr = null;
     const preflightErrors = [];
@@ -5784,7 +6084,7 @@ class Uc6Bot {
         targetRange = this.computeTargetRange(
           mintBasis.tick,
           mintBasis.tickSpacing,
-          this.settings.bandHalfBps
+          effectiveBandHalfBps
         );
       } else {
         try {
@@ -5792,7 +6092,7 @@ class Uc6Bot {
           targetRange = this.computeTargetRange(
             mintBasis.tick,
             mintBasis.tickSpacing,
-            this.settings.bandHalfBps
+            effectiveBandHalfBps
           );
         } catch {
           // Keep provided snapshot on first attempt if refresh fails.
@@ -5805,7 +6105,7 @@ class Uc6Bot {
           positionRunId: runId,
           tokenId: null,
           band: {
-            bandHalfBps: Number(this.settings.bandHalfBps || 0),
+            bandHalfBps: Number(effectiveBandHalfBps || 0),
             tickLower: targetRange.tickLower,
             tickUpper: targetRange.tickUpper,
           },
@@ -5850,7 +6150,7 @@ class Uc6Bot {
     this.state.position = {
       venue: "slipstream",
       tokenId: minted.tokenId,
-      bandHalfBps: this.settings.bandHalfBps,
+      bandHalfBps: effectiveBandHalfBps,
       tickLower: minted.tickLower,
       tickUpper: minted.tickUpper,
       centerTick: minted.centerTick,
@@ -5868,14 +6168,39 @@ class Uc6Bot {
 
     const forceRequestedAt = this.state.forceRebalanceRequestedAt || null;
     const forceRebalance = Boolean(forceRequestedAt);
-    const gate = this.getRebalanceGate();
-    const trigger = this.getPositionTrigger(primary.tick);
+    const gateBase = this.getRebalanceGate();
+    const triggerBase = this.getPositionTrigger(primary.tick);
+    const regimeDecisionCtx = this.estimateRegimeAndAdvice({ triggerBase, gateBase });
+    const effectiveThresholds = regimeDecisionCtx?.effectiveSettings || {
+      edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
+      minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
+      bandHalfBps: Number(this.settings.bandHalfBps || 0),
+    };
+    const gate = this.getRebalanceGate({
+      minRebalanceIntervalSec: effectiveThresholds.minRebalanceIntervalSec,
+    });
+    const trigger = this.getPositionTrigger(primary.tick, {
+      edgeRebalancePct: effectiveThresholds.edgeRebalancePct,
+    });
     const recoveryRetry = Boolean(this.state.forceRebalanceRecoveryPending) && trigger.reason === "no_position";
-    const effectiveTrigger = forceRebalance
+    let effectiveTrigger = forceRebalance
       ? { ...trigger, trigger: true, reason: "manual_force" }
       : recoveryRetry
         ? { ...trigger, trigger: true, reason: "recovery_retry" }
       : trigger;
+    if (
+      !forceRebalance &&
+      !recoveryRetry &&
+      effectiveTrigger.trigger &&
+      effectiveTrigger.reason === "near_edge" &&
+      regimeDecisionCtx?.advice?.waitRecommended
+    ) {
+      effectiveTrigger = {
+        ...effectiveTrigger,
+        trigger: false,
+        reason: "regime_wait_near_edge",
+      };
+    }
     if (effectiveTrigger.trigger && effectiveTrigger.reason === "no_position" && (forceRebalance || recoveryRetry || gate.allowed)) {
       await this.maybeRefreshPositionInventory({ force: true });
       this.enforceSinglePositionInvariant();
@@ -5977,7 +6302,9 @@ class Uc6Bot {
     })();
     this.beginAction("recenter", effectiveTrigger.reason);
     try {
-      await this.rebalanceSlipstream(primary);
+      await this.rebalanceSlipstream(primary, {
+        bandHalfBps: effectiveThresholds.bandHalfBps,
+      });
       if (!this.state.position?.tokenId) {
         throw new Error("Rebalance finished without an active LP position (tokenId missing)");
       }
@@ -6168,6 +6495,7 @@ class Uc6Bot {
         inventoryRefreshEverySec: this.settings.inventoryRefreshEverySec,
         collectableRefreshEverySec: this.settings.collectableRefreshEverySec,
         dashboardRecommendedPollMs: this.settings.dashboardRecommendedPollMs,
+        regime: this.settings.regime,
         maxDeployUsdc: this.settings.maxDeployUsdc,
         maxInitialMintUsdc: this.settings.maxInitialMintUsdc,
         minTopUpUsd: this.settings.minTopUpUsd,
@@ -6258,6 +6586,33 @@ class Uc6Bot {
       },
       analytics: {
         bandPerformance,
+      },
+      regime: latest.regime || {
+        enabled: Boolean(this.settings.regime?.enabled),
+        ok: false,
+        label: "unknown",
+        theta: null,
+        halfLifeSec: null,
+        sigma: null,
+        mu: null,
+        confidence: 0,
+        updatedAtIso: null,
+        sampleCount: 0,
+        windowSec: Number(this.settings.regime?.windowSec || 0),
+      },
+      decision: latest.regimeDecision || {
+        baseThresholds: {
+          edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
+          minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
+          bandHalfBps: Number(this.settings.bandHalfBps || 0),
+        },
+        effectiveThresholds: {
+          edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
+          minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
+          bandHalfBps: Number(this.settings.bandHalfBps || 0),
+        },
+        adviceReason: this.settings.regime?.enabled ? "regime_not_estimated_yet" : "regime_disabled",
+        waitRecommended: false,
       },
       positionsSummary: this.getPositionsSummary(POSITION_SUMMARY_LIMIT),
       positionsTaxSummary: this.getPositionsTaxSummary(),

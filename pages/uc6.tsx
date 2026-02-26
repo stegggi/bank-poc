@@ -45,6 +45,15 @@ type Uc6DraftSettings = {
   failureCooldownSec: number;
   churnProtectionEnabled: boolean;
   churnMaxCostToFeeRatio: number; // percentage in UI
+  regimeEnabled: boolean;
+  regimeWindowSec: number;
+  regimeSampleEverySec: number;
+  regimeMinSamples: number;
+  regimeMrHalfLifeMaxSec: number;
+  regimeTrendHalfLifeMinSec: number;
+  regimeMaxEdgeAdj: number;
+  regimeMaxBandAdjBps: number;
+  regimeMaxCooldownAdjSec: number;
 };
 
 type OwnerPayload = {
@@ -75,6 +84,17 @@ type OwnerPayload = {
   failureCooldownSec: number;
   churnProtectionEnabled: boolean;
   churnMaxCostToFeeRatio: number;
+  regime: {
+    enabled: boolean;
+    windowSec: number;
+    sampleEverySec: number;
+    minSamples: number;
+    mrHalfLifeMaxSec: number;
+    trendHalfLifeMinSec: number;
+    maxEdgeAdj: number;
+    maxBandAdjBps: number;
+    maxCooldownAdjSec: number;
+  };
 };
 
 type PositionLifecycleRecord = {
@@ -184,6 +204,17 @@ type Uc6Status = {
     inventoryRefreshEverySec?: number;
     collectableRefreshEverySec?: number;
     dashboardRecommendedPollMs?: number;
+    regime?: {
+      enabled?: boolean;
+      windowSec?: number;
+      sampleEverySec?: number;
+      minSamples?: number;
+      mrHalfLifeMaxSec?: number;
+      trendHalfLifeMinSec?: number;
+      maxEdgeAdj?: number;
+      maxBandAdjBps?: number;
+      maxCooldownAdjSec?: number;
+    };
     maxDeployUsdc?: number;
     maxInitialMintUsdc?: number;
     minTopUpUsd?: number;
@@ -276,6 +307,33 @@ type Uc6Status = {
       totalCostsUsd?: number;
       totalNetUsd?: number;
     }>;
+  };
+  regime?: {
+    enabled?: boolean;
+    ok?: boolean;
+    label?: "mean_reverting" | "trending" | "unknown" | string;
+    theta?: number | null;
+    halfLifeSec?: number | null;
+    sigma?: number | null;
+    mu?: number | null;
+    confidence?: number;
+    updatedAtIso?: string | null;
+    sampleCount?: number;
+    windowSec?: number;
+  };
+  decision?: {
+    baseThresholds?: {
+      edgeRebalancePct?: number;
+      minRebalanceIntervalSec?: number;
+      bandHalfBps?: number;
+    };
+    effectiveThresholds?: {
+      edgeRebalancePct?: number;
+      minRebalanceIntervalSec?: number;
+      bandHalfBps?: number;
+    };
+    adviceReason?: string;
+    waitRecommended?: boolean;
   };
   providers?: {
     http?: {
@@ -411,6 +469,15 @@ function defaultDraft(): Uc6DraftSettings {
     failureCooldownSec: 900,
     churnProtectionEnabled: false,
     churnMaxCostToFeeRatio: 40,
+    regimeEnabled: false,
+    regimeWindowSec: 1800,
+    regimeSampleEverySec: 12,
+    regimeMinSamples: 60,
+    regimeMrHalfLifeMaxSec: 180,
+    regimeTrendHalfLifeMinSec: 900,
+    regimeMaxEdgeAdj: 0.1,
+    regimeMaxBandAdjBps: 50,
+    regimeMaxCooldownAdjSec: 900,
   };
 }
 
@@ -428,6 +495,7 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
   const reserveMax = n(settings.reservePolicy?.maxUsdc ?? settings.reserveMaxUsdc, d.reserveMaxUsdc);
   const churnEnabled = Boolean(settings.churnProtection?.enabled ?? settings.churnProtectionEnabled ?? d.churnProtectionEnabled);
   const churnRatio = n(settings.churnProtection?.maxCostToFeeRatio ?? settings.churnMaxCostToFeeRatio, d.churnMaxCostToFeeRatio / 100);
+  const regime = settings.regime || {};
 
   return {
     tradingEnabled: Boolean(settings.tradingEnabled ?? d.tradingEnabled),
@@ -457,6 +525,15 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     failureCooldownSec: n(settings.failureCooldownSec, d.failureCooldownSec),
     churnProtectionEnabled: churnEnabled,
     churnMaxCostToFeeRatio: churnRatio * 100,
+    regimeEnabled: Boolean(regime.enabled ?? d.regimeEnabled),
+    regimeWindowSec: n(regime.windowSec, d.regimeWindowSec),
+    regimeSampleEverySec: n(regime.sampleEverySec, d.regimeSampleEverySec),
+    regimeMinSamples: n(regime.minSamples, d.regimeMinSamples),
+    regimeMrHalfLifeMaxSec: n(regime.mrHalfLifeMaxSec, d.regimeMrHalfLifeMaxSec),
+    regimeTrendHalfLifeMinSec: n(regime.trendHalfLifeMinSec, d.regimeTrendHalfLifeMinSec),
+    regimeMaxEdgeAdj: n(regime.maxEdgeAdj, d.regimeMaxEdgeAdj),
+    regimeMaxBandAdjBps: n(regime.maxBandAdjBps, d.regimeMaxBandAdjBps),
+    regimeMaxCooldownAdjSec: n(regime.maxCooldownAdjSec, d.regimeMaxCooldownAdjSec),
   };
 }
 
@@ -489,6 +566,17 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
     failureCooldownSec: draft.failureCooldownSec,
     churnProtectionEnabled: draft.churnProtectionEnabled,
     churnMaxCostToFeeRatio: Math.max(0, draft.churnMaxCostToFeeRatio) / 100,
+    regime: {
+      enabled: draft.regimeEnabled,
+      windowSec: draft.regimeWindowSec,
+      sampleEverySec: draft.regimeSampleEverySec,
+      minSamples: draft.regimeMinSamples,
+      mrHalfLifeMaxSec: draft.regimeMrHalfLifeMaxSec,
+      trendHalfLifeMinSec: draft.regimeTrendHalfLifeMinSec,
+      maxEdgeAdj: draft.regimeMaxEdgeAdj,
+      maxBandAdjBps: draft.regimeMaxBandAdjBps,
+      maxCooldownAdjSec: draft.regimeMaxCooldownAdjSec,
+    },
   };
 }
 
@@ -949,6 +1037,8 @@ export default function Uc6Page() {
   }, []);
 
   const decision = (status?.ops?.lastDecision || status?.lastDecision || {}) as Record<string, unknown>;
+  const regimeStatus = status?.regime || null;
+  const regimeDecisionView = status?.decision || null;
   const events = (status?.events?.lastN || []).slice(-5).reverse();
   const inRange = Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
@@ -974,6 +1064,30 @@ export default function Uc6Page() {
   const closedPositionRecords = positionsPage?.items || [];
   const positionsPageCount = Math.max(1, Number(positionsPage?.totalPages || 1));
   const positionsCurrentPage = Math.max(1, Number(positionsPage?.page || positionsPageNum));
+  const regimeHalfLifeSec = regimeStatus?.halfLifeSec;
+  const regimeHalfLifeLabel =
+    regimeHalfLifeSec == null || !Number.isFinite(Number(regimeHalfLifeSec))
+      ? "—"
+      : Number(regimeHalfLifeSec) > 86400
+        ? `${Math.round(Number(regimeHalfLifeSec) / 3600)}h`
+        : fmtDurationCompact(regimeHalfLifeSec);
+  const regimeConfidencePct = regimeStatus?.confidence == null ? null : n(regimeStatus?.confidence, 0) * 100;
+  const regimeBaseEdgePct = n(regimeDecisionView?.baseThresholds?.edgeRebalancePct, n(status?.settings?.edgeRebalancePct, 0)) * 100;
+  const regimeEffectiveEdgePct =
+    n(regimeDecisionView?.effectiveThresholds?.edgeRebalancePct, n(status?.settings?.edgeRebalancePct, 0)) * 100;
+  const regimeBaseCooldown = n(
+    regimeDecisionView?.baseThresholds?.minRebalanceIntervalSec,
+    n(status?.settings?.minRebalanceIntervalSec, 0)
+  );
+  const regimeEffectiveCooldown = n(
+    regimeDecisionView?.effectiveThresholds?.minRebalanceIntervalSec,
+    n(status?.settings?.minRebalanceIntervalSec, 0)
+  );
+  const regimeBaseBandBps = n(regimeDecisionView?.baseThresholds?.bandHalfBps, n(status?.settings?.bandHalfBps, 0));
+  const regimeEffectiveBandBps = n(
+    regimeDecisionView?.effectiveThresholds?.bandHalfBps,
+    n(status?.settings?.bandHalfBps, 0)
+  );
 
   return (
     <>
@@ -1071,6 +1185,50 @@ export default function Uc6Page() {
               <Metric label="Reserve Target" value={fmtUsd(status?.wallet?.allocationUsd?.reserveTarget)} />
               <Metric label="% Deployed" value={fmtPct(status?.wallet?.deployedPct)} />
               <Metric label="% Idle" value={fmtPct(100 - n(status?.wallet?.deployedPct, 0))} />
+            </div>
+          </Card>
+
+          <Card title="Regime">
+            <div style={styles.metaGrid}>
+              <Metric
+                label="Regime Engine"
+                value={
+                  <Pill
+                    label={status?.settings?.regime?.enabled ? "ON" : "OFF"}
+                    tone={status?.settings?.regime?.enabled ? "good" : "muted"}
+                  />
+                }
+              />
+              <Metric
+                label="Label"
+                value={
+                  <Pill
+                    label={String(regimeStatus?.label || "unknown")}
+                    tone={
+                      regimeStatus?.label === "trending"
+                        ? "warn"
+                        : regimeStatus?.label === "mean_reverting"
+                          ? "good"
+                          : "muted"
+                    }
+                  />
+                }
+              />
+              <Metric label="Half-life" value={regimeHalfLifeLabel} />
+              <Metric label="Confidence" value={regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct)} />
+              <Metric label="Samples" value={`${String(regimeStatus?.sampleCount ?? 0)} / ${String(regimeStatus?.windowSec ?? status?.settings?.regime?.windowSec ?? "—")}s`} />
+              <Metric label="Updated" value={regimeStatus?.updatedAtIso || "—"} />
+              <Metric label="Advice" value={String(regimeDecisionView?.adviceReason || "—")} />
+              <Metric
+                label="Wait Recommended"
+                value={<Pill label={regimeDecisionView?.waitRecommended ? "yes" : "no"} tone={regimeDecisionView?.waitRecommended ? "warn" : "muted"} />}
+              />
+              <Metric label="Edge Threshold (base → effective)" value={`${fmtPct(regimeBaseEdgePct)} → ${fmtPct(regimeEffectiveEdgePct)}`} />
+              <Metric label="Cooldown (base → effective)" value={`${Math.round(regimeBaseCooldown)}s → ${Math.round(regimeEffectiveCooldown)}s`} />
+              <Metric label="Band Target (base → effective)" value={`±${fmtPct(regimeBaseBandBps / 100)} → ±${fmtPct(regimeEffectiveBandBps / 100)}`} />
+            </div>
+            <div style={styles.note}>
+              Regime uses OU half-life heuristics on cached tick samples only (no extra RPC reads). Effective thresholds apply per decision and do not overwrite stored settings.
             </div>
           </Card>
 
@@ -1456,6 +1614,46 @@ export default function Uc6Page() {
                 value={draft.churnMaxCostToFeeRatio}
                 step="0.1"
                 onChange={(v) => updateNumber("churnMaxCostToFeeRatio", v)}
+              />
+
+              <SelectField
+                label="regime.enabled"
+                value={draft.regimeEnabled ? "true" : "false"}
+                onChange={(v) => updateBool("regimeEnabled", v === "true")}
+                options={["false", "true"]}
+              />
+              <NumberField label="regime.windowSec" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
+              <NumberField
+                label="regime.sampleEverySec"
+                value={draft.regimeSampleEverySec}
+                onChange={(v) => updateNumber("regimeSampleEverySec", v)}
+              />
+              <NumberField label="regime.minSamples" value={draft.regimeMinSamples} onChange={(v) => updateNumber("regimeMinSamples", v)} />
+              <NumberField
+                label="regime.mrHalfLifeMaxSec"
+                value={draft.regimeMrHalfLifeMaxSec}
+                onChange={(v) => updateNumber("regimeMrHalfLifeMaxSec", v)}
+              />
+              <NumberField
+                label="regime.trendHalfLifeMinSec"
+                value={draft.regimeTrendHalfLifeMinSec}
+                onChange={(v) => updateNumber("regimeTrendHalfLifeMinSec", v)}
+              />
+              <NumberField
+                label="regime.maxEdgeAdj"
+                value={draft.regimeMaxEdgeAdj}
+                step="0.01"
+                onChange={(v) => updateNumber("regimeMaxEdgeAdj", v)}
+              />
+              <NumberField
+                label="regime.maxBandAdjBps"
+                value={draft.regimeMaxBandAdjBps}
+                onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)}
+              />
+              <NumberField
+                label="regime.maxCooldownAdjSec"
+                value={draft.regimeMaxCooldownAdjSec}
+                onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)}
               />
             </div>
 
