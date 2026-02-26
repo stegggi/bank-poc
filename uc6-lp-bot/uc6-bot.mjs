@@ -2127,6 +2127,50 @@ class Uc6Bot {
       .map((r) => this.sanitizePositionRecordForPersist(r));
   }
 
+  getPositionsTaxSummary() {
+    const closed = this.getClosedPositionRecordsSorted();
+    const byYear = new Map();
+    let totalClosedPositions = 0;
+    let totalRealizedNetProfitUsd = 0;
+
+    for (const rec of closed) {
+      const closedAtIso = rec?.exit?.closedAtIso || null;
+      const closedAtMs = closedAtIso ? Date.parse(closedAtIso) : NaN;
+      if (!Number.isFinite(closedAtMs)) continue;
+      const year = new Date(closedAtMs).getUTCFullYear();
+      if (!Number.isFinite(year)) continue;
+      const net = Number(rec?.performance?.netProfitUsd || 0);
+      totalClosedPositions += 1;
+      totalRealizedNetProfitUsd += Number.isFinite(net) ? net : 0;
+      let row = byYear.get(year);
+      if (!row) {
+        row = {
+          year,
+          closedPositions: 0,
+          realizedNetProfitUsd: 0,
+          firstClosedAtIso: null,
+          lastClosedAtIso: null,
+        };
+        byYear.set(year, row);
+      }
+      row.closedPositions += 1;
+      row.realizedNetProfitUsd += Number.isFinite(net) ? net : 0;
+      if (!row.firstClosedAtIso || closedAtIso < row.firstClosedAtIso) row.firstClosedAtIso = closedAtIso;
+      if (!row.lastClosedAtIso || closedAtIso > row.lastClosedAtIso) row.lastClosedAtIso = closedAtIso;
+    }
+
+    const years = Array.from(byYear.values()).sort((a, b) => b.year - a.year);
+    return {
+      timezone: "UTC",
+      dateRangeRule: "01-01..12-31",
+      totals: {
+        closedPositions: totalClosedPositions,
+        realizedNetProfitUsd: totalRealizedNetProfitUsd,
+      },
+      years,
+    };
+  }
+
   getActivePositionRecord() {
     const runId = this.state.activePositionRunId ? String(this.state.activePositionRunId) : null;
     if (!runId) return null;
@@ -5614,6 +5658,7 @@ class Uc6Bot {
         bandPerformance,
       },
       positionsSummary: this.getPositionsSummary(POSITION_SUMMARY_LIMIT),
+      positionsTaxSummary: this.getPositionsTaxSummary(),
       activePositionRunId: this.state.activePositionRunId ? String(this.state.activePositionRunId) : null,
       activePositionRecord: this.getActivePositionRecord(),
       providers: {

@@ -331,6 +331,21 @@ type Uc6Status = {
     lastError?: { atIso?: string | null; message?: string } | null;
   };
   positionsSummary?: PositionLifecycleRecord[];
+  positionsTaxSummary?: {
+    timezone?: string;
+    dateRangeRule?: string;
+    totals?: {
+      closedPositions?: number;
+      realizedNetProfitUsd?: number;
+    };
+    years?: Array<{
+      year?: number;
+      closedPositions?: number;
+      realizedNetProfitUsd?: number;
+      firstClosedAtIso?: string | null;
+      lastClosedAtIso?: string | null;
+    }>;
+  };
   activePositionRunId?: string | null;
   activePositionRecord?: PositionLifecycleRecord | null;
   counters?: { reason?: string };
@@ -942,6 +957,7 @@ export default function Uc6Page() {
     fmtUsd(row.totalNetUsd),
   ]);
   const activeLifecycleRecord = status?.activePositionRecord || null;
+  const positionsTaxSummary = status?.positionsTaxSummary || null;
   const closedPositionRecords = positionsPage?.items || [];
   const positionsPageCount = Math.max(1, Number(positionsPage?.totalPages || 1));
   const positionsCurrentPage = Math.max(1, Number(positionsPage?.page || positionsPageNum));
@@ -1088,6 +1104,35 @@ export default function Uc6Page() {
 
           <Card title="LP Position Record" fullWidth wideViewport>
             {!!positionsError && <p style={{ ...styles.alert, ...styles.alertErr, marginTop: 0 }}>Positions refresh error: {positionsError}</p>}
+
+            <div style={styles.recordActiveWrap}>
+              <div style={styles.recordActiveTitle}>Realized (Closed) Summary for Tax Tracking</div>
+              <div style={{ ...styles.note, marginBottom: 10 }}>
+                Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}).
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12, marginBottom: 12 }}>
+                <Metric
+                  label="Realized Net Profit (All Closed)"
+                  value={fmtSignedUsd(positionsTaxSummary?.totals?.realizedNetProfitUsd)}
+                />
+                <Metric
+                  label="Closed Positions (All)"
+                  value={String(Math.round(n(positionsTaxSummary?.totals?.closedPositions, 0)))}
+                />
+              </div>
+              <SimpleTable
+                headers={["Tax Year", "Closed Positions", "Realized Net Profit"]}
+                rows={
+                  Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
+                    ? positionsTaxSummary!.years!.map((row) => [
+                        String(Math.round(n(row?.year, 0))),
+                        String(Math.round(n(row?.closedPositions, 0))),
+                        fmtSignedUsd(row?.realizedNetProfitUsd),
+                      ])
+                    : [["—", "0", "—"]]
+                }
+              />
+            </div>
 
             <div style={styles.recordActiveWrap}>
               <div style={styles.recordActiveTitle}>Active (Open) Strategy Run</div>
