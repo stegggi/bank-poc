@@ -71,6 +71,7 @@ const STATE_PATH = path.join(ENV.dataDir, "state.json");
 const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
 const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
 const POSITION_SUMMARY_LIMIT = 20;
+const POSITION_PAGE_SIZE_DEFAULT = 10;
 const POSITION_PAGE_SIZE_MAX = 100;
 
 const POOL_ABI = [
