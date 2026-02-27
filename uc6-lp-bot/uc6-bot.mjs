@@ -3321,25 +3321,20 @@ class Uc6Bot {
   }
 
   summarizeBandPerformance(events) {
-    const recenterEvents = (Array.isArray(events) ? events : [])
-      .filter((ev) => ev && ev.type === "recenter")
-      .slice()
-      .sort((a, b) => {
-        const ams = Date.parse(a.atIso || "");
-        const bms = Date.parse(b.atIso || "");
-        return (Number.isFinite(ams) ? ams : 0) - (Number.isFinite(bms) ? bms : 0);
-      });
+    const _unusedEvents = events;
+    void _unusedEvents;
+    const closedRecords = this.getClosedPositionRecordsSorted();
+    const tiny = 1e-9;
     const byBand = new Map();
-    for (const ev of recenterEvents) {
-      let bandHalfBps = Number(ev.closedBandHalfBpsEffective);
+    for (const rec of closedRecords) {
+      const perf = rec?.performance || {};
+      const activity = rec?.activity || {};
+      const duration = rec?.duration || {};
+      const band = rec?.band || {};
+      let bandHalfBps = this.estimateBandHalfBpsFromTicks(band.tickLower, band.tickUpper);
       if (!(Number.isFinite(bandHalfBps) && bandHalfBps > 0)) {
-        bandHalfBps = this.estimateBandHalfBpsFromTicks(ev.closedTickLower, ev.closedTickUpper);
+        bandHalfBps = Number(band.bandHalfBps || 0);
       }
-      if (!(Number.isFinite(bandHalfBps) && bandHalfBps > 0)) {
-        bandHalfBps = Number(ev.closedBandHalfBps);
-      }
-      const runDurationSec = Number(ev.runDurationSec);
-      const lpBaseUsd = Number(ev.lpBaseUsdAtClose);
       if (!Number.isFinite(bandHalfBps) || bandHalfBps <= 0) continue;
 
       let row = byBand.get(bandHalfBps);
@@ -3347,52 +3342,64 @@ class Uc6Bot {
         row = {
           bandHalfBps,
           runs: 0,
-          totalFeesUsd: 0,
-          totalDurationSec: 0,
-          durationSamples: 0,
-          feeLpRatioSum: 0,
-          feeLpRatioSamples: 0,
-          totalLpBaseUsd: 0,
+          wins: 0,
+          alphaUsdSum: 0,
+          avgDeployedUsdSum: 0,
           totalCostsUsd: 0,
-          totalNetUsd: 0,
+          timeToRebalanceSecSum: 0,
+          timeToRebalanceSamples: 0,
         };
         byBand.set(bandHalfBps, row);
       }
 
-      const fees = Number(ev.feesCollectedUsd || 0);
-      const gas = Number(ev.gasUsd || 0);
-      const swap = Number(ev.swapCostUsd || 0);
-      const net = Number(ev.netUsd || 0);
+      const alphaUsd = Number(perf.alphaVsHodlUsd || 0);
+      const avgDeployedUsd = Number(perf.avgDeployedUsd || 0);
+      const totalCostsUsd = Number(perf.totalCostsUsd || 0);
+      const durationSec = Number(duration.secondsInPosition || 0);
+      const rebalancesCount = Math.max(0, Number(activity.rebalances || 0));
+      const timeToRebalanceSec = durationSec > 0 ? durationSec / Math.max(rebalancesCount, 1) : 0;
+
       row.runs += 1;
-      row.totalFeesUsd += fees;
-      if (Number.isFinite(runDurationSec) && runDurationSec > 0) {
-        row.totalDurationSec += runDurationSec;
-        row.durationSamples += 1;
+      if (Number.isFinite(alphaUsd)) {
+        row.alphaUsdSum += alphaUsd;
+        if (alphaUsd > 0) row.wins += 1;
       }
-      row.totalLpBaseUsd += Number.isFinite(lpBaseUsd) && lpBaseUsd > 0 ? lpBaseUsd : 0;
-      row.totalCostsUsd += gas + swap;
-      row.totalNetUsd += net;
-      if (Number.isFinite(lpBaseUsd) && lpBaseUsd > 0) {
-        row.feeLpRatioSum += fees / lpBaseUsd;
-        row.feeLpRatioSamples += 1;
+      if (Number.isFinite(avgDeployedUsd) && avgDeployedUsd > 0) {
+        row.avgDeployedUsdSum += avgDeployedUsd;
+      }
+      if (Number.isFinite(totalCostsUsd) && totalCostsUsd >= 0) {
+        row.totalCostsUsd += totalCostsUsd;
+      }
+      if (Number.isFinite(timeToRebalanceSec) && timeToRebalanceSec > 0) {
+        row.timeToRebalanceSecSum += timeToRebalanceSec;
+        row.timeToRebalanceSamples += 1;
       }
     }
 
     return Array.from(byBand.values())
-      .sort((a, b) => a.bandHalfBps - b.bandHalfBps)
-      .map((row) => ({
-        bandHalfBps: row.bandHalfBps,
-        bandHalfPct: row.bandHalfBps / 100,
-        runs: row.runs,
-        totalFeesUsd: row.totalFeesUsd,
-        avgFeesUsd: row.runs > 0 ? row.totalFeesUsd / row.runs : 0,
-        avgFeeToLpPct:
-          row.feeLpRatioSamples > 0 ? (row.feeLpRatioSum / row.feeLpRatioSamples) * 100 : null,
-        avgDurationSec: row.durationSamples > 0 ? row.totalDurationSec / row.durationSamples : null,
-        totalDurationSec: row.totalDurationSec,
-        totalCostsUsd: row.totalCostsUsd,
-        totalNetUsd: row.totalNetUsd,
-      }));
+      .map((row) => {
+        const denom = Math.max(tiny, row.avgDeployedUsdSum);
+        const alphaBpsTotal = (row.alphaUsdSum / denom) * 10_000;
+        const costBpsTotal = (row.totalCostsUsd / denom) * 10_000;
+        const winRate = row.runs > 0 ? row.wins / row.runs : 0;
+        const avgTimeToRebalanceSec =
+          row.timeToRebalanceSamples > 0 ? row.timeToRebalanceSecSum / row.timeToRebalanceSamples : null;
+        return {
+          bandHalfBps: row.bandHalfBps,
+          bandHalfPct: row.bandHalfBps / 100,
+          actualBandKey: `±${(row.bandHalfBps / 100).toFixed(2)}%`,
+          runs: row.runs,
+          alphaBpsTotal,
+          winRate,
+          costBpsTotal,
+          avgTimeToRebalanceSec,
+        };
+      })
+      .sort((a, b) => {
+        const alphaDelta = Number(b.alphaBpsTotal || 0) - Number(a.alphaBpsTotal || 0);
+        if (Math.abs(alphaDelta) > 1e-12) return alphaDelta;
+        return Number(b.runs || 0) - Number(a.runs || 0);
+      });
   }
 
   estimateBandHalfBpsFromTicks(tickLower, tickUpper) {

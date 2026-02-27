@@ -390,14 +390,12 @@ type Uc6Status = {
     bandPerformance?: Array<{
       bandHalfBps?: number;
       bandHalfPct?: number;
+      actualBandKey?: string;
       runs?: number;
-      totalFeesUsd?: number;
-      avgFeesUsd?: number;
-      avgFeeToLpPct?: number | null;
-      avgDurationSec?: number | null;
-      totalDurationSec?: number;
-      totalCostsUsd?: number;
-      totalNetUsd?: number;
+      alphaBpsTotal?: number;
+      winRate?: number;
+      costBpsTotal?: number;
+      avgTimeToRebalanceSec?: number | null;
     }>;
   };
   regime?: {
@@ -761,6 +759,18 @@ function fmtPct(v: number | null | undefined, digits = 2): string {
 function fmtRatioPct(ratio: number | null | undefined): string {
   if (ratio == null || Number.isNaN(ratio)) return "—";
   return fmtPct(Number(ratio) * 100, 2);
+}
+
+function fmtBps(v: number | null | undefined, digits = 1): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  return `${fmtNum(v, digits)} bps`;
+}
+
+function bandConfidence(runs: number | null | undefined): { label: string; tone: "good" | "warn" | "muted" } {
+  const nRuns = Math.max(0, Math.round(Number(runs || 0)));
+  if (nRuns >= 20) return { label: "High", tone: "good" };
+  if (nRuns >= 8) return { label: "Medium", tone: "warn" };
+  return { label: "Low", tone: "muted" };
 }
 
 function fmtSpotPrice(v: number | null | undefined): string {
@@ -1223,13 +1233,21 @@ export default function Uc6Page() {
   const aggregateLpUsd = n(status?.ops?.positionInventory?.totalUsdValue, 0);
   const selectorLabel = selectorHumanLabel(status?.market?.selector, status?.market?.venueActive);
   const bandPerformanceRows = (status?.analytics?.bandPerformance || []).map((row) => [
-    `±${fmtPct(row.bandHalfPct)}`,
-    String(Math.round(n(row.runs, 0))),
-    fmtUsd(row.totalFeesUsd),
-    fmtUsd(row.avgFeesUsd),
-    fmtPct(row.avgFeeToLpPct),
-    fmtDurationCompact(row.avgDurationSec),
-    fmtUsd(row.totalNetUsd),
+    row.actualBandKey || `±${fmtPct(row.bandHalfPct)}`,
+    (() => {
+      const runs = Math.round(n(row.runs, 0));
+      const confidence = bandConfidence(runs);
+      return (
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+          <span>{String(runs)}</span>
+          <Pill label={confidence.label} tone={confidence.tone} />
+        </span>
+      );
+    })(),
+    fmtBps(row.alphaBpsTotal),
+    fmtPct(n(row.winRate, 0) * 100),
+    fmtBps(row.costBpsTotal),
+    fmtDurationCompact(row.avgTimeToRebalanceSec),
   ]);
   const activeLifecycleRecord = status?.activePositionRecord || null;
   const positionsTaxSummary = status?.positionsTaxSummary || null;
@@ -1758,14 +1776,14 @@ export default function Uc6Page() {
 
               <div style={styles.profitTableCol}>
                 <div style={{ ...styles.note, marginTop: 0, marginBottom: 8 }}>
-                  Band performance (completed runs only; currently grouped by actual placed band width after tick-grid snapping, not configured target).
+                  Band performance (completed runs only; grouped by actual placed band width after tick-grid snapping).
                 </div>
                 <SimpleTable
-                  headers={["Band", "Runs", "Fees Total", "Fees Avg", "Avg Fees / LP", "Avg Time To Rebalance", "Net Total"]}
+                  headers={["Band", "Runs", "Alpha vs HODL / LP (bps)", "Win Rate vs HODL", "Avg Cost / LP (bps)", "Avg Time To Rebalance"]}
                   rows={
                     bandPerformanceRows.length > 0
                       ? bandPerformanceRows
-                      : [["—", "0", "—", "—", "—", "—", "—"]]
+                      : [["—", "0", "—", "—", "—", "—"]]
                   }
                 />
               </div>
