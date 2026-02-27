@@ -855,13 +855,38 @@ export async function runPoolComparisonJob({
     row.compareToCurrent = compareToCurrentPool(row, currentRow, { switchCostUsd: estimatedSwitchCostUsd });
   }
 
-  const top5 = uniqueBy(
-    rows
-    .filter((r) => !r.isCurrent || normAddr(r.pool?.address) !== currentPoolAddress)
-    .sort((a, b) => num(b.economics?.expectedNetDayUsd, -Infinity) - num(a.economics?.expectedNetDayUsd, -Infinity))
-    ,
-    (r) => topPoolDedupeKey(r)
-  )
+  const rowsSorted = rows
+    .slice()
+    .sort((a, b) => num(b.economics?.expectedNetDayUsd, -Infinity) - num(a.economics?.expectedNetDayUsd, -Infinity));
+
+  const currentLikeKey = currentRow ? topPoolDedupeKey(currentRow) : null;
+  const nonCurrentRows = rowsSorted.filter((r) => {
+    const addr = normAddr(r?.pool?.address);
+    if (currentPoolAddress && addr === currentPoolAddress) return false;
+    // Exclude rows that are effectively the same pool product (venue + pair + selector)
+    // as the currently active pool, even if pool address differs.
+    if (currentLikeKey && topPoolDedupeKey(r) === currentLikeKey) return false;
+    return true;
+  });
+
+  const dedupedRows = uniqueBy(nonCurrentRows, (r) => topPoolDedupeKey(r));
+  // Prefer diversity first: include best candidate per venue, then fill remaining
+  // slots by score while keeping unique addresses.
+  const bestPerVenue = uniqueBy(dedupedRows, (r) => String(r?.dex?.id || "").toLowerCase());
+  const selected = [];
+  const selectedAddr = new Set();
+  const tryPush = (row) => {
+    if (!row || selected.length >= cfg.topN) return;
+    const addr = normAddr(row?.pool?.address);
+    if (!addr || selectedAddr.has(addr)) return;
+    selectedAddr.add(addr);
+    selected.push(row);
+  };
+  for (const row of bestPerVenue) tryPush(row);
+  for (const row of dedupedRows) tryPush(row);
+  for (const row of nonCurrentRows) tryPush(row);
+
+  const top5 = selected
     .slice(0, cfg.topN)
     .map((r, idx) => ({ ...r, rank: idx + 1 }));
 

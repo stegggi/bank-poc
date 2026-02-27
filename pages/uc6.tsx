@@ -757,6 +757,13 @@ function pairLabel(row?: PoolComparisonRow | null): string {
   return pair.pairKey || `${pair.baseSymbol || "?"}/${pair.quoteSymbol || "?"}`;
 }
 
+function poolLink(row?: PoolComparisonRow | null): string | null {
+  const raw = String(row?.pool?.address || "").trim();
+  if (!raw) return null;
+  const poolId = raw.toLowerCase().startsWith("base_") ? raw.slice(5) : raw;
+  return `https://www.geckoterminal.com/base/pools/${encodeURIComponent(poolId)}`;
+}
+
 function ratingTone(rating?: string): "good" | "warn" | "bad" | "muted" {
   if (!rating) return "muted";
   if (rating === "More") return "good";
@@ -1226,7 +1233,16 @@ export default function Uc6Page() {
     ? ([
         poolComparisonCurrent.dex?.name || "—",
         `${poolComparison?.network?.name || "Base"} (${poolComparisonCurrent.chain?.chainId || BASE_CHAIN_ID_DEC})`,
-        pairLabel(poolComparisonCurrent),
+        (() => {
+          const href = poolLink(poolComparisonCurrent);
+          const label = pairLabel(poolComparisonCurrent);
+          if (!href) return label;
+          return (
+            <a href={href} target="_blank" rel="noreferrer noopener" style={styles.link}>
+              {label}
+            </a>
+          );
+        })(),
         <span
           title={poolComparisonCurrent.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}
         >
@@ -1248,7 +1264,16 @@ export default function Uc6Page() {
     : null;
   const poolComparisonTopRows = poolComparisonTop5.map((row) => [
     row.dex?.name || "—",
-    pairLabel(row),
+    (() => {
+      const href = poolLink(row);
+      const label = pairLabel(row);
+      if (!href) return label;
+      return (
+        <a href={href} target="_blank" rel="noreferrer noopener" style={styles.link}>
+          {label}
+        </a>
+      );
+    })(),
     <span title={row.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}>
       {poolComparisonSelectorLabel(row)}
       {row.selector?.feeIsEstimated ? " *" : ""}
@@ -2193,6 +2218,10 @@ const styles: Record<string, CSSProperties> = {
     margin: "8px 0 0",
     color: "#4a5a70",
     fontSize: 14,
+  },
+  link: {
+    color: "#0b57d0",
+    textDecoration: "underline",
   },
   row: {
     marginTop: 12,
