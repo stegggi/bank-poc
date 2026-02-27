@@ -728,6 +728,13 @@ function fmtRatioPct(ratio: number | null | undefined): string {
   return fmtPct(Number(ratio) * 100, 2);
 }
 
+function fmtSpotPrice(v: number | null | undefined): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  if (!Number.isFinite(n) || n <= 0) return "—";
+  return fmtUsd(n);
+}
+
 function fmtDays(v: number | null | undefined): string {
   if (v == null || Number.isNaN(v) || !Number.isFinite(Number(v))) return "—";
   const x = Number(v);
@@ -1572,7 +1579,7 @@ export default function Uc6Page() {
                       "Div. vs HODL",
                       "Net Profit",
                       "Cost/Fee",
-                      "APR",
+                      "Entry/Exit Price",
                       "Actions",
                     ].map((h) => (
                       <th key={h} style={styles.th}>
@@ -1605,8 +1612,8 @@ export default function Uc6Page() {
                           <td style={styles.td}>
                             <span title={ticksLabel}>{bandLabel}</span>
                           </td>
-                          <td style={styles.td} title={rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso || ""}>
-                            {fmtIsoLocal(rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso)}
+                          <td style={styles.td} title={rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso || ""}>
+                            {fmtIsoLocal(rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso)}
                           </td>
                           <td style={styles.td} title={rec.exit?.closedAtIso || ""}>
                             {rec.exit?.closedAtIso ? fmtIsoLocal(rec.exit.closedAtIso) : "OPEN"}
@@ -1620,7 +1627,9 @@ export default function Uc6Page() {
                           <td style={{ ...styles.td, color: divVsHodlUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd)}</td>
                           <td style={{ ...styles.td, color: netUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.netProfitUsd)}</td>
                           <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
-                          <td style={styles.td}>{fmtPct(rec.performance?.apr)}</td>
+                          <td style={styles.td}>
+                            {fmtSpotPrice(rec.entry?.spotPriceUsdcPerWeth)} -&gt; {fmtSpotPrice(rec.exit?.spotPriceUsdcPerWeth)}
+                          </td>
                           <td style={styles.td}>
                             <button style={styles.tableActionButton} onClick={() => setSelectedPosition(rec)}>
                               View
