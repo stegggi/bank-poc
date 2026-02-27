@@ -1462,6 +1462,10 @@ export default function Uc6Page() {
               <Metric label="Token ID (LP NFT)" value={String(status?.position?.tokenId ?? "—")} mono />
               <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
               <Metric label="Pool Tier / Selector" value={selectorLabel} />
+              <Metric
+                label="Pair"
+                value={`${activeLifecycleRecord?.pair?.base || status?.market?.pair?.base || "WETH"}/${activeLifecycleRecord?.pair?.quote || status?.market?.pair?.quote || "USDC"}`}
+              />
               <Metric label="Current Pool Tick (internal)" value={String(status?.market?.tick?.current ?? "—")} />
               <Metric label="Pool Tick Spacing (grid)" value={String(status?.market?.tick?.spacing ?? "—")} />
               <Metric label="Base Band Setting" value={`±${fmtPct(configuredBandHalfPct)}`} />
@@ -1491,6 +1495,17 @@ export default function Uc6Page() {
               />
               <Metric label="Distance To Edge" value={`${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`} />
               <Metric label="Liquidity" value={status?.position?.liquidity || "—"} mono />
+              <Metric label="Opened" value={fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso)} />
+              <Metric label="Entry Snapshot" value={fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso)} />
+              <Metric label="Entry Value" value={fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd)} />
+              <Metric label="Fees Collected" value={fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd)} />
+              <Metric label="Total Costs" value={fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd)} />
+              <Metric label="Fees Net" value={fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd)} />
+              <Metric label="Capital Gain/Loss" value={fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd)} />
+              <Metric label="Divergence vs HODL" value={fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd)} />
+              <Metric label="Net Profit" value={fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd)} />
+              <Metric label="Tx Count" value={String(activeLifecycleRecord?.activity?.txCount ?? 0)} />
+              <Metric label="Record Status" value={activeLifecycleRecord?.status || "—"} />
             </div>
           </Card>
 
@@ -1515,44 +1530,6 @@ export default function Uc6Page() {
                     : [["—", "0", "—", "—"]]
                 }
               />
-            </div>
-
-            <div style={styles.recordActiveWrap}>
-              <div style={styles.recordActiveTitle}>Active (Open) LP Position</div>
-              {activeLifecycleRecord ? (
-                <div style={styles.metaGrid}>
-                  <Metric
-                    label="Token ID (LP NFT)"
-                    value={activeLifecycleRecord.tokenId || activeLifecycleRecord.id || status?.activePositionId || "—"}
-                    mono
-                  />
-                  <Metric
-                    label="Pair"
-                    value={`${activeLifecycleRecord.pair?.base || "WETH"}/${activeLifecycleRecord.pair?.quote || "USDC"}`}
-                  />
-                  <Metric
-                    label="Band"
-                    value={
-                      <span title={`${activeLifecycleRecord.band?.tickLower ?? "—"} .. ${activeLifecycleRecord.band?.tickUpper ?? "—"}`}>
-                        {formatRecordBandLabel(activeLifecycleRecord)}
-                      </span>
-                    }
-                  />
-                  <Metric label="Opened" value={fmtIsoLocal(activeLifecycleRecord.entry?.openedAtIso)} />
-                  <Metric label="Entry Snapshot" value={fmtIsoLocal(activeLifecycleRecord.entry?.entrySnapshotAtIso)} />
-                  <Metric label="Entry Value" value={fmtUsd(activeLifecycleRecord.entry?.entryValueUsd)} />
-                  <Metric label="Fees Collected" value={fmtUsd(activeLifecycleRecord.performance?.feesCollectedUsd)} />
-                  <Metric label="Total Costs" value={fmtUsd(activeLifecycleRecord.performance?.totalCostsUsd)} />
-                  <Metric label="Fees Net" value={fmtSignedUsd(activeLifecycleRecord.performance?.feesNetUsd)} />
-                  <Metric label="Capital Gain/Loss" value={fmtSignedUsd(activeLifecycleRecord.performance?.capitalGainLossUsd)} />
-                  <Metric label="Divergence vs HODL" value={fmtSignedUsd(activeLifecycleRecord.performance?.divergenceVsHodlUsd)} />
-                  <Metric label="Net Profit" value={fmtSignedUsd(activeLifecycleRecord.performance?.netProfitUsd)} />
-                  <Metric label="Tx Count" value={String(activeLifecycleRecord.activity?.txCount ?? 0)} />
-                  <Metric label="Status" value={activeLifecycleRecord.status || "OPEN"} />
-                </div>
-              ) : (
-                <div style={styles.note}>No active open LP position record.</div>
-              )}
             </div>
 
             <div style={{ ...styles.note, marginTop: 12 }}>
@@ -1665,87 +1642,95 @@ export default function Uc6Page() {
             </div>
           </Card>
 
-          <Card title="Profitability (Net)">
-            <SimpleTable
-              headers={["Window", "Fees", "Rewards", "Costs", "Net", "APR"]}
-              rows={[
-                [
-                  "Today",
-                  fmtUsd(status?.fees?.collectedTodayUsd),
-                  "$0.00",
-                  fmtUsd(status?.costs?.totalTodayUsd),
-                  fmtUsd(status?.pnl?.netTodayUsd),
-                  fmtPct(n(status?.pnl?.aprToday, 0) * 100),
-                ],
-                [
-                  "7D",
-                  fmtUsd(status?.fees?.collected7dUsd),
-                  "$0.00",
-                  fmtUsd(status?.costs?.total7dUsd),
-                  fmtUsd(status?.pnl?.net7dUsd),
-                  fmtPct(n(status?.pnl?.apr7d, 0) * 100),
-                ],
-                [
-                  "30D",
-                  fmtUsd(status?.fees?.collected30dUsd),
-                  "$0.00",
-                  fmtUsd(status?.costs?.total30dUsd),
-                  fmtUsd(status?.pnl?.net30dUsd),
-                  status?.pnl?.apr30d == null ? "—" : fmtPct(n(status?.pnl?.apr30d, 0) * 100),
-                ],
-              ]}
-            />
-            <div style={{ ...styles.note, marginTop: 8 }}>
-              Net = Fees Net (fees + rewards - costs). Divergence vs HODL is shown in LP Position Records as a separate benchmark metric and is not deducted as a cash cost.
-            </div>
-            <div style={styles.note}>
-              Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
-              {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
-            </div>
-            <div style={{ ...styles.note, marginTop: 10 }}>
-              Band performance (completed runs only; currently grouped by actual placed band width after tick-grid snapping, not configured target).
-            </div>
-            <SimpleTable
-              headers={["Band", "Runs", "Fees Total", "Fees Avg", "Avg Fees / LP", "Avg Time To Rebalance", "Net Total"]}
-              rows={
-                bandPerformanceRows.length > 0
-                  ? bandPerformanceRows
-                  : [["—", "0", "—", "—", "—", "—", "—"]]
-              }
-            />
-          </Card>
-
-          <Card title="Rebalance & Activity">
-            {isOwner && (
-              <div style={{ ...styles.row, marginBottom: 12 }}>
-                <button
-                  style={styles.buttonSecondary}
-                  onClick={forceRebalance}
-                  disabled={busy !== "" || Boolean(status?.killSwitch) || !status?.tradingEnabled}
-                  title={
-                    status?.killSwitch
-                      ? "Kill switch active"
-                      : !status?.tradingEnabled
-                        ? "Trading is disabled"
-                        : "Request an immediate rebalance (owner-only)"
-                  }
-                >
-                  Force Rebalance
-                </button>
+          <Card title="Profitability (Net)" fullWidth wideViewport>
+            <div style={styles.profitTablesGrid}>
+              <div style={styles.profitTableCol}>
+                <SimpleTable
+                  headers={["Window", "Fees", "Rewards", "Costs", "Net", "APR"]}
+                  rows={[
+                    [
+                      "Today",
+                      fmtUsd(status?.fees?.collectedTodayUsd),
+                      "$0.00",
+                      fmtUsd(status?.costs?.totalTodayUsd),
+                      fmtUsd(status?.pnl?.netTodayUsd),
+                      fmtPct(n(status?.pnl?.aprToday, 0) * 100),
+                    ],
+                    [
+                      "7D",
+                      fmtUsd(status?.fees?.collected7dUsd),
+                      "$0.00",
+                      fmtUsd(status?.costs?.total7dUsd),
+                      fmtUsd(status?.pnl?.net7dUsd),
+                      fmtPct(n(status?.pnl?.apr7d, 0) * 100),
+                    ],
+                    [
+                      "30D",
+                      fmtUsd(status?.fees?.collected30dUsd),
+                      "$0.00",
+                      fmtUsd(status?.costs?.total30dUsd),
+                      fmtUsd(status?.pnl?.net30dUsd),
+                      status?.pnl?.apr30d == null ? "—" : fmtPct(n(status?.pnl?.apr30d, 0) * 100),
+                    ],
+                  ]}
+                />
+                <div style={{ ...styles.note, marginTop: 8 }}>
+                  Net = Fees Net (fees + rewards - costs). Divergence vs HODL is shown in LP Position Records as a separate benchmark metric and is not deducted as a cash cost.
+                </div>
+                <div style={styles.note}>
+                  Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
+                  {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
+                </div>
               </div>
-            )}
-            <div style={styles.metaGrid}>
-              <Metric label="Rebalances (24h)" value={String(status?.ops?.rebalances24h ?? 0)} />
-              <Metric label="Rebalances (7d)" value={String(status?.ops?.rebalances7d ?? 0)} />
-              <Metric label="Costs Today" value={fmtUsd(status?.costs?.totalTodayUsd)} />
-              <Metric label="Avg Cost / Rebalance" value={fmtUsd(n(status?.costs?.totalTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
-              <Metric label="Avg Fees / Rebalance" value={fmtUsd(n(status?.fees?.collectedTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
-              <Metric label="Churn Ratio" value={<Pill label={churnRatio == null ? "n/a" : fmtPct(churnRatio * 100)} tone={churnTone(churnRatio)} />} />
-              <Metric label="Churn Protection" value={status?.settings?.churnProtection?.enabled ? "enabled" : "disabled"} />
-              <Metric label="Churn Limit" value={fmtPct(n(status?.settings?.churnProtection?.maxCostToFeeRatio, 0) * 100)} />
-              <Metric label="Rebalance Trigger Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
-              <Metric label="Last Rebalance" value={status?.ops?.lastRebalanceAtIso || "—"} />
-              <Metric label="Gate" value={status?.counters?.reason || "—"} />
+
+              <div style={styles.profitTableCol}>
+                <div style={{ ...styles.note, marginTop: 0, marginBottom: 8 }}>
+                  Band performance (completed runs only; currently grouped by actual placed band width after tick-grid snapping, not configured target).
+                </div>
+                <SimpleTable
+                  headers={["Band", "Runs", "Fees Total", "Fees Avg", "Avg Fees / LP", "Avg Time To Rebalance", "Net Total"]}
+                  rows={
+                    bandPerformanceRows.length > 0
+                      ? bandPerformanceRows
+                      : [["—", "0", "—", "—", "—", "—", "—"]]
+                  }
+                />
+              </div>
+            </div>
+
+            <div style={{ ...styles.recordActiveWrap, marginTop: 12 }}>
+              <div style={styles.recordActiveTitle}>Rebalance & Activity</div>
+              {isOwner && (
+                <div style={{ ...styles.row, marginTop: 0, marginBottom: 12 }}>
+                  <button
+                    style={styles.buttonSecondary}
+                    onClick={forceRebalance}
+                    disabled={busy !== "" || Boolean(status?.killSwitch) || !status?.tradingEnabled}
+                    title={
+                      status?.killSwitch
+                        ? "Kill switch active"
+                        : !status?.tradingEnabled
+                          ? "Trading is disabled"
+                          : "Request an immediate rebalance (owner-only)"
+                    }
+                  >
+                    Force Rebalance
+                  </button>
+                </div>
+              )}
+              <div style={styles.metaGrid}>
+                <Metric label="Rebalances (24h)" value={String(status?.ops?.rebalances24h ?? 0)} />
+                <Metric label="Rebalances (7d)" value={String(status?.ops?.rebalances7d ?? 0)} />
+                <Metric label="Costs Today" value={fmtUsd(status?.costs?.totalTodayUsd)} />
+                <Metric label="Avg Cost / Rebalance" value={fmtUsd(n(status?.costs?.totalTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
+                <Metric label="Avg Fees / Rebalance" value={fmtUsd(n(status?.fees?.collectedTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
+                <Metric label="Churn Ratio" value={<Pill label={churnRatio == null ? "n/a" : fmtPct(churnRatio * 100)} tone={churnTone(churnRatio)} />} />
+                <Metric label="Churn Protection" value={status?.settings?.churnProtection?.enabled ? "enabled" : "disabled"} />
+                <Metric label="Churn Limit" value={fmtPct(n(status?.settings?.churnProtection?.maxCostToFeeRatio, 0) * 100)} />
+                <Metric label="Rebalance Trigger Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
+                <Metric label="Last Rebalance" value={status?.ops?.lastRebalanceAtIso || "—"} />
+                <Metric label="Gate" value={status?.counters?.reason || "—"} />
+              </div>
             </div>
           </Card>
 
@@ -2374,6 +2359,15 @@ const styles: Record<string, CSSProperties> = {
     overflowX: "auto",
     border: "1px solid #e5ebf4",
     borderRadius: 10,
+  },
+  profitTablesGrid: {
+    display: "grid",
+    gridTemplateColumns: "repeat(auto-fit, minmax(520px, 1fr))",
+    gap: 12,
+    alignItems: "start",
+  },
+  profitTableCol: {
+    minWidth: 0,
   },
   table: {
     width: "100%",
