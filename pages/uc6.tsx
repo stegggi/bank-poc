@@ -140,10 +140,14 @@ type PositionLifecycleRecord = {
     capitalGainLossUsd?: number;
     impermanentLossUsd?: number;
     divergenceVsHodlUsd?: number;
+    requiredFeesToBeatHodlUsd?: number;
     alphaVsHodlUsd?: number;
     netProfitUsd?: number;
     costToFeeRatio?: number;
     avgDeployedUsd?: number;
+    feeApr?: number;
+    alphaApr?: number;
+    absoluteApr?: number;
     apr?: number;
   };
   activity?: {
@@ -151,6 +155,8 @@ type PositionLifecycleRecord = {
     harvests?: number;
     swaps?: number;
     txCount?: number;
+    closeGateBlockedCount?: number;
+    closeGateOverrideReason?: string | null;
   };
   tx?: {
     openTxHashes?: string[];
@@ -284,6 +290,23 @@ type Uc6Status = {
       maxBandAdjBps?: number;
       maxCooldownAdjSec?: number;
     };
+    hodlGate?: {
+      enabled?: boolean;
+      marginUsd?: number;
+      useUncollectedFees?: boolean;
+      allowCloseIfOutOfRange?: boolean;
+      outOfRangeMaxSec?: number;
+      outOfRangeEmergencyEdgePct?: number;
+    };
+    executionCaps?: {
+      maxInventorySwapsPerRebalance?: number;
+      maxSwapsOnOpen?: number;
+      maxTopUpsPerCycle?: number;
+      minTopUpUsd?: number;
+      targetRatioTolerancePct?: number;
+      minSwapUsd?: number;
+      useMulticallClose?: boolean;
+    };
     maxDeployUsdc?: number;
     maxInitialMintUsdc?: number;
     minTopUpUsd?: number;
@@ -404,6 +427,18 @@ type Uc6Status = {
     adviceReason?: string;
     waitRecommended?: boolean;
   };
+  hodlGate?: {
+    enabled?: boolean;
+    marginUsd?: number;
+    alphaLiveUsd?: number;
+    requiredFeesToBeatHodlLiveUsd?: number;
+    outOfRangeDurationSec?: number;
+    distanceBeyondEdgePct?: number;
+    lastGateDecision?: {
+      allowed?: boolean;
+      reason?: string;
+    };
+  };
   providers?: {
     http?: {
       active?: string | null;
@@ -517,7 +552,7 @@ function defaultDraft(): Uc6DraftSettings {
     venue: "slipstream",
     bandHalfBps: 100,
     edgeRebalancePct: 0.85,
-    minRebalanceIntervalSec: 300,
+    minRebalanceIntervalSec: 7200,
     maxRebalancesPerDay: 20,
     slippageBps: 30,
     pollIntervalMs: 2000,
@@ -534,8 +569,8 @@ function defaultDraft(): Uc6DraftSettings {
     reserveMinUsdc: 25,
     reservePct: 0,
     reserveMaxUsdc: 0,
-    compoundMode: "on_rebalance",
-    harvestThresholdUsd: 30,
+    compoundMode: "threshold_harvest",
+    harvestThresholdUsd: 0.2,
     failureCooldownSec: 900,
     churnProtectionEnabled: false,
     churnMaxCostToFeeRatio: 40,
@@ -1228,6 +1263,11 @@ export default function Uc6Page() {
     regimeDecisionView?.effectiveThresholds?.bandHalfBps,
     n(status?.settings?.bandHalfBps, 0)
   );
+  const hodlGateView = status?.hodlGate || null;
+  const hodlGateAllowed = hodlGateView?.lastGateDecision?.allowed !== false;
+  const hodlGateReason = String(hodlGateView?.lastGateDecision?.reason || "—");
+  const alphaLiveUsd = n(hodlGateView?.alphaLiveUsd, 0);
+  const requiredFeesToBeatHodlLiveUsd = n(hodlGateView?.requiredFeesToBeatHodlLiveUsd, 0);
   const activeMintTargetBandBpsRaw = activeLifecycleRecord?.band?.bandHalfBps;
   const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
     ? Math.round(Number(activeMintTargetBandBpsRaw))
@@ -1503,7 +1543,28 @@ export default function Uc6Page() {
               <Metric label="Fees Net" value={fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd)} />
               <Metric label="Capital Gain/Loss" value={fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd)} />
               <Metric label="Divergence vs HODL" value={fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd)} />
-              <Metric label="Net Profit" value={fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd)} />
+              <Metric
+                label="Alpha vs HODL (Live)"
+                value={
+                  <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                    {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
+                  </span>
+                }
+              />
+              <Metric
+                label="Required Fees to Beat HODL (Live)"
+                value={fmtUsd(requiredFeesToBeatHodlLiveUsd)}
+              />
+              <Metric label="LP P/L (absolute)" value={fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd)} />
+              <Metric
+                label="Close Gate Status"
+                value={
+                  <span title={hodlGateReason}>
+                    <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />{" "}
+                    {hodlGateReason}
+                  </span>
+                }
+              />
               <Metric label="Tx Count" value={String(activeLifecycleRecord?.activity?.txCount ?? 0)} />
               <Metric label="Record Status" value={activeLifecycleRecord?.status || "—"} />
             </div>
@@ -1533,7 +1594,7 @@ export default function Uc6Page() {
             </div>
 
             <div style={{ ...styles.note, marginTop: 12 }}>
-              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs. Net Profit = Fees Net + Capital Gain/Loss. Divergence vs HODL is a benchmark delta (principal LP vs HODL), not a cash cost.
+              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs. LP P/L (absolute) = Fees Net + Capital Gain/Loss. Alpha vs HODL = Fees Net + Divergence vs HODL.
             </div>
 
             <div style={styles.tableWrap}>
@@ -1554,8 +1615,13 @@ export default function Uc6Page() {
                       "Fees Net",
                       "Capital G/L",
                       "Div. vs HODL",
-                      "Net Profit",
+                      "LP P/L (absolute)",
+                      "Alpha vs HODL",
+                      "Req Fees to Beat HODL",
                       "Cost/Fee",
+                      "Fee APR",
+                      "Alpha APR vs HODL",
+                      "Absolute APR",
                       "Entry/Exit Price",
                       "Actions",
                     ].map((h) => (
@@ -1568,7 +1634,7 @@ export default function Uc6Page() {
                 <tbody>
                   {closedPositionRecords.length === 0 ? (
                     <tr>
-                      <td style={styles.td} colSpan={17}>
+                      <td style={styles.td} colSpan={22}>
                         No closed position records yet.
                       </td>
                     </tr>
@@ -1581,6 +1647,8 @@ export default function Uc6Page() {
                       const feesNetUsd = n(rec.performance?.feesNetUsd, 0);
                       const capitalGainLossUsd = n(rec.performance?.capitalGainLossUsd, 0);
                       const netUsd = n(rec.performance?.netProfitUsd, 0);
+                      const alphaVsHodlUsd = n(rec.performance?.alphaVsHodlUsd, 0);
+                      const requiredFeesToBeatHodlUsd = n(rec.performance?.requiredFeesToBeatHodlUsd, 0);
                       return (
                         <tr key={rec.id}>
                           <td style={styles.td}>{`${rec.pair?.base || "WETH"}/${rec.pair?.quote || "USDC"}`}</td>
@@ -1603,7 +1671,12 @@ export default function Uc6Page() {
                           <td style={{ ...styles.td, color: capitalGainLossUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.capitalGainLossUsd)}</td>
                           <td style={{ ...styles.td, color: divVsHodlUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd)}</td>
                           <td style={{ ...styles.td, color: netUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.netProfitUsd)}</td>
+                          <td style={{ ...styles.td, color: alphaVsHodlUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.alphaVsHodlUsd)}</td>
+                          <td style={styles.td}>{fmtUsd(requiredFeesToBeatHodlUsd)}</td>
                           <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
+                          <td style={styles.td}>{fmtPct(rec.performance?.feeApr ?? 0)}</td>
+                          <td style={styles.td}>{fmtPct(rec.performance?.alphaApr ?? 0)}</td>
+                          <td style={styles.td}>{fmtPct(rec.performance?.absoluteApr ?? rec.performance?.apr ?? 0)}</td>
                           <td style={styles.td}>
                             {fmtSpotPrice(rec.entry?.spotPriceUsdcPerWeth)} -&gt; {fmtSpotPrice(rec.exit?.spotPriceUsdcPerWeth)}
                           </td>
@@ -1998,10 +2071,13 @@ function PositionRecordDrawer({
             <Metric label="Fees Net" value={fmtSignedUsd(perf.feesNetUsd)} />
             <Metric label="Capital Gain/Loss" value={fmtSignedUsd(perf.capitalGainLossUsd)} />
             <Metric label="Divergence vs HODL" value={fmtSignedUsd(perf.divergenceVsHodlUsd ?? perf.impermanentLossUsd)} />
-            <Metric label="Net Profit" value={fmtSignedUsd(perf.netProfitUsd)} />
+            <Metric label="LP P/L (absolute)" value={fmtSignedUsd(perf.netProfitUsd)} />
             <Metric label="Alpha vs HODL" value={fmtSignedUsd(perf.alphaVsHodlUsd)} />
+            <Metric label="Required Fees to Beat HODL" value={fmtUsd(perf.requiredFeesToBeatHodlUsd)} />
             <Metric label="Cost / Fee" value={fmtRatioPct(perf.costToFeeRatio)} />
-            <Metric label="APR" value={fmtPct(perf.apr)} />
+            <Metric label="Fee APR" value={fmtPct(perf.feeApr ?? 0)} />
+            <Metric label="Alpha APR vs HODL" value={fmtPct(perf.alphaApr ?? 0)} />
+            <Metric label="Absolute APR" value={fmtPct(perf.absoluteApr ?? perf.apr ?? 0)} />
           </div>
         </div>
 
@@ -2012,6 +2088,8 @@ function PositionRecordDrawer({
             <Metric label="Harvests" value={String(record.activity?.harvests ?? 0)} />
             <Metric label="Swaps" value={String(record.activity?.swaps ?? 0)} />
             <Metric label="Tx Count" value={String(record.activity?.txCount ?? 0)} />
+            <Metric label="Close Gate Blocks" value={String(record.activity?.closeGateBlockedCount ?? 0)} />
+            <Metric label="Close Gate Override" value={record.activity?.closeGateOverrideReason || "—"} />
           </div>
         </div>
 
