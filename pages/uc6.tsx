@@ -107,6 +107,7 @@ type PositionLifecycleRecord = {
   selector?: { type?: "tickSpacing" | "fee" | string; value?: number; humanLabel?: string };
   band?: {
     bandHalfBps?: number;
+    targetBandHalfBps?: number;
     tickLower?: number;
     tickUpper?: number;
   };
@@ -1217,6 +1218,10 @@ export default function Uc6Page() {
   const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
     ? Math.round(Number(activeMintTargetBandBpsRaw))
     : null;
+  const regimeEffectiveBandAtMintBpsRaw = activeLifecycleRecord?.band?.targetBandHalfBps;
+  const regimeEffectiveBandAtMintBps = Number.isFinite(Number(regimeEffectiveBandAtMintBpsRaw))
+    ? Math.round(Number(regimeEffectiveBandAtMintBpsRaw))
+    : activeMintTargetBandBps;
   const poolComparisonCurrentRow = poolComparisonCurrent
     ? ([
         poolComparisonCurrent.dex?.name || "—",
@@ -1428,7 +1433,10 @@ export default function Uc6Page() {
               <Metric label="Current Pool Tick (internal)" value={String(status?.market?.tick?.current ?? "—")} />
               <Metric label="Pool Tick Spacing (grid)" value={String(status?.market?.tick?.spacing ?? "—")} />
               <Metric label="Base Band Setting" value={`±${fmtPct(configuredBandHalfPct)}`} />
-              <Metric label="Regime Effective Band (current decision)" value={`±${fmtPct(regimeEffectiveBandBps / 100)}`} />
+              <Metric
+                label="Regime Effective Band (at mint)"
+                value={regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`}
+              />
               <Metric
                 label="Mint Target Used (current LP)"
                 value={activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`}
