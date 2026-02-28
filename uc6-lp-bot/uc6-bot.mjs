@@ -561,6 +561,7 @@ const DEFAULT_SETTINGS = {
     useUncollectedFees: true,
     allowCloseIfOutOfRange: true,
     outOfRangeMaxSec: 900,
+    outOfRangeEmergencyMinSec: 60,
     outOfRangeEmergencyEdgePct: 1.15,
   },
   executionCaps: {
@@ -779,6 +780,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       outOfRangeMaxSec: clamp(
         Math.round(toNumber(srcHodlGate.outOfRangeMaxSec, baseHodlGate.outOfRangeMaxSec)),
         30,
+        7 * 24 * 60 * 60
+      ),
+      outOfRangeEmergencyMinSec: clamp(
+        Math.round(toNumber(srcHodlGate.outOfRangeEmergencyMinSec, baseHodlGate.outOfRangeEmergencyMinSec)),
+        5,
         7 * 24 * 60 * 60
       ),
       outOfRangeEmergencyEdgePct: clamp(
@@ -6287,6 +6293,11 @@ class Uc6Bot {
       useUncollectedFees: Boolean(cfg.useUncollectedFees),
       allowCloseIfOutOfRange: Boolean(cfg.allowCloseIfOutOfRange),
       outOfRangeMaxSec: clamp(Math.round(Number(cfg.outOfRangeMaxSec || 0)), 30, 7 * 24 * 60 * 60),
+      outOfRangeEmergencyMinSec: clamp(
+        Math.round(Number(cfg.outOfRangeEmergencyMinSec || 0)),
+        5,
+        7 * 24 * 60 * 60
+      ),
       outOfRangeEmergencyEdgePct: clamp(Number(cfg.outOfRangeEmergencyEdgePct || 1), 1, 5),
     };
   }
@@ -6361,7 +6372,13 @@ class Uc6Bot {
     if (
       gateCfg.allowCloseIfOutOfRange &&
       dist.outOfRange &&
-      (outOfRangeDurationSec >= gateCfg.outOfRangeMaxSec || dist.distanceBeyondEdgePct >= gateCfg.outOfRangeEmergencyEdgePct)
+      (
+        outOfRangeDurationSec >= gateCfg.outOfRangeMaxSec ||
+        (
+          outOfRangeDurationSec >= gateCfg.outOfRangeEmergencyMinSec &&
+          dist.distanceBeyondEdgePct >= gateCfg.outOfRangeEmergencyEdgePct
+        )
+      )
     ) {
       overrideAllowed = true;
       overrideReason =
