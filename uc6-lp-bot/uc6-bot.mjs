@@ -2896,7 +2896,9 @@ class Uc6Bot {
       ? (entryValueUsd + exitValueUsd) / 2
       : entryValueUsd;
 
-    const openedAtMs = Date.parse(rec.entry?.entrySnapshotAtIso || rec.entry?.openedAtIso || "");
+    // Duration/APR should reflect how long the LP NFT was actually open on-chain.
+    // Keep entrySnapshotAtIso only as the valuation/HODL baseline.
+    const openedAtMs = Date.parse(rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso || "");
     const closedAtMs = Date.parse(rec.exit?.closedAtIso || "");
     if (Number.isFinite(openedAtMs) && Number.isFinite(closedAtMs) && closedAtMs > openedAtMs) {
       rec.duration.secondsInPosition = Math.round((closedAtMs - openedAtMs) / 1000);
