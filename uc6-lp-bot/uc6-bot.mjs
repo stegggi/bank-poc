@@ -88,6 +88,7 @@ const REGIME_WARN_MIN_INTERVAL_MS = 60_000;
 const POOL_COMPARISON_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const POOL_COMPARISON_STALE_MS = 24 * 60 * 60 * 1000;
 const TX_LOOKUP_PROVIDER_PREFERENCE = ["ankr_http", "base_public_http", "infura_http", "alchemy_http"];
+const INFURA_DAILY_RETRY_HOUR_UTC = 5;
 
 const POOL_ABI = [
   {
@@ -1156,6 +1157,21 @@ function isRpc429Error(err) {
   return msg.includes("Status: 429") || /Too Many Requests/i.test(msg);
 }
 
+function isInfuraDailyLimitError(err) {
+  const msg = err instanceof Error ? err.message : String(err || "");
+  return /daily/i.test(msg) && /(limit|credit|request)/i.test(msg);
+}
+
+function nextUtcHourMs(targetHourUtc) {
+  const now = new Date();
+  const next = new Date(now);
+  next.setUTCHours(targetHourUtc, 0, 0, 0);
+  if (next.getTime() <= now.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1);
+  }
+  return next.getTime();
+}
+
 function withTimeout(promise, ms, label = "rpc call") {
   if (!ms || ms <= 0) return promise;
   let timer = null;
@@ -1238,6 +1254,10 @@ class HttpProviderPool {
     provider.successStreak = 0;
     provider.lastError = err instanceof Error ? err.message : String(err || "unknown");
     if (isRpc429Error(err)) provider.last429AtIso = nowIso();
+    if (provider.name === "infura_http" && isInfuraDailyLimitError(err)) {
+      provider.cooldownUntilMs = nextUtcHourMs(INFURA_DAILY_RETRY_HOUR_UTC);
+      return;
+    }
     if (provider.failCount >= this.failThreshold) {
       provider.cooldownUntilMs = Date.now() + this.cooldownMs;
     }

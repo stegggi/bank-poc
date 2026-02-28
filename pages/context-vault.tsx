@@ -55,6 +55,30 @@ function saveUserPkg(pkg: UserModulePackageV1) {
   localStorage.setItem(STORAGE_PREFIX + pkg.moduleId, JSON.stringify(pkg));
 }
 
+function getStoredBankBlobRefs(moduleId: string, bank: BankId, owner: string) {
+  const pkg = loadUserPkg(moduleId);
+  const refs = pkg?.bankBlobRefs?.[bank];
+  if (!refs) return null;
+  if (refs.owner && refs.owner.toLowerCase() !== owner.toLowerCase()) return null;
+  if (!refs.contextUrl || !refs.dekUrl) return null;
+  return refs;
+}
+
+function saveBankBlobRefs(moduleId: string, bank: BankId, owner: string, contextUrl: string, dekUrl: string) {
+  const pkg = loadUserPkg(moduleId);
+  if (!pkg) return;
+  pkg.bankBlobRefs = {
+    ...(pkg.bankBlobRefs || {}),
+    [bank]: {
+      owner: owner.toLowerCase(),
+      contextUrl,
+      dekUrl,
+      updatedAtIso: new Date().toISOString(),
+    },
+  };
+  saveUserPkg(pkg);
+}
+
 function expiryFromDays(daysStr: string): number {
   const d = Number(daysStr);
   if (!Number.isFinite(d) || d < 0) throw new Error("Expiry days must be 0 or a positive number.");
@@ -853,6 +877,10 @@ export default function ContextVaultPage() {
             const dekJson = await dekResp.json();
             if (!dekResp.ok) throw new Error(dekJson?.error ?? "Failed to store wrapped DEK at bank.");
 
+      if (typeof ctxJson?.url === "string" && typeof dekJson?.url === "string") {
+        saveBankBlobRefs(customerModuleId, bank, walletAddress, ctxJson.url, dekJson.url);
+      }
+
       // 3) Onchain grant
       const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
       const data = iface.encodeFunctionData("grantAccess", [customerModuleId, bankAddress, expiry, pHash]);
@@ -897,8 +925,15 @@ export default function ContextVaultPage() {
     try {
       if (!ethers.isAddress(bankOwner)) throw new Error("Enter a valid customer owner address.");
       if (!isBytes32(bankModuleId)) throw new Error("Enter a valid moduleId (bytes32).");
+      const params = new URLSearchParams({
+        owner: bankOwner,
+        moduleId: bankModuleId,
+      });
+      const blobRefs = getStoredBankBlobRefs(bankModuleId, bank, bankOwner);
+      if (blobRefs?.contextUrl) params.set("ctxUrl", blobRefs.contextUrl);
+      if (blobRefs?.dekUrl) params.set("dekUrl", blobRefs.dekUrl);
 
-      const r = await fetch(`/api/bank/${bank}/plain?owner=${bankOwner}&moduleId=${bankModuleId}`);
+      const r = await fetch(`/api/bank/${bank}/plain?${params.toString()}`);
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error ?? "Failed to load/decrypt.");
 

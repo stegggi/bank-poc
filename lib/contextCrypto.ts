@@ -16,6 +16,17 @@ export type UserModulePackageV1 = {
   plaintextSha256: string;        // sha256(plaintext)
   ciphertextKeccak256: string;    // keccak256(ciphertext)
   createdAtIso: string;
+  bankBlobRefs?: Partial<
+    Record<
+      "bank-a" | "bank-b",
+      {
+        owner?: string;
+        contextUrl?: string;
+        dekUrl?: string;
+        updatedAtIso?: string;
+      }
+    >
+  >;
 };
 
 export type BankStoredPackageV1 = {

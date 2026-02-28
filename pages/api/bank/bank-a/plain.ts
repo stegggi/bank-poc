@@ -32,6 +32,31 @@ function b64ToBytes(b64: string): Uint8Array {
   return new Uint8Array(buf.buffer, buf.byteOffset, buf.byteLength);
 }
 
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+async function fetchBlobJson(primaryUrl?: string | null, fallbackPath?: string | null) {
+  if (primaryUrl && isHttpUrl(primaryUrl)) {
+    const resp = await fetch(primaryUrl, { cache: "no-store" });
+    if (resp.ok) return await resp.json();
+  }
+  if (!fallbackPath) {
+    throw new Error("Blob URL unavailable.");
+  }
+  const meta = await head(fallbackPath);
+  const resp = await fetch(meta.url, { cache: "no-store" });
+  if (!resp.ok) {
+    throw new Error("Blob fetch failed.");
+  }
+  return await resp.json();
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     const bank = BANK;
@@ -43,6 +68,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const owner = String(req.query.owner || "");
     const moduleId = String(req.query.moduleId || "");
+    const ctxUrl = String(req.query.ctxUrl || "");
+    const dekUrl = String(req.query.dekUrl || "");
 
     if (!isHexAddress(owner)) return res.status(400).json({ ok: false, error: "Invalid owner address." });
     if (!isBytes32(moduleId)) return res.status(400).json({ ok: false, error: "Invalid moduleId (bytes32)." });
@@ -74,16 +101,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 2) Load ciphertext package (public blob)
-    const ctxMeta = await head(contextPath(bank, owner, moduleId));
-    const ctxResp = await fetch(ctxMeta.url);
-    if (!ctxResp.ok) return res.status(404).json({ ok: false, error: "Ciphertext not found in bank storage." });
-    const ctxPkg = await ctxResp.json();
+    let ctxPkg;
+    try {
+      ctxPkg = await fetchBlobJson(ctxUrl, contextPath(bank, owner, moduleId));
+    } catch {
+      return res.status(404).json({ ok: false, error: "Ciphertext not found in bank storage." });
+    }
 
     // 3) Load wrapped DEK package (public blob)
-    const dekMeta = await head(dekPath(bank, owner, moduleId));
-    const dekResp = await fetch(dekMeta.url);
-    if (!dekResp.ok) return res.status(404).json({ ok: false, error: "Wrapped DEK not found in bank storage." });
-    const dekPkg = await dekResp.json();
+    let dekPkg;
+    try {
+      dekPkg = await fetchBlobJson(dekUrl, dekPath(bank, owner, moduleId));
+    } catch {
+      return res.status(404).json({ ok: false, error: "Wrapped DEK not found in bank storage." });
+    }
 
     const ciphertextB64 = String(ctxPkg.ciphertextB64 || "");
     const ivB64 = String(ctxPkg.ivB64 || "");
