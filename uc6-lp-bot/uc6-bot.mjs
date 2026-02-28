@@ -87,6 +87,7 @@ const POSITION_PAGE_SIZE_MAX = 100;
 const REGIME_WARN_MIN_INTERVAL_MS = 60_000;
 const POOL_COMPARISON_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const POOL_COMPARISON_STALE_MS = 24 * 60 * 60 * 1000;
+const TX_LOOKUP_PROVIDER_PREFERENCE = ["ankr_http", "base_public_http", "infura_http", "alchemy_http"];
 
 const POOL_ABI = [
   {
@@ -1242,14 +1243,26 @@ class HttpProviderPool {
     }
   }
 
-  chooseIndexes() {
+  chooseIndexes(preferredNames = null) {
     const count = this.providers.length;
     const now = Date.now();
-    const out = [];
+    const baseOrder = [];
+    if (Array.isArray(preferredNames) && preferredNames.length > 0) {
+      for (const name of preferredNames) {
+        const idx = this.providers.findIndex((p) => p.name === name);
+        if (idx >= 0 && !baseOrder.includes(idx)) baseOrder.push(idx);
+      }
+    }
     for (let offset = 0; offset < count; offset += 1) {
       const idx = (this.activeIndex + offset) % count;
+      if (!baseOrder.includes(idx)) baseOrder.push(idx);
+    }
+
+    const out = [];
+    for (let orderPos = 0; orderPos < baseOrder.length; orderPos += 1) {
+      const idx = baseOrder[orderPos];
       const p = this.providers[idx];
-      if (p.cooldownUntilMs > now && offset !== count - 1) continue;
+      if (p.cooldownUntilMs > now && orderPos !== baseOrder.length - 1) continue;
       out.push(idx);
     }
     if (out.length === 0 && count > 0) out.push(this.activeIndex);
@@ -1266,10 +1279,10 @@ class HttpProviderPool {
     }
   }
 
-  async invoke(kind, fn, { timeoutMs = 8_000, retries = 1 } = {}) {
+  async invoke(kind, fn, { timeoutMs = 8_000, retries = 1, preferredNames = null } = {}) {
     if (!this.hasProviders()) throw new Error("No HTTP RPC providers configured");
     let lastErr = null;
-    const indexes = this.chooseIndexes();
+    const indexes = this.chooseIndexes(preferredNames);
     for (const idx of indexes) {
       const provider = this.providers[idx];
       const attempts = Math.max(1, retries);
@@ -1468,14 +1481,22 @@ class Uc6Bot {
         this.httpPool.invoke("simulateContract", (p) => p.publicClient.simulateContract(args), { timeoutMs: 12_000, retries: 2 }),
       getBalance: (args) => this.httpPool.invoke("getBalance", (p) => p.publicClient.getBalance(args), { timeoutMs: 8_000, retries: 2 }),
       getTransaction: (args) =>
-        this.httpPool.invoke("getTransaction", (p) => p.publicClient.getTransaction(args), { timeoutMs: 8_000, retries: 2 }),
+        this.httpPool.invoke("getTransaction", (p) => p.publicClient.getTransaction(args), {
+          timeoutMs: 8_000,
+          retries: 2,
+          preferredNames: TX_LOOKUP_PROVIDER_PREFERENCE,
+        }),
       getTransactionReceipt: (args) =>
-        this.httpPool.invoke("getTransactionReceipt", (p) => p.publicClient.getTransactionReceipt(args), { timeoutMs: 8_000, retries: 2 }),
+        this.httpPool.invoke("getTransactionReceipt", (p) => p.publicClient.getTransactionReceipt(args), {
+          timeoutMs: 8_000,
+          retries: 2,
+          preferredNames: TX_LOOKUP_PROVIDER_PREFERENCE,
+        }),
       waitForTransactionReceipt: (args) =>
         this.httpPool.invoke(
           "waitForTransactionReceipt",
-          (p) => p.publicClient.waitForTransactionReceipt(args),
-          { timeoutMs: 45_000, retries: 1 }
+          (p) => p.publicClient.waitForTransactionReceipt({ pollingInterval: 4_000, ...args }),
+          { timeoutMs: 45_000, retries: 1, preferredNames: TX_LOOKUP_PROVIDER_PREFERENCE }
         ),
       getChainId: () => this.httpPool.invoke("getChainId", (p) => p.publicClient.getChainId(), { timeoutMs: 5_000, retries: 1 }),
     };
@@ -1496,6 +1517,7 @@ class Uc6Bot {
     this.activeAction = null;
     this.lastLedgerRepairAtMs = 0;
     this.ledgerRepairInFlight = false;
+    this.ledgerRepairDirty = true;
     this.ownerNonceUsed = new Map();
     this.ownerRateLimiter = new SimpleRateLimiter(20, 60_000);
     this.server = null;
@@ -1940,6 +1962,7 @@ class Uc6Bot {
     if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
       this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
     }
+    this.ledgerRepairDirty = true;
   }
 
   emptyLifecycleAccounting() {
@@ -3505,6 +3528,30 @@ class Uc6Bot {
     return null;
   }
 
+  needsLedgerFeeBackfill() {
+    const ledger = Array.isArray(this.state.ledgerEvents) ? this.state.ledgerEvents : [];
+    return ledger.some((ev) => {
+      if (!ev || (ev.type !== "harvest" && ev.type !== "recenter" && ev.type !== "liquidate")) return false;
+      if (Number(ev.feesCollectedUsd || 0) > 0) return false;
+      if (ev.feesBackfilled) return false;
+      return Array.isArray(ev.txHashes) && ev.txHashes.some((h) => typeof h === "string" && h.startsWith("0x"));
+    });
+  }
+
+  needsLedgerBandBackfill() {
+    const recenterEvents = Array.isArray(this.state.ledgerEvents)
+      ? this.state.ledgerEvents.filter((ev) => ev && ev.type === "recenter")
+      : [];
+    if (recenterEvents.length <= 1) return false;
+    for (let i = 1; i < recenterEvents.length; i += 1) {
+      const ev = recenterEvents[i];
+      const missingBand = !(Number.isFinite(Number(ev?.closedBandHalfBpsEffective)) && Number(ev.closedBandHalfBpsEffective) > 0);
+      const missingDuration = !(Number.isFinite(Number(ev?.runDurationSec)) && Number(ev.runDurationSec) > 0);
+      if (missingBand || missingDuration) return true;
+    }
+    return false;
+  }
+
   async backfillBandMetadataForRecenters() {
     if (!Array.isArray(this.state.ledgerEvents) || this.state.ledgerEvents.length === 0) return false;
     let changed = false;
@@ -3517,11 +3564,31 @@ class Uc6Bot {
         return (Number.isFinite(ams) ? ams : 0) - (Number.isFinite(bms) ? bms : 0);
       });
 
-    const openedBandByRecenterIndex = [];
-    for (let i = 0; i < recenterIndexes.length; i += 1) {
+    if (recenterIndexes.length <= 1) return false;
+
+    let needsBandRepair = false;
+    let needsDurationRepair = false;
+    for (let i = 1; i < recenterIndexes.length; i += 1) {
       const ev = recenterIndexes[i].ev;
-      openedBandByRecenterIndex[i] = await this.deriveMintBandMetaFromTxs(ev?.txHashes || []);
+      if (!(Number.isFinite(Number(ev?.closedBandHalfBpsEffective)) && Number(ev.closedBandHalfBpsEffective) > 0)) {
+        needsBandRepair = true;
+      }
+      if (!(Number.isFinite(Number(ev?.runDurationSec)) && Number(ev.runDurationSec) > 0)) {
+        needsDurationRepair = true;
+      }
+      if (needsBandRepair && needsDurationRepair) break;
     }
+    if (!needsBandRepair && !needsDurationRepair) return false;
+
+    const openedBandByRecenterIndex = new Map();
+    const getOpenedBandForRecenterIndex = async (index) => {
+      if (index < 0 || index >= recenterIndexes.length) return null;
+      if (openedBandByRecenterIndex.has(index)) return openedBandByRecenterIndex.get(index) || null;
+      const ev = recenterIndexes[index]?.ev;
+      const meta = await this.deriveMintBandMetaFromTxs(ev?.txHashes || []);
+      openedBandByRecenterIndex.set(index, meta || null);
+      return meta || null;
+    };
 
     for (let i = 0; i < recenterIndexes.length; i += 1) {
       const { idx } = recenterIndexes[i];
@@ -3530,7 +3597,7 @@ class Uc6Bot {
 
       const currentEffectiveBand = Number(ev.closedBandHalfBpsEffective);
       if (!(Number.isFinite(currentEffectiveBand) && currentEffectiveBand > 0) && i > 0) {
-        const prevOpened = openedBandByRecenterIndex[i - 1] || null;
+        const prevOpened = await getOpenedBandForRecenterIndex(i - 1);
         if (prevOpened) {
           let rowChanged = false;
           if (Number.isFinite(Number(prevOpened.tickLower)) && Number.isFinite(Number(prevOpened.tickUpper))) {
@@ -4879,6 +4946,7 @@ class Uc6Bot {
 
   async repairLedgerAccounting() {
     const now = Date.now();
+    if (!this.ledgerRepairDirty) return false;
     if (this.ledgerRepairInFlight) return false;
     if (this.lastLedgerRepairAtMs && now - this.lastLedgerRepairAtMs < 60_000) return false;
     this.ledgerRepairInFlight = true;
@@ -4886,8 +4954,15 @@ class Uc6Bot {
     try {
       let changed = false;
       if (this.sanitizeLedgerEventsInPlace()) changed = true;
-      if (await this.backfillMissingFeesFromReceipts()) changed = true;
-      if (await this.backfillBandMetadataForRecenters()) changed = true;
+      const needsFees = this.needsLedgerFeeBackfill();
+      const needsBand = this.needsLedgerBandBackfill();
+      if (!needsFees && !needsBand) {
+        this.ledgerRepairDirty = false;
+        return changed;
+      }
+      if (needsFees && (await this.backfillMissingFeesFromReceipts())) changed = true;
+      if (needsBand && (await this.backfillBandMetadataForRecenters())) changed = true;
+      this.ledgerRepairDirty = this.needsLedgerFeeBackfill() || this.needsLedgerBandBackfill();
       return changed;
     } finally {
       this.ledgerRepairInFlight = false;
