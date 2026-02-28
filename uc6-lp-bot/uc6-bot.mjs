@@ -47,6 +47,7 @@ const LAST_ERROR_AUTO_CLEAR_SUCCESS_LOOPS = 5;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
+  httpInfuraUrl: process.env.UC6_HTTP_INFURA_URL || "",
   httpAnkrUrl: process.env.UC6_HTTP_ANKR_URL || "",
   httpAlchemyUrl: process.env.UC6_HTTP_ALCHEMY_URL || "",
   httpPublicUrl: process.env.UC6_HTTP_PUBLIC_URL || "https://mainnet.base.org",
@@ -419,6 +420,16 @@ const ROUTER_ABI_TICK = [
   },
 ];
 
+const WETH_WRAPPER_ABI = [
+  {
+    name: "withdraw",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "wad", type: "uint256" }],
+    outputs: [],
+  },
+];
+
 const QUOTER_ABI_FEE_V2 = [
   {
     name: "quoteExactInputSingle",
@@ -559,6 +570,12 @@ const DEFAULT_SETTINGS = {
     minSwapUsd: 5,
     useMulticallClose: false,
   },
+  gasTopUp: {
+    enabled: true,
+    minEthUsd: 5,
+    topUpUsdc: 5,
+    minIntervalSec: 1800,
+  },
   poolComparison: {
     enabled: true,
     computeHourUtc: 8,
@@ -619,6 +636,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       ? baseSettings.executionCaps
       : DEFAULT_SETTINGS.executionCaps;
   const srcExecutionCaps = src.executionCaps && typeof src.executionCaps === "object" ? src.executionCaps : {};
+  const baseGasTopUp =
+    baseSettings.gasTopUp && typeof baseSettings.gasTopUp === "object"
+      ? baseSettings.gasTopUp
+      : DEFAULT_SETTINGS.gasTopUp;
+  const srcGasTopUp = src.gasTopUp && typeof src.gasTopUp === "object" ? src.gasTopUp : {};
   const basePoolComparison =
     baseSettings.poolComparison && typeof baseSettings.poolComparison === "object"
       ? baseSettings.poolComparison
@@ -790,6 +812,16 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       minSwapUsd: clamp(toNumber(srcExecutionCaps.minSwapUsd, baseExecutionCaps.minSwapUsd), 0, 1_000_000),
       useMulticallClose: toBool(srcExecutionCaps.useMulticallClose, baseExecutionCaps.useMulticallClose),
     },
+    gasTopUp: {
+      enabled: toBool(srcGasTopUp.enabled, baseGasTopUp.enabled),
+      minEthUsd: clamp(toNumber(srcGasTopUp.minEthUsd, baseGasTopUp.minEthUsd), 0, 1_000_000),
+      topUpUsdc: clamp(toNumber(srcGasTopUp.topUpUsdc, baseGasTopUp.topUpUsdc), 0.01, 1_000_000),
+      minIntervalSec: clamp(
+        Math.round(toNumber(srcGasTopUp.minIntervalSec, baseGasTopUp.minIntervalSec)),
+        30,
+        86_400
+      ),
+    },
     poolComparison: {
       enabled: toBool(srcPoolComparison.enabled, basePoolComparison.enabled),
       computeHourUtc: clamp(
@@ -832,6 +864,9 @@ function defaultState(accountAddress) {
     forceRebalanceRequestedAt: null,
     forceRebalanceRecoveryPending: false,
     outOfRangeSinceIso: null,
+    lastGasTopUpAttemptAt: null,
+    lastGasTopUpSuccessAt: null,
+    lastGasTopUpSkipReason: null,
     activePositionRunId: null,
     pendingEntrySnapshot: null,
     pendingCompoundUsd: 0,
@@ -1153,6 +1188,8 @@ class HttpProviderPool {
     this.failThreshold = 2;
     this.cooldownMs = 120_000;
     this.promoteSuccessThreshold = 5;
+    this.minRequestGapMs = this.providers.some((p) => p.name === "infura_http") ? 200 : 0;
+    this.nextRequestAtMs = 0;
   }
 
   hasProviders() {
@@ -1219,6 +1256,16 @@ class HttpProviderPool {
     return out;
   }
 
+  async waitForRateSlot() {
+    if (!(this.minRequestGapMs > 0)) return;
+    const now = Date.now();
+    const waitMs = Math.max(0, this.nextRequestAtMs - now);
+    this.nextRequestAtMs = Math.max(now, this.nextRequestAtMs) + this.minRequestGapMs;
+    if (waitMs > 0) {
+      await sleep(waitMs);
+    }
+  }
+
   async invoke(kind, fn, { timeoutMs = 8_000, retries = 1 } = {}) {
     if (!this.hasProviders()) throw new Error("No HTTP RPC providers configured");
     let lastErr = null;
@@ -1228,6 +1275,7 @@ class HttpProviderPool {
       const attempts = Math.max(1, retries);
       for (let i = 0; i < attempts; i += 1) {
         try {
+          await this.waitForRateSlot();
           const res = await withTimeout(fn(provider), timeoutMs, `${kind} via ${provider.name}`);
           this.activeIndex = idx;
           this.markSuccess(provider);
@@ -1369,20 +1417,28 @@ class WsHeadWatcher {
 class Uc6Bot {
   constructor() {
     const hasExplicitHttpProviders = Boolean(
-      ENV.httpAnkrUrl || ENV.httpAlchemyUrl || process.env.UC6_HTTP_PUBLIC_URL
+      ENV.httpInfuraUrl || ENV.httpAnkrUrl || ENV.httpAlchemyUrl || process.env.UC6_HTTP_PUBLIC_URL
     );
     const httpProviders = hasExplicitHttpProviders
-      ? [
-          { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
-          { name: "alchemy_http", url: ENV.httpAlchemyUrl || "" },
-          { name: "base_public_http", url: ENV.httpPublicUrl || "" },
-        ]
+      ? ENV.httpInfuraUrl
+        ? [
+            { name: "infura_http", url: ENV.httpInfuraUrl || "" },
+            { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
+            { name: "base_public_http", url: ENV.httpPublicUrl || "" },
+          ]
+        : [
+            { name: "ankr_http", url: ENV.httpAnkrUrl || "" },
+            { name: "alchemy_http", url: ENV.httpAlchemyUrl || "" },
+            { name: "base_public_http", url: ENV.httpPublicUrl || "" },
+          ]
       : [
           { name: "legacy_http", url: ENV.rpcUrl || "" },
           { name: "base_public_http", url: ENV.httpPublicUrl || "" },
         ];
     const httpPrimaryUrl = (httpProviders.find((p) => p.url) || {}).url || "";
-    if (!httpPrimaryUrl) throw new Error("Missing UC6 HTTP RPC URL (UC6_HTTP_ANKR_URL or UC6_RPC_URL)");
+    if (!httpPrimaryUrl) {
+      throw new Error("Missing UC6 HTTP RPC URL (UC6_HTTP_INFURA_URL, UC6_HTTP_ANKR_URL or UC6_RPC_URL)");
+    }
     if (!ENV.privateKey) throw new Error("Missing UC6_PRIVATE_KEY");
     if (!ENV.adminToken) throw new Error("Missing UC6_ADMIN_TOKEN");
     if (!ENV.ownerAddress) throw new Error("Missing UC6_OWNER_ADDRESS");
@@ -3668,12 +3724,11 @@ class Uc6Bot {
     const key = getAddress(poolAddress);
     const cached = this.poolMetaCache.get(key);
     if (cached) return cached;
-    const [token0, token1, tickSpacing, fee] = await Promise.all([
-      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token0" }),
-      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token1" }),
-      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "tickSpacing" }),
-      this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "fee" }).catch(() => 3000),
-    ]);
+    // Keep metadata reads serialized to avoid startup bursts on credit-metered providers.
+    const token0 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token0" });
+    const token1 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token1" });
+    const tickSpacing = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "tickSpacing" });
+    const fee = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "fee" }).catch(() => 3000);
     const meta = {
       token0: getAddress(token0),
       token1: getAddress(token1),
@@ -6011,6 +6066,104 @@ class Uc6Bot {
     };
   }
 
+  getGasTopUpConfig() {
+    const cfg = this.settings?.gasTopUp && typeof this.settings.gasTopUp === "object"
+      ? this.settings.gasTopUp
+      : DEFAULT_SETTINGS.gasTopUp;
+    return {
+      enabled: Boolean(cfg.enabled),
+      minEthUsd: clamp(Number(cfg.minEthUsd || 0), 0, 1_000_000),
+      topUpUsdc: clamp(Number(cfg.topUpUsdc || 0), 0.01, 1_000_000),
+      minIntervalSec: clamp(Math.round(Number(cfg.minIntervalSec || 0)), 30, 86_400),
+    };
+  }
+
+  async maybeTopUpEthGas(snapshot) {
+    const cfg = this.getGasTopUpConfig();
+    if (!cfg.enabled) return false;
+    if (!this.settings.tradingEnabled || this.settings.killSwitch) return false;
+    if (!snapshot) return false;
+
+    const nowMs = Date.now();
+    const lastAttemptMs = Date.parse(this.state.lastGasTopUpAttemptAt || "");
+    if (Number.isFinite(lastAttemptMs) && nowMs - lastAttemptMs < cfg.minIntervalSec * 1000) {
+      return false;
+    }
+
+    const wallet = this.state.latest?.wallet || {};
+    const ethUsd = Number(wallet?.valuesUsd?.eth || 0);
+    if (!(Number.isFinite(ethUsd) && ethUsd < cfg.minEthUsd)) {
+      return false;
+    }
+
+    const usdcTopUpRaw = parseUnits(cfg.topUpUsdc.toFixed(6), USDC_DECIMALS);
+    const usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+    if (usdcBalanceRaw < usdcTopUpRaw) {
+      this.state.lastGasTopUpAttemptAt = nowIso();
+      this.state.lastGasTopUpSkipReason = "insufficient_usdc_for_gas_topup";
+      return false;
+    }
+
+    const router = this.settings.venue === "uniswapv3" ? this.uniswapRouter : this.slipstreamRouter;
+    this.state.lastGasTopUpAttemptAt = nowIso();
+    this.beginAction("gas_topup", "eth_wallet_low");
+    try {
+      const swapRes = await this.swapExactInputSingle({
+        router,
+        tokenIn: this.usdc,
+        tokenOut: this.weth,
+        amountIn: usdcTopUpRaw,
+        slippageBps: this.settings.slippageBps,
+        fee: Number(snapshot.fee || 0),
+        tickSpacing: Number(snapshot.tickSpacing || 0),
+        snapshot,
+      });
+      const wethOutRaw = BigInt(swapRes?.actualOut || 0n);
+      if (wethOutRaw <= 0n) {
+        throw new Error("gas top-up swap produced zero WETH output");
+      }
+
+      await this.assertTxAllowed("gas_topup_unwrap_weth");
+      const unwrapHash = await this.walletClient.writeContract({
+        address: this.weth,
+        abi: WETH_WRAPPER_ABI,
+        functionName: "withdraw",
+        args: [wethOutRaw],
+        account: this.account,
+      });
+      const unwrapReceipt = await this.publicClient.waitForTransactionReceipt({ hash: unwrapHash });
+      this.addTxToActiveAction("swap", unwrapHash, unwrapReceipt);
+      if (unwrapReceipt.status && unwrapReceipt.status !== "success") {
+        throw new Error(`WETH unwrap tx reverted on-chain hash=${unwrapHash}`);
+      }
+
+      this.state.lastGasTopUpSuccessAt = nowIso();
+      this.state.lastGasTopUpSkipReason = null;
+      this.setDecision({
+        action: "gas_topup",
+        reason: "eth_wallet_low",
+        ethUsdBefore: ethUsd,
+        topUpUsdc: cfg.topUpUsdc,
+        txHash: unwrapHash,
+      });
+      this.finalizeActiveAction("gas_topup", "eth_wallet_low", {
+        ethUsdBefore: ethUsd,
+        topUpUsdc: cfg.topUpUsdc,
+        unwrappedWeth: Number(formatUnits(wethOutRaw, WETH_DECIMALS)),
+      });
+
+      await this.refreshWalletBalancesHeavy().catch((err) => this.setLastError(err));
+      return true;
+    } catch (err) {
+      this.state.lastGasTopUpSkipReason = err instanceof Error ? err.message : String(err || "gas top-up failed");
+      this.finalizeActiveAction("error", "gas_topup_failed", {
+        message: this.state.lastGasTopUpSkipReason,
+      });
+      this.setLastError(err);
+      return false;
+    }
+  }
+
   getHodlGateConfig() {
     const cfg = this.settings?.hodlGate && typeof this.settings.hodlGate === "object"
       ? this.settings.hodlGate
@@ -7000,6 +7153,11 @@ class Uc6Bot {
     }
     await this.refreshCollectableNowMaybe();
     await this.maybeEmitPendingEntrySnapshot().catch((err) => this.setLastError(err));
+    await this.maybeTopUpEthGas(
+      this.settings.venue === "uniswapv3"
+        ? snapshots.fallback || snapshots.primary || this.state.latest?.fallback || this.state.latest?.primary
+        : snapshots.primary || this.state.latest?.primary || snapshots.fallback || this.state.latest?.fallback
+    ).catch((err) => this.setLastError(err));
 
     const tokenId = this.state.position?.tokenId;
     if (tokenId && this.state.position?.tickLower != null && this.state.position?.tickUpper != null) {
@@ -7167,6 +7325,7 @@ class Uc6Bot {
         regime: this.settings.regime,
         hodlGate: this.settings.hodlGate,
         executionCaps: this.settings.executionCaps,
+        gasTopUp: this.settings.gasTopUp,
         poolComparison: this.settings.poolComparison,
         maxDeployUsdc: this.settings.maxDeployUsdc,
         maxInitialMintUsdc: this.settings.maxInitialMintUsdc,
@@ -7321,6 +7480,12 @@ class Uc6Bot {
         },
         lastRebalanceAtIso: this.state.lastRebalanceAt,
         cooldownRemainingSec: gate.remainingSec,
+        gasTopUp: {
+          lastAttemptAtIso: this.state.lastGasTopUpAttemptAt || null,
+          lastSuccessAtIso: this.state.lastGasTopUpSuccessAt || null,
+          lastSkipReason: this.state.lastGasTopUpSkipReason || null,
+          ethUsd: Number(walletState.valuesUsd?.eth || 0),
+        },
         forceRebalanceRequestedAtIso: this.state.forceRebalanceRequestedAt || null,
         forceRebalanceRecoveryPending: Boolean(this.state.forceRebalanceRecoveryPending),
         positionInventory: positionInventory
