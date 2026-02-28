@@ -1254,7 +1254,7 @@ class HttpProviderPool {
     provider.successStreak = 0;
     provider.lastError = err instanceof Error ? err.message : String(err || "unknown");
     if (isRpc429Error(err)) provider.last429AtIso = nowIso();
-    if (provider.name === "infura_http" && isInfuraDailyLimitError(err)) {
+    if (provider.name === "infura_http" && (isRpc429Error(err) || isInfuraDailyLimitError(err))) {
       provider.cooldownUntilMs = nextUtcHourMs(INFURA_DAILY_RETRY_HOUR_UTC);
       return;
     }
@@ -5596,6 +5596,10 @@ class Uc6Bot {
       let swapsUsed = 0;
       let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
       let wethBalanceRaw = await this.readTokenBalance(this.weth);
+      const syncWalletPairBalances = async () => {
+        usdcBalanceRaw = await this.readTokenBalance(this.usdc);
+        wethBalanceRaw = await this.readTokenBalance(this.weth);
+      };
       const applySwapDelta = (swapRes) => {
         if (!swapRes) return;
         const actualIn = BigInt(swapRes.actualIn || 0);
@@ -5632,8 +5636,11 @@ class Uc6Bot {
           tickSpacing: snapshot.tickSpacing,
           snapshot,
         });
-        applySwapDelta(swapRes);
-        swapsUsed += 1;
+        if (swapRes) {
+          applySwapDelta(swapRes);
+          swapsUsed += 1;
+          await syncWalletPairBalances();
+        }
         freeUsdcRaw = usdcBalanceRaw > keepReserveTopUpRaw ? usdcBalanceRaw - keepReserveTopUpRaw : 0n;
         deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
       }
@@ -5708,10 +5715,14 @@ class Uc6Bot {
           tickSpacing: snapshot.tickSpacing,
           snapshot,
         });
-        applySwapDelta(swapRes);
-        swapsUsed += 1;
+        if (swapRes) {
+          applySwapDelta(swapRes);
+          swapsUsed += 1;
+          await syncWalletPairBalances();
+        }
       }
 
+      await syncWalletPairBalances();
       const usdcAfter = usdcBalanceRaw;
       const wethAfter = wethBalanceRaw;
       let usdcSpendable = usdcAfter > keepReserveTopUpRaw ? usdcAfter - keepReserveTopUpRaw : 0n;
@@ -5737,8 +5748,11 @@ class Uc6Bot {
               tickSpacing: snapshot.tickSpacing,
               snapshot,
             });
-            applySwapDelta(swapRes);
-            swapsUsed += 1;
+            if (swapRes) {
+              applySwapDelta(swapRes);
+              swapsUsed += 1;
+              await syncWalletPairBalances();
+            }
           }
         } else if (usdcToUse <= 0n && wethToUse > 0n) {
           const topUpWethIn = wethToUse / 4n;
@@ -5757,11 +5771,15 @@ class Uc6Bot {
               tickSpacing: snapshot.tickSpacing,
               snapshot,
             });
-            applySwapDelta(swapRes);
-            swapsUsed += 1;
+            if (swapRes) {
+              applySwapDelta(swapRes);
+              swapsUsed += 1;
+              await syncWalletPairBalances();
+            }
           }
         }
 
+        await syncWalletPairBalances();
         const usdcRetry = usdcBalanceRaw;
         const wethRetry = wethBalanceRaw;
         usdcSpendable = usdcRetry > keepReserveTopUpRaw ? usdcRetry - keepReserveTopUpRaw : 0n;
