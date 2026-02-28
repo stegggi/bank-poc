@@ -1,5 +1,18 @@
 const GECKO_BASE_URL = "https://api.geckoterminal.com/api/v2";
 
+function uniqueStrings(values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value || "").trim();
+    if (!text) continue;
+    if (seen.has(text)) continue;
+    seen.add(text);
+    out.push(text);
+  }
+  return out;
+}
+
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -31,6 +44,62 @@ function buildUrl(baseUrl, pathname, params = {}) {
     url.searchParams.set(k, String(v));
   }
   return url.toString();
+}
+
+export function getPoolDisplayText(resource, extras = []) {
+  const attrs = resource?.attributes || resource?.attrs || resource || {};
+  const labels = [
+    attrs?.name,
+    attrs?.pool_name,
+    attrs?.symbol,
+    attrs?.display_name,
+    attrs?.token_name,
+    attrs?.pool_label,
+    attrs?.label,
+    ...(Array.isArray(attrs?.labels) ? attrs.labels : []),
+    ...(Array.isArray(attrs?.tags) ? attrs.tags : []),
+    resource?.id,
+    ...extras,
+  ];
+  return uniqueStrings(labels).join(" | ");
+}
+
+export function parseFeeRateFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  const matches = [...raw.matchAll(/(\d+(?:\.\d+)?)\s*%/g)]
+    .map((match) => {
+      const rawValue = String(match[1] || "");
+      const pct = Number(rawValue);
+      const decimals = (rawValue.split(".")[1] || "").length;
+      return { pct, decimals, rawValue };
+    })
+    .filter((m) => Number.isFinite(m.pct) && m.pct > 0 && m.pct <= 1);
+  if (matches.length === 0) return null;
+  matches.sort((a, b) => {
+    if (b.decimals !== a.decimals) return b.decimals - a.decimals;
+    if (b.rawValue.length !== a.rawValue.length) return b.rawValue.length - a.rawValue.length;
+    return a.pct - b.pct;
+  });
+  return matches[0].pct / 100;
+}
+
+export function parseVariantFromText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  if (/\bCL\s*100\b/i.test(raw)) return "CL100";
+  if (/\bCL\s*50\b/i.test(raw)) return "CL50";
+  if (/\bCL\s*1\b/i.test(raw)) return "CL1";
+  if (/basic\s+volatile/i.test(raw)) return "Basic Volatile";
+  return null;
+}
+
+export function parseTickSpacingText(text) {
+  const raw = String(text || "");
+  if (!raw) return null;
+  const explicit = raw.match(/tick\s*spacing\s*[:=]?\s*(\d+)/i) || raw.match(/tickspacing\s*[:=]?\s*(\d+)/i);
+  if (explicit) return String(explicit[1]);
+  return null;
 }
 
 function isRetryableStatus(status) {

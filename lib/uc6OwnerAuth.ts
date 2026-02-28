@@ -16,7 +16,32 @@ type RegimeSettingsPayload = {
   maxBandAdjBps?: number;
   maxCooldownAdjSec?: number;
 };
-type OwnerSettingsValue = Primitive | RegimeSettingsPayload;
+type TrendEscapeSettingsPayload = {
+  enabled?: boolean;
+  variant?: string;
+  requireRegimeLabel?: string;
+  minRegimeConfidence?: number;
+  directionLookbackSec?: number;
+  minTrendMovePct?: number;
+  minTrendConfirmSec?: number;
+  cooldownAfterEscapeSec?: number;
+  minAlphaUsdToEscape?: number;
+  emergencyOutOfRangeEdgePct?: number;
+  emergencyMinOutOfRangeSec?: number;
+  uptrendHold?: string;
+  downtrendHold?: string;
+  fallbackHold?: string;
+};
+type ReEntrySettingsPayload = {
+  enabled?: boolean;
+  requireRegimeLabel?: string;
+  minRegimeConfidence?: number;
+  minMeanRevertConfirmSec?: number;
+  maxDistanceFromMuPct?: number;
+  minHoldSec?: number;
+  cooldownAfterReEntrySec?: number;
+};
+type OwnerSettingsValue = Primitive | RegimeSettingsPayload | TrendEscapeSettingsPayload | ReEntrySettingsPayload;
 
 type RateBucket = { count: number; resetAt: number };
 type ChallengeStore = Map<string, Uc6ChallengeRecord>;
@@ -300,6 +325,36 @@ const REGIME_SETTING_TYPES: Record<keyof Required<RegimeSettingsPayload>, "boole
   maxCooldownAdjSec: "number",
 };
 
+const TREND_ESCAPE_SETTING_TYPES: Record<
+  keyof Required<TrendEscapeSettingsPayload>,
+  "boolean" | "number" | "string"
+> = {
+  enabled: "boolean",
+  variant: "string",
+  requireRegimeLabel: "string",
+  minRegimeConfidence: "number",
+  directionLookbackSec: "number",
+  minTrendMovePct: "number",
+  minTrendConfirmSec: "number",
+  cooldownAfterEscapeSec: "number",
+  minAlphaUsdToEscape: "number",
+  emergencyOutOfRangeEdgePct: "number",
+  emergencyMinOutOfRangeSec: "number",
+  uptrendHold: "string",
+  downtrendHold: "string",
+  fallbackHold: "string",
+};
+
+const REENTRY_SETTING_TYPES: Record<keyof Required<ReEntrySettingsPayload>, "boolean" | "number" | "string"> = {
+  enabled: "boolean",
+  requireRegimeLabel: "string",
+  minRegimeConfidence: "number",
+  minMeanRevertConfirmSec: "number",
+  maxDistanceFromMuPct: "number",
+  minHoldSec: "number",
+  cooldownAfterReEntrySec: "number",
+};
+
 function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
   if (!asObject(input)) {
     throw new Error('Invalid settings value for "regime"');
@@ -327,6 +382,42 @@ function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
   return out;
 }
 
+function normalizeTypedSettingsObject<T extends Record<string, unknown>>(
+  scope: string,
+  input: unknown,
+  expectedTypes: Record<string, "boolean" | "number" | "string">
+): T {
+  if (!asObject(input)) {
+    throw new Error(`Invalid settings value for "${scope}"`);
+  }
+  const out: Record<string, unknown> = {};
+  for (const [rawKey, value] of Object.entries(input)) {
+    const expectedType = expectedTypes[rawKey];
+    if (!expectedType) {
+      throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
+    }
+    if (expectedType === "boolean") {
+      if (typeof value !== "boolean") {
+        throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
+      }
+      out[rawKey] = value;
+      continue;
+    }
+    if (expectedType === "string") {
+      if (typeof value !== "string") {
+        throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
+      }
+      out[rawKey] = value;
+      continue;
+    }
+    if (typeof value !== "number" || !Number.isFinite(value)) {
+      throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
+    }
+    out[rawKey] = value;
+  }
+  return out as T;
+}
+
 export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSettingsValue> {
   if (!asObject(input)) {
     throw new Error("Settings payload must be an object");
@@ -335,6 +426,18 @@ export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSett
   for (const [key, value] of Object.entries(input)) {
     if (key === "regime") {
       out[key] = normalizeRegimeSettings(value);
+    } else if (key === "trendEscape") {
+      out[key] = normalizeTypedSettingsObject<TrendEscapeSettingsPayload>(
+        "trendEscape",
+        value,
+        TREND_ESCAPE_SETTING_TYPES
+      );
+    } else if (key === "reEntry") {
+      out[key] = normalizeTypedSettingsObject<ReEntrySettingsPayload>(
+        "reEntry",
+        value,
+        REENTRY_SETTING_TYPES
+      );
     } else if (
       value === null ||
       typeof value === "string" ||

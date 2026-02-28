@@ -1,15 +1,20 @@
 import path from "node:path";
 import { promises as fsp } from "node:fs";
 
-import { createGeckoTerminalClient } from "./geckoterminal_client.mjs";
+import {
+  createGeckoTerminalClient,
+  getPoolDisplayText,
+  parseFeeRateFromText,
+  parseTickSpacingText,
+  parseVariantFromText,
+} from "./geckoterminal_client.mjs";
 import { compareToCurrentPool, computeEconomicsAndStats, mean, stdev } from "./scoring.mjs";
 
 const NETWORK_ID = "base";
 const NETWORK_META = { id: "base", name: "Base", chainId: 8453 };
 const TINY = 1e-9;
-const DEFAULT_FEE_RATE_GUESS = 0.0005; // 0.05%
 const MAX_OHLCV_DAYS = 30;
-const DEFAULT_MAX_OHLCV_POOLS_PER_RUN = 12;
+const DEFAULT_MAX_OHLCV_POOLS_PER_RUN = 10;
 
 const TOKEN_ALLOWLIST = [
   { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", stable: false },
@@ -94,16 +99,11 @@ function canonicalPairKey(pair) {
   return [a, b].filter(Boolean).sort().join("/");
 }
 
-function topPoolDedupeKey(row) {
-  if (!row) return null;
-  const dexId = String(row?.dex?.id || "").toLowerCase();
-  const pairKey = canonicalPairKey(row?.pair);
-  const selectorType = String(row?.selector?.type || "unknown").toLowerCase();
-  const selectorValueRaw = row?.selector?.value;
-  const selectorValue = Number.isFinite(Number(selectorValueRaw))
-    ? String(Math.round(Number(selectorValueRaw)))
-    : `fee~${num(row?.selector?.feeRate, 0).toFixed(6)}`;
-  return `${dexId}|${pairKey}|${selectorType}|${selectorValue}`;
+function strictPoolKey(dexId, address) {
+  const dex = String(dexId || "").trim().toLowerCase();
+  const addr = normAddr(address);
+  if (!dex || !addr) return null;
+  return `${dex}|${addr}`;
 }
 
 function resourceKey(type, id) {
@@ -148,7 +148,7 @@ function parseTokenEntry(token) {
   };
 }
 
-function parseFeeAndSelector({ attrs, dexName }) {
+function parseFeeAndSelector({ attrs, dexName, poolText }) {
   const tickSpacing = num(attrs.tick_spacing ?? attrs.tickSpacing ?? attrs.tick_spacing_v3, NaN);
   const feeTierRaw = num(
     attrs.fee_tier ?? attrs.feeTier ?? attrs.fee_tier_bps ?? attrs.lp_fee_tier ?? attrs.swap_fee_bps,
@@ -162,23 +162,28 @@ function parseFeeAndSelector({ attrs, dexName }) {
       attrs.swap_fee_percentage,
     NaN
   );
-  let feeRate = NaN;
-  let feeIsEstimated = false;
-  if (Number.isFinite(feeTierRaw) && feeTierRaw > 0 && feeTierRaw <= 1_000_000) {
-    feeRate = feeTierRaw / 1_000_000;
-  } else if (Number.isFinite(feePctField) && feePctField > 0) {
-    feeRate = feePctField / 100;
+  const feeRateFromText = parseFeeRateFromText(poolText);
+  let feeRateFromField = null;
+  if (Number.isFinite(feePctField) && feePctField > 0 && feePctField <= 1) {
+    feeRateFromField = feePctField / 100;
+  } else if (Number.isFinite(feeTierRaw) && feeTierRaw > 0 && feeTierRaw <= 1_000_000) {
+    feeRateFromField = feeTierRaw / 1_000_000;
   }
-  if (!(Number.isFinite(feeRate) && feeRate > 0 && feeRate < 0.2)) {
-    feeRate = DEFAULT_FEE_RATE_GUESS;
-    feeIsEstimated = true;
-  }
+  const feeRate = Number.isFinite(Number(feeRateFromText))
+    ? Number(feeRateFromText)
+    : (Number.isFinite(Number(feeRateFromField)) ? Number(feeRateFromField) : null);
+  const feeIsInferred = Number.isFinite(Number(feeRate));
   const dexLower = String(dexName || "").toLowerCase();
+  const parsedTickSpacingText = parseTickSpacingText(poolText);
+  const parsedTickSpacing = Number.isFinite(Number(parsedTickSpacingText)) ? Number(parsedTickSpacingText) : NaN;
   let type = "unknown";
   let value = null;
   if (dexLower.includes("slipstream") && Number.isFinite(tickSpacing) && tickSpacing > 0) {
     type = "tickSpacing";
     value = Math.round(tickSpacing);
+  } else if (dexLower.includes("slipstream") && Number.isFinite(parsedTickSpacing) && parsedTickSpacing > 0) {
+    type = "tickSpacing";
+    value = Math.round(parsedTickSpacing);
   } else if (Number.isFinite(feeTierRaw) && feeTierRaw > 0) {
     type = "feeTier";
     value = Math.round(feeTierRaw);
@@ -191,7 +196,9 @@ function parseFeeAndSelector({ attrs, dexName }) {
       type,
       value,
       feeRate,
-      feeIsEstimated,
+      feeIsInferred,
+      variantLabel: parseVariantFromText(poolText),
+      tickSpacingText: parsedTickSpacingText || (Number.isFinite(tickSpacing) && tickSpacing > 0 ? String(Math.round(tickSpacing)) : null),
     },
   };
 }
@@ -222,8 +229,6 @@ function parsePoolEntry(poolResource, includedIdx) {
   const poolAddress = normAddr(attrs.address || attrs.pool_address || attrs.contract_address) ||
     (String(poolResource.id || "").includes("_") ? String(poolResource.id).split("_").pop()?.toLowerCase() : null);
   if (!poolAddress || !baseToken?.address || !quoteToken?.address) return null;
-
-  const { selector } = parseFeeAndSelector({ attrs, dexName: dexMeta.dexName });
   const tvlUsd = Math.max(
     0,
     num(
@@ -238,11 +243,19 @@ function parsePoolEntry(poolResource, includedIdx) {
   const pairKey = `${(ALLOWLIST_BY_ADDRESS.get(baseToken.address)?.symbol || baseToken.symbol || "UNK")}/${(ALLOWLIST_BY_ADDRESS.get(
     quoteToken.address
   )?.symbol || quoteToken.symbol || "UNK")}`;
+  const poolText = getPoolDisplayText(poolResource, [
+    dexMeta.dexName,
+    pairKey,
+    baseToken.symbol || "",
+    quoteToken.symbol || "",
+  ]);
+  const { selector } = parseFeeAndSelector({ attrs, dexName: dexMeta.dexName, poolText });
   return {
     raw: poolResource,
     address: poolAddress,
     dex: dexMeta,
     poolName: String(attrs.name || attrs.pool_name || "").trim() || null,
+    poolText,
     baseToken,
     quoteToken,
     pairKey,
@@ -418,8 +431,10 @@ function venueSelectorForCurrentPool(currentPoolMeta, gtCandidate) {
   return {
     type: selectorType === "fee" ? "feeTier" : selectorType,
     value: selectorValue,
-    feeRate: num(gtCandidate?.selector?.feeRate, DEFAULT_FEE_RATE_GUESS),
-    feeIsEstimated: Boolean(gtCandidate?.selector?.feeIsEstimated ?? true),
+    feeRate: Number.isFinite(Number(gtCandidate?.selector?.feeRate)) ? Number(gtCandidate.selector.feeRate) : null,
+    feeIsInferred: Boolean(gtCandidate?.selector?.feeIsInferred),
+    variantLabel: gtCandidate?.selector?.variantLabel || null,
+    tickSpacingText: gtCandidate?.selector?.tickSpacingText || null,
   };
 }
 
@@ -445,8 +460,10 @@ function makeCurrentFallbackRow({ currentRef }) {
     selector: currentRef.selector || {
       type: "unknown",
       value: null,
-      feeRate: DEFAULT_FEE_RATE_GUESS,
-      feeIsEstimated: true,
+      feeRate: null,
+      feeIsInferred: false,
+      variantLabel: null,
+      tickSpacingText: null,
     },
     stats: {
       tvlUsd: 0,
@@ -455,11 +472,13 @@ function makeCurrentFallbackRow({ currentRef }) {
       tvlHistoryDays: 0,
       volAvg7dUsd: 0,
       volAvg30dUsd: 0,
+      feesDay7dUsd: null,
+      feesDay30dUsd: null,
       feePower7d: 0,
       feePower30d: 0,
       dailyRangePct7d: 0,
       volumeStability30d: 0,
-      flowTrend: 1,
+      flowTrend: null,
     },
     economics: {
       expectedFeesDayUsd: 0,
@@ -469,6 +488,16 @@ function makeCurrentFallbackRow({ currentRef }) {
       expectedCostPerRebalanceUsd: 0,
       gasBaselineUsd: num(currentRef.gasBaselineUsd, 0.03),
       rebalanceSwapNotionalPct: num(currentRef.rebalanceSwapNotionalPct, 0.1),
+      finalScore: null,
+      scoreReason: "current_pool_fallback",
+    },
+    scalability: {
+      scalable: false,
+      scalableByTvl: false,
+      scalableBySize: false,
+      tvlMinUsd: 0,
+      maxRefCapitalPctOfTvl: 0,
+      refCapitalPctOfTvl: 0,
     },
     compareToCurrent: {
       rating: "Similar",
@@ -567,10 +596,11 @@ async function fetchOhlcvRowsForCandidate(client, candidate, { logger }) {
 
 function roughCandidateFeePowerScore(candidate) {
   const tvlUsd = Math.max(TINY, num(candidate?.tvlUsd, 0));
-  const feeRate = Math.max(0, num(candidate?.selector?.feeRate, DEFAULT_FEE_RATE_GUESS));
+  const feeRate = Number.isFinite(Number(candidate?.selector?.feeRate)) ? Math.max(0, Number(candidate.selector.feeRate)) : null;
   const vol24hUsd = Math.max(0, num(candidate?.volume24hUsd, 0));
-  if (vol24hUsd > 0 && feeRate > 0) return (vol24hUsd * feeRate) / tvlUsd;
-  return (Math.max(0, num(candidate?.tvlUsd, 0)) * Math.max(feeRate, DEFAULT_FEE_RATE_GUESS)) / 1_000_000;
+  if (vol24hUsd > 0 && feeRate != null) return (vol24hUsd * feeRate) / tvlUsd;
+  if (vol24hUsd > 0) return vol24hUsd / tvlUsd;
+  return Math.max(0, num(candidate?.tvlUsd, 0)) / 1_000_000;
 }
 
 function buildPoolRowBase(candidate) {
@@ -591,8 +621,10 @@ function buildPoolRowBase(candidate) {
     selector: {
       type: candidate.selector?.type || "unknown",
       value: Number.isFinite(Number(candidate.selector?.value)) ? Number(candidate.selector.value) : null,
-      feeRate: num(candidate.selector?.feeRate, DEFAULT_FEE_RATE_GUESS),
-      feeIsEstimated: Boolean(candidate.selector?.feeIsEstimated),
+      feeRate: Number.isFinite(Number(candidate.selector?.feeRate)) ? Number(candidate.selector.feeRate) : null,
+      feeIsInferred: Boolean(candidate.selector?.feeIsInferred),
+      variantLabel: candidate.selector?.variantLabel || null,
+      tickSpacingText: candidate.selector?.tickSpacingText || null,
     },
     stats: {
       tvlUsd: Math.max(0, num(candidate.tvlUsd, 0)),
@@ -601,20 +633,32 @@ function buildPoolRowBase(candidate) {
       tvlHistoryDays: 0,
       volAvg7dUsd: 0,
       volAvg30dUsd: 0,
-      feePower7d: 0,
-      feePower30d: 0,
+      feesDay7dUsd: null,
+      feesDay30dUsd: null,
+      feePower7d: null,
+      feePower30d: null,
       dailyRangePct7d: 0,
       volumeStability30d: 0,
-      flowTrend: 1,
+      flowTrend: null,
     },
     economics: {
-      expectedFeesDayUsd: 0,
+      expectedFeesDayUsd: null,
       expectedCostsDayUsd: 0,
-      expectedNetDayUsd: 0,
+      expectedNetDayUsd: null,
       expectedRebalancesPerDay: 0,
       expectedCostPerRebalanceUsd: 0,
       gasBaselineUsd: 0,
       rebalanceSwapNotionalPct: 0,
+      finalScore: null,
+      scoreReason: null,
+    },
+    scalability: {
+      scalable: false,
+      scalableByTvl: false,
+      scalableBySize: false,
+      tvlMinUsd: 0,
+      maxRefCapitalPctOfTvl: 0,
+      refCapitalPctOfTvl: 0,
     },
     compareToCurrent: {
       rating: "Similar",
@@ -639,6 +683,10 @@ export async function runPoolComparisonJob({
     computeHourUtc: clamp(Math.round(num(settings?.computeHourUtc, 8)), 0, 23),
     maxCandidatesPerDex: clamp(Math.round(num(settings?.maxCandidatesPerDex, 50)), 5, 100),
     topN: clamp(Math.round(num(settings?.topN, 5)), 1, 20),
+    minTvlUsd: Math.max(0, num(settings?.minTvlUsd, 2_000_000)),
+    maxRefCapitalPctOfTvl: clamp(num(settings?.maxRefCapitalPctOfTvl, 0.0025), 0, 1),
+    requireFeeRateInference: settings?.requireFeeRateInference !== false,
+    allowLowTvlInTable: settings?.allowLowTvlInTable !== false,
     rebalanceSwapNotionalPct: clamp(num(settings?.rebalanceSwapNotionalPct, 0.1), 0, 1),
   };
   if (!cfg.enabled) {
@@ -658,7 +706,7 @@ export async function runPoolComparisonJob({
     network: NETWORK_ID,
     fetchFn,
     logger,
-    minDelayMs: 400,
+    minDelayMs: 2200,
     maxRetries: 3,
     timeoutMs: 15_000,
   });
@@ -674,7 +722,7 @@ export async function runPoolComparisonJob({
       if (logger?.warn) logger.warn(`[pool_compare] failed dex candidate fetch ${dex.dexName}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
-  let candidates = uniqueBy(candidateList, (c) => normAddr(c.address));
+  let candidates = uniqueBy(candidateList, (c) => strictPoolKey(c?.dex?.dexId || c?.dex?.id, c?.address));
 
   const currentPoolAddress = normAddr(currentRef?.poolAddress);
   let currentCandidate = currentPoolAddress ? candidates.find((c) => normAddr(c.address) === currentPoolAddress) : null;
@@ -697,19 +745,19 @@ export async function runPoolComparisonJob({
     }
   }
 
-  candidates = uniqueBy(candidates, (c) => normAddr(c.address));
+  candidates = uniqueBy(candidates, (c) => strictPoolKey(c?.dex?.dexId || c?.dex?.id, c?.address));
 
   const ohlcvPriority = uniqueBy(
     [currentCandidate, ...candidates.slice().sort((a, b) => roughCandidateFeePowerScore(b) - roughCandidateFeePowerScore(a))].filter(
       Boolean
     ),
-    (c) => normAddr(c.address)
+    (c) => strictPoolKey(c?.dex?.dexId || c?.dex?.id, c?.address)
   );
-  const maxOhlcvPools = clamp(Math.max(cfg.topN * 2 + 1, 8), 6, DEFAULT_MAX_OHLCV_POOLS_PER_RUN);
+  const maxOhlcvPools = clamp(Math.max(cfg.topN * 2 + 2, 8), 6, DEFAULT_MAX_OHLCV_POOLS_PER_RUN);
   const ohlcvFetchSet = new Set(
     ohlcvPriority
       .slice(0, maxOhlcvPools)
-      .map((c) => normAddr(c.address))
+      .map((c) => strictPoolKey(c?.dex?.dexId || c?.dex?.id, c?.address))
       .filter(Boolean)
   );
 
@@ -730,8 +778,8 @@ export async function runPoolComparisonJob({
 
   for (const candidate of candidates) {
     let ohlcvRows = [];
-    const candidateAddr = normAddr(candidate.address);
-    const shouldFetchOhlcv = !!candidateAddr && ohlcvFetchSet.has(candidateAddr);
+    const candidateKey = strictPoolKey(candidate?.dex?.dexId || candidate?.dex?.id, candidate?.address);
+    const shouldFetchOhlcv = !!candidateKey && ohlcvFetchSet.has(candidateKey);
     if (shouldFetchOhlcv) {
       if (!ohlcvRateLimited) {
         const ohlcvRes = await fetchOhlcvRowsForCandidate(client, candidate, { logger });
@@ -797,7 +845,6 @@ export async function runPoolComparisonJob({
       volAvg30dUsd: ohlcvStats.volAvg30dUsd,
       dailyRangePct7d: ohlcvStats.dailyRangePct7d,
       volumeStability30d: ohlcvStats.volumeStability30d,
-      flowTrend: 1,
     };
 
     const econ = computeEconomicsAndStats({
@@ -807,10 +854,14 @@ export async function runPoolComparisonJob({
       bandHalfBps,
       edgeRebalancePct,
       gasBaselineUsd,
+      minTvlUsd: cfg.minTvlUsd,
+      maxRefCapitalPctOfTvl: cfg.maxRefCapitalPctOfTvl,
+      requireFeeRateInference: cfg.requireFeeRateInference,
       rebalanceSwapNotionalPct: cfg.rebalanceSwapNotionalPct,
     });
     row.stats = { ...row.stats, ...econ.stats };
     row.economics = econ.economics;
+    row.scalability = econ.scalability;
     rows.push(row);
   }
 
@@ -818,7 +869,11 @@ export async function runPoolComparisonJob({
     await appendJsonLines(tvlHistoryPath, tvlAppends);
   }
 
-  rows.sort((a, b) => num(b.economics?.expectedNetDayUsd, -Infinity) - num(a.economics?.expectedNetDayUsd, -Infinity));
+  rows.sort((a, b) => {
+    const scoreDiff = num(b.economics?.finalScore, Number.NEGATIVE_INFINITY) - num(a.economics?.finalScore, Number.NEGATIVE_INFINITY);
+    if (scoreDiff !== 0) return scoreDiff;
+    return num(b.stats?.tvlAvg7dUsd, 0) - num(a.stats?.tvlAvg7dUsd, 0);
+  });
 
   const currentRow =
     rows.find((r) => normAddr(r?.pool?.address) === currentPoolAddress) ||
@@ -852,41 +907,53 @@ export async function runPoolComparisonJob({
 
   const estimatedSwitchCostUsd = Math.max(0, gasBaselineUsd * 2 + 0.02);
   for (const row of rows) {
-    row.compareToCurrent = compareToCurrentPool(row, currentRow, { switchCostUsd: estimatedSwitchCostUsd });
+    row.compareToCurrent = compareToCurrentPool(row, currentRow, {
+      switchCostUsd: estimatedSwitchCostUsd,
+      requireFeeRateInference: cfg.requireFeeRateInference,
+    });
   }
 
   const rowsSorted = rows
     .slice()
-    .sort((a, b) => num(b.economics?.expectedNetDayUsd, -Infinity) - num(a.economics?.expectedNetDayUsd, -Infinity));
+    .sort((a, b) => {
+      const scoreDiff = num(b.economics?.finalScore, Number.NEGATIVE_INFINITY) - num(a.economics?.finalScore, Number.NEGATIVE_INFINITY);
+      if (scoreDiff !== 0) return scoreDiff;
+      return num(b.stats?.tvlAvg7dUsd, 0) - num(a.stats?.tvlAvg7dUsd, 0);
+    });
 
-  const currentLikeKey = currentRow ? topPoolDedupeKey(currentRow) : null;
   const nonCurrentRows = rowsSorted.filter((r) => {
     const addr = normAddr(r?.pool?.address);
-    if (currentPoolAddress && addr === currentPoolAddress) return false;
-    // Exclude rows that are effectively the same pool product (venue + pair + selector)
-    // as the currently active pool, even if pool address differs.
-    if (currentLikeKey && topPoolDedupeKey(r) === currentLikeKey) return false;
-    return true;
+    return !(currentPoolAddress && addr === currentPoolAddress);
   });
 
-  const dedupedRows = uniqueBy(nonCurrentRows, (r) => topPoolDedupeKey(r));
-  // Prefer diversity first: include best candidate per venue, then fill remaining
-  // slots by score while keeping unique addresses.
+  const scalableRows = nonCurrentRows.filter((r) => {
+    if (!r?.scalability?.scalable) return false;
+    if (cfg.requireFeeRateInference && !r?.selector?.feeIsInferred) return false;
+    return true;
+  });
+  const notRecommendedRows = cfg.allowLowTvlInTable
+    ? nonCurrentRows.filter((r) => !r?.scalability?.scalable || (cfg.requireFeeRateInference && !r?.selector?.feeIsInferred))
+    : [];
+
+  const dedupedRows = uniqueBy(scalableRows, (r) => strictPoolKey(r?.dex?.id, r?.pool?.address));
   const bestPerVenue = uniqueBy(dedupedRows, (r) => String(r?.dex?.id || "").toLowerCase());
   const selected = [];
-  const selectedAddr = new Set();
+  const selectedKeys = new Set();
   const tryPush = (row) => {
     if (!row || selected.length >= cfg.topN) return;
-    const addr = normAddr(row?.pool?.address);
-    if (!addr || selectedAddr.has(addr)) return;
-    selectedAddr.add(addr);
+    const key = strictPoolKey(row?.dex?.id, row?.pool?.address);
+    if (!key || selectedKeys.has(key)) return;
+    selectedKeys.add(key);
     selected.push(row);
   };
   for (const row of bestPerVenue) tryPush(row);
   for (const row of dedupedRows) tryPush(row);
-  for (const row of nonCurrentRows) tryPush(row);
+  for (const row of scalableRows) tryPush(row);
 
   const top5 = selected
+    .slice(0, cfg.topN)
+    .map((r, idx) => ({ ...r, rank: idx + 1 }));
+  const notRecommended = uniqueBy(notRecommendedRows, (r) => strictPoolKey(r?.dex?.id, r?.pool?.address))
     .slice(0, cfg.topN)
     .map((r, idx) => ({ ...r, rank: idx + 1 }));
 
@@ -925,11 +992,13 @@ export async function runPoolComparisonJob({
     },
     current: currentRow,
     top5,
+    notRecommended,
     notes: {
       limitations: [
         "Daily ranking uses GeckoTerminal public API snapshots and daily OHLCV; not real-time.",
-        "FeePower and expected net/day are heuristics based on avg volume/TVL and a simple churn proxy.",
+        "Fees/day, FeePower, and expected net/day are heuristics based on daily volume, inferred fee tier, TVL snapshots, and a simple churn proxy.",
         "TVL averages use local daily snapshots and may fall back to current TVL for newly observed pools.",
+        "Pools with unknown fee tier or insufficient scalability are excluded from Top 5 recommendations by default.",
         "OHLCV requests are rate-limit constrained on GeckoTerminal free tier; some rows may use 24h volume fallback or incomplete OHLCV coverage.",
       ],
     },

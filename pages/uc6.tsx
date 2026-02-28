@@ -54,6 +54,24 @@ type Uc6DraftSettings = {
   regimeMaxEdgeAdj: number;
   regimeMaxBandAdjBps: number;
   regimeMaxCooldownAdjSec: number;
+  trendEscapeEnabled: boolean;
+  trendEscapeMinRegimeConfidence: number;
+  trendEscapeDirectionLookbackSec: number;
+  trendEscapeMinTrendMovePct: number;
+  trendEscapeMinTrendConfirmSec: number;
+  trendEscapeCooldownAfterEscapeSec: number;
+  trendEscapeMinAlphaUsdToEscape: number;
+  trendEscapeEmergencyOutOfRangeEdgePct: number;
+  trendEscapeEmergencyMinOutOfRangeSec: number;
+  trendEscapeUptrendHold: "WETH" | "USDC" | "50_50";
+  trendEscapeDowntrendHold: "WETH" | "USDC" | "50_50";
+  trendEscapeFallbackHold: "WETH" | "USDC" | "50_50";
+  reEntryEnabled: boolean;
+  reEntryMinRegimeConfidence: number;
+  reEntryMinMeanRevertConfirmSec: number;
+  reEntryMaxDistanceFromMuPct: number;
+  reEntryMinHoldSec: number;
+  reEntryCooldownAfterReEntrySec: number;
 };
 
 type OwnerPayload = {
@@ -94,6 +112,31 @@ type OwnerPayload = {
     maxEdgeAdj: number;
     maxBandAdjBps: number;
     maxCooldownAdjSec: number;
+  };
+  trendEscape: {
+    enabled: boolean;
+    variant: "hybrid";
+    requireRegimeLabel: "trending";
+    minRegimeConfidence: number;
+    directionLookbackSec: number;
+    minTrendMovePct: number;
+    minTrendConfirmSec: number;
+    cooldownAfterEscapeSec: number;
+    minAlphaUsdToEscape: number;
+    emergencyOutOfRangeEdgePct: number;
+    emergencyMinOutOfRangeSec: number;
+    uptrendHold: "WETH" | "USDC" | "50_50";
+    downtrendHold: "WETH" | "USDC" | "50_50";
+    fallbackHold: "WETH" | "USDC" | "50_50";
+  };
+  reEntry: {
+    enabled: boolean;
+    requireRegimeLabel: "mean_reverting";
+    minRegimeConfidence: number;
+    minMeanRevertConfirmSec: number;
+    maxDistanceFromMuPct: number;
+    minHoldSec: number;
+    cooldownAfterReEntrySec: number;
   };
 };
 
@@ -194,7 +237,9 @@ type PoolComparisonRow = {
     type?: "feeTier" | "tickSpacing" | "unknown" | string;
     value?: number | null;
     feeRate?: number;
-    feeIsEstimated?: boolean;
+    feeIsInferred?: boolean;
+    variantLabel?: string | null;
+    tickSpacingText?: string | null;
   };
   stats?: {
     tvlUsd?: number;
@@ -203,24 +248,37 @@ type PoolComparisonRow = {
     tvlHistoryDays?: number;
     volAvg7dUsd?: number;
     volAvg30dUsd?: number;
+    feesDay7dUsd?: number | null;
+    feesDay30dUsd?: number | null;
     feePower7d?: number;
     feePower30d?: number;
     dailyRangePct7d?: number;
     volumeStability30d?: number;
+    flowTrend?: number | null;
   };
   economics?: {
-    expectedFeesDayUsd?: number;
+    expectedFeesDayUsd?: number | null;
     expectedCostsDayUsd?: number;
-    expectedNetDayUsd?: number;
+    expectedNetDayUsd?: number | null;
     expectedRebalancesPerDay?: number;
     expectedCostPerRebalanceUsd?: number;
     gasBaselineUsd?: number;
     rebalanceSwapNotionalPct?: number;
+    finalScore?: number | null;
+    scoreReason?: string | null;
+  };
+  scalability?: {
+    scalable?: boolean;
+    scalableByTvl?: boolean;
+    scalableBySize?: boolean;
+    tvlMinUsd?: number;
+    maxRefCapitalPctOfTvl?: number;
+    refCapitalPctOfTvl?: number;
   };
   compareToCurrent?: {
     rating?: "More" | "Similar" | "Less" | string;
     reason?: string;
-    expectedNetDiffDayUsd?: number;
+    expectedNetDiffDayUsd?: number | null;
     switchCostUsd?: number;
     breakEvenDays?: number | null;
   };
@@ -231,6 +289,7 @@ type PoolComparisonStatus = {
   computedAtIso?: string | null;
   current?: PoolComparisonRow | null;
   top5?: PoolComparisonRow[];
+  notRecommended?: PoolComparisonRow[];
   ref?: {
     currentPool?: {
       poolAddress?: string | null;
@@ -289,6 +348,31 @@ type Uc6Status = {
       maxEdgeAdj?: number;
       maxBandAdjBps?: number;
       maxCooldownAdjSec?: number;
+    };
+    trendEscape?: {
+      enabled?: boolean;
+      variant?: string;
+      requireRegimeLabel?: string;
+      minRegimeConfidence?: number;
+      directionLookbackSec?: number;
+      minTrendMovePct?: number;
+      minTrendConfirmSec?: number;
+      cooldownAfterEscapeSec?: number;
+      minAlphaUsdToEscape?: number;
+      emergencyOutOfRangeEdgePct?: number;
+      emergencyMinOutOfRangeSec?: number;
+      uptrendHold?: "WETH" | "USDC" | "50_50";
+      downtrendHold?: "WETH" | "USDC" | "50_50";
+      fallbackHold?: "WETH" | "USDC" | "50_50";
+    };
+    reEntry?: {
+      enabled?: boolean;
+      requireRegimeLabel?: string;
+      minRegimeConfidence?: number;
+      minMeanRevertConfirmSec?: number;
+      maxDistanceFromMuPct?: number;
+      minHoldSec?: number;
+      cooldownAfterReEntrySec?: number;
     };
     hodlGate?: {
       enabled?: boolean;
@@ -410,6 +494,30 @@ type Uc6Status = {
     updatedAtIso?: string | null;
     sampleCount?: number;
     windowSec?: number;
+  };
+  strategyMode?: "LP_ACTIVE" | "HOLD_WETH" | "HOLD_USDC" | "HOLD_50_50" | string;
+  trend?: {
+    movePct?: number | null;
+    direction?: string;
+    lookbackSec?: number;
+    confirmSec?: number;
+    meanRevertConfirmSec?: number;
+    distanceFromMuPct?: number | null;
+  };
+  trendEscape?: {
+    enabled?: boolean;
+    eligible?: boolean;
+    holdTargetIfEscape?: string | null;
+    reasonIfBlocked?: string;
+    cooldownUntilIso?: string | null;
+  };
+  reEntry?: {
+    enabled?: boolean;
+    eligible?: boolean;
+    reasonIfBlocked?: string;
+    meanRevertConfirmSec?: number;
+    distanceFromMuPct?: number | null;
+    eligibleAtIso?: string | null;
   };
   decision?: {
     baseThresholds?: {
@@ -581,6 +689,24 @@ function defaultDraft(): Uc6DraftSettings {
     regimeMaxEdgeAdj: 0.1,
     regimeMaxBandAdjBps: 50,
     regimeMaxCooldownAdjSec: 900,
+    trendEscapeEnabled: true,
+    trendEscapeMinRegimeConfidence: 0.6,
+    trendEscapeDirectionLookbackSec: 600,
+    trendEscapeMinTrendMovePct: 0.004,
+    trendEscapeMinTrendConfirmSec: 120,
+    trendEscapeCooldownAfterEscapeSec: 3600,
+    trendEscapeMinAlphaUsdToEscape: 0,
+    trendEscapeEmergencyOutOfRangeEdgePct: 1.15,
+    trendEscapeEmergencyMinOutOfRangeSec: 120,
+    trendEscapeUptrendHold: "WETH",
+    trendEscapeDowntrendHold: "USDC",
+    trendEscapeFallbackHold: "50_50",
+    reEntryEnabled: true,
+    reEntryMinRegimeConfidence: 0.6,
+    reEntryMinMeanRevertConfirmSec: 300,
+    reEntryMaxDistanceFromMuPct: 0.006,
+    reEntryMinHoldSec: 900,
+    reEntryCooldownAfterReEntrySec: 1800,
   };
 }
 
@@ -599,6 +725,8 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
   const churnEnabled = Boolean(settings.churnProtection?.enabled ?? settings.churnProtectionEnabled ?? d.churnProtectionEnabled);
   const churnRatio = n(settings.churnProtection?.maxCostToFeeRatio ?? settings.churnMaxCostToFeeRatio, d.churnMaxCostToFeeRatio / 100);
   const regime = settings.regime || {};
+  const trendEscape = settings.trendEscape || {};
+  const reEntry = settings.reEntry || {};
 
   return {
     tradingEnabled: Boolean(settings.tradingEnabled ?? d.tradingEnabled),
@@ -637,6 +765,45 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     regimeMaxEdgeAdj: n(regime.maxEdgeAdj, d.regimeMaxEdgeAdj),
     regimeMaxBandAdjBps: n(regime.maxBandAdjBps, d.regimeMaxBandAdjBps),
     regimeMaxCooldownAdjSec: n(regime.maxCooldownAdjSec, d.regimeMaxCooldownAdjSec),
+    trendEscapeEnabled: Boolean(trendEscape.enabled ?? d.trendEscapeEnabled),
+    trendEscapeMinRegimeConfidence: n(trendEscape.minRegimeConfidence, d.trendEscapeMinRegimeConfidence),
+    trendEscapeDirectionLookbackSec: n(trendEscape.directionLookbackSec, d.trendEscapeDirectionLookbackSec),
+    trendEscapeMinTrendMovePct: n(trendEscape.minTrendMovePct, d.trendEscapeMinTrendMovePct),
+    trendEscapeMinTrendConfirmSec: n(trendEscape.minTrendConfirmSec, d.trendEscapeMinTrendConfirmSec),
+    trendEscapeCooldownAfterEscapeSec: n(trendEscape.cooldownAfterEscapeSec, d.trendEscapeCooldownAfterEscapeSec),
+    trendEscapeMinAlphaUsdToEscape: n(trendEscape.minAlphaUsdToEscape, d.trendEscapeMinAlphaUsdToEscape),
+    trendEscapeEmergencyOutOfRangeEdgePct: n(
+      trendEscape.emergencyOutOfRangeEdgePct,
+      d.trendEscapeEmergencyOutOfRangeEdgePct
+    ),
+    trendEscapeEmergencyMinOutOfRangeSec: n(
+      trendEscape.emergencyMinOutOfRangeSec,
+      d.trendEscapeEmergencyMinOutOfRangeSec
+    ),
+    trendEscapeUptrendHold:
+      trendEscape.uptrendHold === "USDC"
+        ? "USDC"
+        : trendEscape.uptrendHold === "50_50"
+          ? "50_50"
+          : d.trendEscapeUptrendHold,
+    trendEscapeDowntrendHold:
+      trendEscape.downtrendHold === "WETH"
+        ? "WETH"
+        : trendEscape.downtrendHold === "50_50"
+          ? "50_50"
+          : d.trendEscapeDowntrendHold,
+    trendEscapeFallbackHold:
+      trendEscape.fallbackHold === "WETH"
+        ? "WETH"
+        : trendEscape.fallbackHold === "USDC"
+          ? "USDC"
+          : d.trendEscapeFallbackHold,
+    reEntryEnabled: Boolean(reEntry.enabled ?? d.reEntryEnabled),
+    reEntryMinRegimeConfidence: n(reEntry.minRegimeConfidence, d.reEntryMinRegimeConfidence),
+    reEntryMinMeanRevertConfirmSec: n(reEntry.minMeanRevertConfirmSec, d.reEntryMinMeanRevertConfirmSec),
+    reEntryMaxDistanceFromMuPct: n(reEntry.maxDistanceFromMuPct, d.reEntryMaxDistanceFromMuPct),
+    reEntryMinHoldSec: n(reEntry.minHoldSec, d.reEntryMinHoldSec),
+    reEntryCooldownAfterReEntrySec: n(reEntry.cooldownAfterReEntrySec, d.reEntryCooldownAfterReEntrySec),
   };
 }
 
@@ -679,6 +846,31 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
       maxEdgeAdj: draft.regimeMaxEdgeAdj,
       maxBandAdjBps: draft.regimeMaxBandAdjBps,
       maxCooldownAdjSec: draft.regimeMaxCooldownAdjSec,
+    },
+    trendEscape: {
+      enabled: draft.trendEscapeEnabled,
+      variant: "hybrid",
+      requireRegimeLabel: "trending",
+      minRegimeConfidence: draft.trendEscapeMinRegimeConfidence,
+      directionLookbackSec: draft.trendEscapeDirectionLookbackSec,
+      minTrendMovePct: draft.trendEscapeMinTrendMovePct,
+      minTrendConfirmSec: draft.trendEscapeMinTrendConfirmSec,
+      cooldownAfterEscapeSec: draft.trendEscapeCooldownAfterEscapeSec,
+      minAlphaUsdToEscape: draft.trendEscapeMinAlphaUsdToEscape,
+      emergencyOutOfRangeEdgePct: draft.trendEscapeEmergencyOutOfRangeEdgePct,
+      emergencyMinOutOfRangeSec: draft.trendEscapeEmergencyMinOutOfRangeSec,
+      uptrendHold: draft.trendEscapeUptrendHold,
+      downtrendHold: draft.trendEscapeDowntrendHold,
+      fallbackHold: draft.trendEscapeFallbackHold,
+    },
+    reEntry: {
+      enabled: draft.reEntryEnabled,
+      requireRegimeLabel: "mean_reverting",
+      minRegimeConfidence: draft.reEntryMinRegimeConfidence,
+      minMeanRevertConfirmSec: draft.reEntryMinMeanRevertConfirmSec,
+      maxDistanceFromMuPct: draft.reEntryMaxDistanceFromMuPct,
+      minHoldSec: draft.reEntryMinHoldSec,
+      cooldownAfterReEntrySec: draft.reEntryCooldownAfterReEntrySec,
     },
   };
 }
@@ -756,6 +948,14 @@ function fmtPct(v: number | null | undefined, digits = 2): string {
   return `${fmtNum(v, digits)}%`;
 }
 
+function fmtSignedPct(v: number | null | undefined, digits = 2): string {
+  if (v == null || Number.isNaN(v)) return "—";
+  const n = Number(v);
+  if (n === 0) return "0.00%";
+  const abs = Math.abs(n);
+  return `${n < 0 ? "-" : "+"}${fmtNum(abs, digits)}%`;
+}
+
 function fmtRatioPct(ratio: number | null | undefined): string {
   if (ratio == null || Number.isNaN(ratio)) return "—";
   return fmtPct(Number(ratio) * 100, 2);
@@ -789,16 +989,25 @@ function fmtDays(v: number | null | undefined): string {
   return `${fmtNum(x, x < 10 ? 1 : 0)}d`;
 }
 
+function fmtPctOrDash(v: number | null | undefined, digits = 2): string {
+  if (v == null || Number.isNaN(v) || !Number.isFinite(Number(v))) return "—";
+  return fmtPct(Number(v) * 100, digits);
+}
+
 function poolComparisonSelectorLabel(row?: PoolComparisonRow | null): string {
-  const feeRate = n(row?.selector?.feeRate, NaN);
+  const feeRate = row?.selector?.feeRate;
   const selectorType = String(row?.selector?.type || "unknown");
   const selectorValue = row?.selector?.value;
-  const feePct = Number.isFinite(feeRate) && feeRate >= 0 ? `${fmtNum(feeRate * 100, 3)}%` : "—";
+  const feePct =
+    Number.isFinite(Number(feeRate)) && Number(feeRate) > 0
+      ? `${fmtNum(Number(feeRate) * 100, 4)}%${row?.selector?.feeIsInferred ? " (inferred)" : ""}`
+      : "Unknown fee";
   if (selectorType === "feeTier" && Number.isFinite(Number(selectorValue))) {
     return `${feePct} (tier ${Number(selectorValue)})`;
   }
-  if (selectorType === "tickSpacing" && Number.isFinite(Number(selectorValue))) {
-    return `${feePct} (tickSpacing ${Number(selectorValue)})`;
+  if (selectorType === "tickSpacing") {
+    const tickText = row?.selector?.tickSpacingText || (Number.isFinite(Number(selectorValue)) ? String(Number(selectorValue)) : null);
+    if (tickText) return `${feePct} (tickSpacing ${tickText})`;
   }
   return feePct;
 }
@@ -821,6 +1030,23 @@ function ratingTone(rating?: string): "good" | "warn" | "bad" | "muted" {
   if (rating === "More") return "good";
   if (rating === "Similar") return "warn";
   if (rating === "Less") return "bad";
+  return "muted";
+}
+
+function poolVariantLabel(row?: PoolComparisonRow | null): string {
+  return String(row?.selector?.variantLabel || "—");
+}
+
+function poolScalabilityLabel(row?: PoolComparisonRow | null): string {
+  if (row?.scalability?.scalable) return "OK scalable";
+  if (row?.scalability?.scalableByTvl === false) return "Warn low_tvl";
+  if (row?.scalability?.scalableBySize === false) return "Warn too_large_for_pool";
+  return "unknown";
+}
+
+function poolScalabilityTone(row?: PoolComparisonRow | null): "good" | "warn" | "muted" {
+  if (row?.scalability?.scalable) return "good";
+  if (row?.scalability?.scalableByTvl === false || row?.scalability?.scalableBySize === false) return "warn";
   return "muted";
 }
 
@@ -1254,6 +1480,7 @@ export default function Uc6Page() {
   const poolComparison = status?.poolComparison || null;
   const poolComparisonCurrent = poolComparison?.current || null;
   const poolComparisonTop5 = poolComparison?.top5 || [];
+  const poolComparisonNotRecommended = poolComparison?.notRecommended || [];
   const closedPositionRecords = positionsPage?.items || [];
   const positionsPageCount = Math.max(1, Number(positionsPage?.totalPages || 1));
   const positionsCurrentPage = Math.max(1, Number(positionsPage?.page || positionsPageNum));
@@ -1286,6 +1513,11 @@ export default function Uc6Page() {
   const hodlGateReason = String(hodlGateView?.lastGateDecision?.reason || "—");
   const alphaLiveUsd = n(hodlGateView?.alphaLiveUsd, 0);
   const requiredFeesToBeatHodlLiveUsd = n(hodlGateView?.requiredFeesToBeatHodlLiveUsd, 0);
+  const strategyMode = status?.strategyMode || "LP_ACTIVE";
+  const trendView = status?.trend || null;
+  const trendEscapeView = status?.trendEscape || null;
+  const reEntryView = status?.reEntry || null;
+  const trendMovePct = trendView?.movePct == null ? null : n(trendView.movePct, 0) * 100;
   const activeMintTargetBandBpsRaw = activeLifecycleRecord?.band?.bandHalfBps;
   const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
     ? Math.round(Number(activeMintTargetBandBpsRaw))
@@ -1301,24 +1533,31 @@ export default function Uc6Page() {
         (() => {
           const href = poolLink(poolComparisonCurrent);
           const label = pairLabel(poolComparisonCurrent);
-          if (!href) return label;
+          const addr = shortAddr(poolComparisonCurrent.pool?.address || "");
+          const content = (
+            <span>
+              {label}
+              {addr !== "—" ? ` (${addr})` : ""}
+            </span>
+          );
+          if (!href) return content;
           return (
             <a href={href} target="_blank" rel="noreferrer noopener" style={styles.link}>
-              {label}
+              {content}
             </a>
           );
         })(),
-        <span
-          title={poolComparisonCurrent.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}
-        >
+        poolVariantLabel(poolComparisonCurrent),
+        <span title={poolComparisonCurrent.selector?.feeIsInferred ? "Fee tier inferred from GeckoTerminal metadata/text." : "Fee tier unavailable from GeckoTerminal metadata."}>
           {poolComparisonSelectorLabel(poolComparisonCurrent)}
-          {poolComparisonCurrent.selector?.feeIsEstimated ? " *" : ""}
         </span>,
         `${fmtUsdCompact(poolComparisonCurrent.stats?.tvlAvg7dUsd)} / ${fmtUsdCompact(poolComparisonCurrent.stats?.tvlAvg30dUsd)}`,
         `${fmtUsdCompact(poolComparisonCurrent.stats?.volAvg7dUsd)} / ${fmtUsdCompact(poolComparisonCurrent.stats?.volAvg30dUsd)}`,
+        `${fmtUsdCompact(poolComparisonCurrent.stats?.feesDay7dUsd)} / ${fmtUsdCompact(poolComparisonCurrent.stats?.feesDay30dUsd)}`,
+        <Pill label={poolScalabilityLabel(poolComparisonCurrent)} tone={poolScalabilityTone(poolComparisonCurrent)} />,
         <span title="Approx fee/day per $TVL = avgVolume * feeRate / avgTVL">
-          {`${fmtPct(n(poolComparisonCurrent.stats?.feePower7d, 0) * 100, 3)} / ${fmtPct(
-            n(poolComparisonCurrent.stats?.feePower30d, 0) * 100,
+          {`${fmtPctOrDash(poolComparisonCurrent.stats?.feePower7d, 3)} / ${fmtPctOrDash(
+            poolComparisonCurrent.stats?.feePower30d,
             3
           )}`}
         </span>,
@@ -1332,21 +1571,30 @@ export default function Uc6Page() {
     (() => {
       const href = poolLink(row);
       const label = pairLabel(row);
-      if (!href) return label;
+      const addr = shortAddr(row.pool?.address || "");
+      const content = (
+        <span>
+          {label}
+          {addr !== "—" ? ` (${addr})` : ""}
+        </span>
+      );
+      if (!href) return content;
       return (
         <a href={href} target="_blank" rel="noreferrer noopener" style={styles.link}>
-          {label}
+          {content}
         </a>
       );
     })(),
-    <span title={row.selector?.feeIsEstimated ? "Fee rate estimated from pool metadata fallback." : undefined}>
+    poolVariantLabel(row),
+    <span title={row.selector?.feeIsInferred ? "Fee tier inferred from GeckoTerminal metadata/text." : "Fee tier unavailable from GeckoTerminal metadata."}>
       {poolComparisonSelectorLabel(row)}
-      {row.selector?.feeIsEstimated ? " *" : ""}
     </span>,
     `${fmtUsdCompact(row.stats?.tvlAvg7dUsd)} / ${fmtUsdCompact(row.stats?.tvlAvg30dUsd)}`,
     `${fmtUsdCompact(row.stats?.volAvg7dUsd)} / ${fmtUsdCompact(row.stats?.volAvg30dUsd)}`,
+    `${fmtUsdCompact(row.stats?.feesDay7dUsd)} / ${fmtUsdCompact(row.stats?.feesDay30dUsd)}`,
+    <Pill label={poolScalabilityLabel(row)} tone={poolScalabilityTone(row)} />,
     <span title="Approx fee/day per $TVL = avgVolume * feeRate / avgTVL">
-      {`${fmtPct(n(row.stats?.feePower7d, 0) * 100, 3)} / ${fmtPct(n(row.stats?.feePower30d, 0) * 100, 3)}`}
+      {`${fmtPctOrDash(row.stats?.feePower7d, 3)} / ${fmtPctOrDash(row.stats?.feePower30d, 3)}`}
     </span>,
     <span title="Heuristic expected net/day for your current UC6 capital, band, and edge threshold">
       {fmtSignedUsd(row.economics?.expectedNetDayUsd)}
@@ -1358,6 +1606,25 @@ export default function Uc6Page() {
       </span>
     </div>,
     fmtDays(row.compareToCurrent?.breakEvenDays ?? null),
+  ]);
+  const poolComparisonNotRecommendedRows = poolComparisonNotRecommended.map((row) => [
+    row.dex?.name || "—",
+    (() => {
+      const href = poolLink(row);
+      const label = `${pairLabel(row)} (${String(row.pool?.address || "").slice(0, 8)}...)`;
+      if (!href) return label;
+      return (
+        <a href={href} target="_blank" rel="noreferrer noopener" style={styles.link}>
+          {label}
+        </a>
+      );
+    })(),
+    poolVariantLabel(row),
+    poolComparisonSelectorLabel(row),
+    `${fmtUsdCompact(row.stats?.tvlAvg7dUsd)} / ${fmtUsdCompact(row.stats?.tvlAvg30dUsd)}`,
+    `${fmtUsdCompact(row.stats?.feesDay7dUsd)} / ${fmtUsdCompact(row.stats?.feesDay30dUsd)}`,
+    <Pill label={poolScalabilityLabel(row)} tone={poolScalabilityTone(row)} />,
+    row.compareToCurrent?.reason || "—",
   ]);
 
   return (
@@ -1500,6 +1767,54 @@ export default function Uc6Page() {
             </div>
             <div style={styles.note}>
               Regime uses OU half-life heuristics on cached tick samples only (no extra RPC reads). Effective thresholds apply per decision and do not overwrite stored settings.
+            </div>
+          </Card>
+
+          <Card title="Trend Escape">
+            <div style={styles.metaGrid}>
+              <Metric
+                label="Mode"
+                value={
+                  <Pill
+                    label={String(strategyMode)}
+                    tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"}
+                  />
+                }
+              />
+              <Metric label="Trend Direction" value={String(trendView?.direction || "flat")} />
+              <Metric label="Move Over Lookback" value={trendMovePct == null ? "—" : fmtSignedPct(trendMovePct)} />
+              <Metric label="Lookback" value={`${String(trendView?.lookbackSec ?? "—")}s`} />
+              <Metric label="Trend Confirm" value={`${String(trendView?.confirmSec ?? 0)}s`} />
+              <Metric label="Mean-Revert Confirm" value={`${String(trendView?.meanRevertConfirmSec ?? 0)}s`} />
+              <Metric label="Distance From Mu" value={trendView?.distanceFromMuPct == null ? "—" : fmtPct(n(trendView.distanceFromMuPct, 0) * 100)} />
+              <Metric label="Alpha Live" value={fmtSignedUsd(alphaLiveUsd)} />
+              <Metric label="Escape Alpha Min" value={fmtSignedUsd(status?.settings?.trendEscape?.minAlphaUsdToEscape)} />
+              <Metric
+                label="Escape Eligible"
+                value={
+                  <Pill
+                    label={trendEscapeView?.eligible ? "yes" : "no"}
+                    tone={trendEscapeView?.eligible ? "warn" : "muted"}
+                  />
+                }
+              />
+              <Metric label="Escape Hold Target" value={String(trendEscapeView?.holdTargetIfEscape || "—")} />
+              <Metric label="Escape Block Reason" value={String(trendEscapeView?.reasonIfBlocked || "—")} />
+              <Metric
+                label="Re-entry Eligible"
+                value={
+                  <Pill
+                    label={reEntryView?.eligible ? "yes" : "no"}
+                    tone={reEntryView?.eligible ? "good" : "muted"}
+                  />
+                }
+              />
+              <Metric label="Re-entry Block Reason" value={String(reEntryView?.reasonIfBlocked || "—")} />
+              <Metric label="Re-entry Eligible At" value={fmtIsoLocal(reEntryView?.eligibleAtIso)} />
+              <Metric label="Escape Cooldown Until" value={fmtIsoLocal(trendEscapeView?.cooldownUntilIso)} />
+            </div>
+            <div style={styles.note}>
+              In trending regimes the bot can close LP and hold inventory directionally. Re-entry requires sustained mean reversion and price proximity to regime mu.
             </div>
           </Card>
 
@@ -1859,8 +2174,24 @@ export default function Uc6Page() {
 
             <div style={{ marginTop: 10, fontWeight: 600 }}>Current pool</div>
             <SimpleTable
-              headers={["Venue", "Chain", "Pair", "Fee/Tier", "TVL (7d / 30d)", "Volume (7d / 30d)", "FeePower (7d / 30d)", "Exp Net/day"]}
-              rows={poolComparisonCurrentRow ? [poolComparisonCurrentRow] : [["—", "—", "—", "—", "—", "—", "—", "—"]]}
+              headers={[
+                "Venue",
+                "Chain",
+                "Pair",
+                "Variant",
+                "Fee/Tier",
+                "TVL (7d / 30d)",
+                "Volume (7d / 30d)",
+                "Fees/day (7d / 30d)",
+                "Scalability",
+                "FeePower (7d / 30d)",
+                "Exp Net/day",
+              ]}
+              rows={
+                poolComparisonCurrentRow
+                  ? [poolComparisonCurrentRow]
+                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—"]]
+              }
             />
 
             <div style={{ marginTop: 12, fontWeight: 600 }}>Top 5 candidate pools</div>
@@ -1868,9 +2199,12 @@ export default function Uc6Page() {
               headers={[
                 "Venue",
                 "Pair",
+                "Variant",
                 "Fee/Tier",
                 "TVL (7d / 30d)",
                 "Volume (7d / 30d)",
+                "Fees/day (7d / 30d)",
+                "Scalability",
                 "FeePower (7d / 30d)",
                 "Exp Net/day",
                 "Rating vs current",
@@ -1879,11 +2213,20 @@ export default function Uc6Page() {
               rows={
                 poolComparisonTopRows.length > 0
                   ? poolComparisonTopRows
-                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—"]]
+                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—"]]
               }
             />
+            {poolComparisonNotRecommendedRows.length > 0 && (
+              <>
+                <div style={{ marginTop: 12, fontWeight: 600 }}>Not scalable / experimental pools</div>
+                <SimpleTable
+                  headers={["Venue", "Pair", "Variant", "Fee/Tier", "TVL (7d / 30d)", "Fees/day (7d / 30d)", "Scalability", "Why not recommended"]}
+                  rows={poolComparisonNotRecommendedRows}
+                />
+              </>
+            )}
             <div style={{ ...styles.note, marginTop: 8 }}>
-              Rating compares expected net/day over the next 1–2 weeks vs the current pool using recent 7d/30d volume, TVL, fee-power, and a simple rebalance-cost proxy. “*” marks fee-rate estimates.
+              Ratings use inferred fee tier, absolute fees/day, fee-power, recent flow stability, and TVL scalability for your current capital. Pools with unknown fee or insufficient scalability are excluded from Top 5.
             </div>
           </Card>
         </section>
@@ -1997,6 +2340,109 @@ export default function Uc6Page() {
                 label="regime.maxCooldownAdjSec"
                 value={draft.regimeMaxCooldownAdjSec}
                 onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)}
+              />
+
+              <SelectField
+                label="trendEscape.enabled"
+                value={draft.trendEscapeEnabled ? "true" : "false"}
+                onChange={(v) => updateBool("trendEscapeEnabled", v === "true")}
+                options={["false", "true"]}
+              />
+              <NumberField
+                label="trendEscape.minRegimeConfidence"
+                value={draft.trendEscapeMinRegimeConfidence}
+                step="0.01"
+                onChange={(v) => updateNumber("trendEscapeMinRegimeConfidence", v)}
+              />
+              <NumberField
+                label="trendEscape.directionLookbackSec"
+                value={draft.trendEscapeDirectionLookbackSec}
+                onChange={(v) => updateNumber("trendEscapeDirectionLookbackSec", v)}
+              />
+              <NumberField
+                label="trendEscape.minTrendMovePct"
+                value={draft.trendEscapeMinTrendMovePct}
+                step="0.0001"
+                onChange={(v) => updateNumber("trendEscapeMinTrendMovePct", v)}
+              />
+              <NumberField
+                label="trendEscape.minTrendConfirmSec"
+                value={draft.trendEscapeMinTrendConfirmSec}
+                onChange={(v) => updateNumber("trendEscapeMinTrendConfirmSec", v)}
+              />
+              <NumberField
+                label="trendEscape.cooldownAfterEscapeSec"
+                value={draft.trendEscapeCooldownAfterEscapeSec}
+                onChange={(v) => updateNumber("trendEscapeCooldownAfterEscapeSec", v)}
+              />
+              <NumberField
+                label="trendEscape.minAlphaUsdToEscape"
+                value={draft.trendEscapeMinAlphaUsdToEscape}
+                step="0.01"
+                onChange={(v) => updateNumber("trendEscapeMinAlphaUsdToEscape", v)}
+              />
+              <NumberField
+                label="trendEscape.emergencyOutOfRangeEdgePct"
+                value={draft.trendEscapeEmergencyOutOfRangeEdgePct}
+                step="0.01"
+                onChange={(v) => updateNumber("trendEscapeEmergencyOutOfRangeEdgePct", v)}
+              />
+              <NumberField
+                label="trendEscape.emergencyMinOutOfRangeSec"
+                value={draft.trendEscapeEmergencyMinOutOfRangeSec}
+                onChange={(v) => updateNumber("trendEscapeEmergencyMinOutOfRangeSec", v)}
+              />
+              <SelectField
+                label="trendEscape.uptrendHold"
+                value={draft.trendEscapeUptrendHold}
+                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeUptrendHold: v as "WETH" | "USDC" | "50_50" } : p))}
+                options={["WETH", "USDC", "50_50"]}
+              />
+              <SelectField
+                label="trendEscape.downtrendHold"
+                value={draft.trendEscapeDowntrendHold}
+                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeDowntrendHold: v as "WETH" | "USDC" | "50_50" } : p))}
+                options={["USDC", "WETH", "50_50"]}
+              />
+              <SelectField
+                label="trendEscape.fallbackHold"
+                value={draft.trendEscapeFallbackHold}
+                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeFallbackHold: v as "WETH" | "USDC" | "50_50" } : p))}
+                options={["50_50", "WETH", "USDC"]}
+              />
+
+              <SelectField
+                label="reEntry.enabled"
+                value={draft.reEntryEnabled ? "true" : "false"}
+                onChange={(v) => updateBool("reEntryEnabled", v === "true")}
+                options={["false", "true"]}
+              />
+              <NumberField
+                label="reEntry.minRegimeConfidence"
+                value={draft.reEntryMinRegimeConfidence}
+                step="0.01"
+                onChange={(v) => updateNumber("reEntryMinRegimeConfidence", v)}
+              />
+              <NumberField
+                label="reEntry.minMeanRevertConfirmSec"
+                value={draft.reEntryMinMeanRevertConfirmSec}
+                onChange={(v) => updateNumber("reEntryMinMeanRevertConfirmSec", v)}
+              />
+              <NumberField
+                label="reEntry.maxDistanceFromMuPct"
+                value={draft.reEntryMaxDistanceFromMuPct}
+                step="0.0001"
+                onChange={(v) => updateNumber("reEntryMaxDistanceFromMuPct", v)}
+              />
+              <NumberField
+                label="reEntry.minHoldSec"
+                value={draft.reEntryMinHoldSec}
+                onChange={(v) => updateNumber("reEntryMinHoldSec", v)}
+              />
+              <NumberField
+                label="reEntry.cooldownAfterReEntrySec"
+                value={draft.reEntryCooldownAfterReEntrySec}
+                onChange={(v) => updateNumber("reEntryCooldownAfterReEntrySec", v)}
               />
             </div>
 

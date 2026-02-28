@@ -564,6 +564,31 @@ const DEFAULT_SETTINGS = {
     outOfRangeEmergencyMinSec: 60,
     outOfRangeEmergencyEdgePct: 1.15,
   },
+  trendEscape: {
+    enabled: true,
+    variant: "hybrid",
+    requireRegimeLabel: "trending",
+    minRegimeConfidence: 0.6,
+    directionLookbackSec: 600,
+    minTrendMovePct: 0.004,
+    minTrendConfirmSec: 120,
+    cooldownAfterEscapeSec: 3600,
+    minAlphaUsdToEscape: 0,
+    emergencyOutOfRangeEdgePct: 1.15,
+    emergencyMinOutOfRangeSec: 120,
+    uptrendHold: "WETH",
+    downtrendHold: "USDC",
+    fallbackHold: "50_50",
+  },
+  reEntry: {
+    enabled: true,
+    requireRegimeLabel: "mean_reverting",
+    minRegimeConfidence: 0.6,
+    minMeanRevertConfirmSec: 300,
+    maxDistanceFromMuPct: 0.006,
+    minHoldSec: 900,
+    cooldownAfterReEntrySec: 1800,
+  },
   executionCaps: {
     maxInventorySwapsPerRebalance: 2,
     maxSwapsOnOpen: 1,
@@ -584,6 +609,10 @@ const DEFAULT_SETTINGS = {
     computeHourUtc: 8,
     maxCandidatesPerDex: 50,
     topN: 5,
+    minTvlUsd: 2_000_000,
+    maxRefCapitalPctOfTvl: 0.0025,
+    requireFeeRateInference: true,
+    allowLowTvlInTable: true,
     rebalanceSwapNotionalPct: 0.1,
   },
 };
@@ -634,6 +663,16 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       ? baseSettings.hodlGate
       : DEFAULT_SETTINGS.hodlGate;
   const srcHodlGate = src.hodlGate && typeof src.hodlGate === "object" ? src.hodlGate : {};
+  const baseTrendEscape =
+    baseSettings.trendEscape && typeof baseSettings.trendEscape === "object"
+      ? baseSettings.trendEscape
+      : DEFAULT_SETTINGS.trendEscape;
+  const srcTrendEscape = src.trendEscape && typeof src.trendEscape === "object" ? src.trendEscape : {};
+  const baseReEntry =
+    baseSettings.reEntry && typeof baseSettings.reEntry === "object"
+      ? baseSettings.reEntry
+      : DEFAULT_SETTINGS.reEntry;
+  const srcReEntry = src.reEntry && typeof src.reEntry === "object" ? src.reEntry : {};
   const baseExecutionCaps =
     baseSettings.executionCaps && typeof baseSettings.executionCaps === "object"
       ? baseSettings.executionCaps
@@ -793,6 +832,100 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         5
       ),
     },
+    trendEscape: {
+      enabled: toBool(srcTrendEscape.enabled, baseTrendEscape.enabled),
+      variant: "hybrid",
+      requireRegimeLabel:
+        srcTrendEscape.requireRegimeLabel === "mean_reverting" ? "mean_reverting" : "trending",
+      minRegimeConfidence: clamp(
+        toNumber(srcTrendEscape.minRegimeConfidence, baseTrendEscape.minRegimeConfidence),
+        0,
+        1
+      ),
+      directionLookbackSec: clamp(
+        Math.round(toNumber(srcTrendEscape.directionLookbackSec, baseTrendEscape.directionLookbackSec)),
+        30,
+        86_400
+      ),
+      minTrendMovePct: clamp(
+        toNumber(srcTrendEscape.minTrendMovePct, baseTrendEscape.minTrendMovePct),
+        0,
+        1
+      ),
+      minTrendConfirmSec: clamp(
+        Math.round(toNumber(srcTrendEscape.minTrendConfirmSec, baseTrendEscape.minTrendConfirmSec)),
+        5,
+        86_400
+      ),
+      cooldownAfterEscapeSec: clamp(
+        Math.round(toNumber(srcTrendEscape.cooldownAfterEscapeSec, baseTrendEscape.cooldownAfterEscapeSec)),
+        0,
+        7 * 24 * 60 * 60
+      ),
+      minAlphaUsdToEscape: clamp(
+        toNumber(srcTrendEscape.minAlphaUsdToEscape, baseTrendEscape.minAlphaUsdToEscape),
+        -1_000_000,
+        1_000_000
+      ),
+      emergencyOutOfRangeEdgePct: clamp(
+        toNumber(srcTrendEscape.emergencyOutOfRangeEdgePct, baseTrendEscape.emergencyOutOfRangeEdgePct),
+        1,
+        5
+      ),
+      emergencyMinOutOfRangeSec: clamp(
+        Math.round(toNumber(srcTrendEscape.emergencyMinOutOfRangeSec, baseTrendEscape.emergencyMinOutOfRangeSec)),
+        5,
+        7 * 24 * 60 * 60
+      ),
+      uptrendHold:
+        srcTrendEscape.uptrendHold === "USDC"
+          ? "USDC"
+          : srcTrendEscape.uptrendHold === "50_50"
+            ? "50_50"
+            : "WETH",
+      downtrendHold:
+        srcTrendEscape.downtrendHold === "WETH"
+          ? "WETH"
+          : srcTrendEscape.downtrendHold === "50_50"
+            ? "50_50"
+            : "USDC",
+      fallbackHold:
+        srcTrendEscape.fallbackHold === "WETH"
+          ? "WETH"
+          : srcTrendEscape.fallbackHold === "USDC"
+            ? "USDC"
+            : "50_50",
+    },
+    reEntry: {
+      enabled: toBool(srcReEntry.enabled, baseReEntry.enabled),
+      requireRegimeLabel:
+        srcReEntry.requireRegimeLabel === "trending" ? "trending" : "mean_reverting",
+      minRegimeConfidence: clamp(
+        toNumber(srcReEntry.minRegimeConfidence, baseReEntry.minRegimeConfidence),
+        0,
+        1
+      ),
+      minMeanRevertConfirmSec: clamp(
+        Math.round(toNumber(srcReEntry.minMeanRevertConfirmSec, baseReEntry.minMeanRevertConfirmSec)),
+        5,
+        86_400
+      ),
+      maxDistanceFromMuPct: clamp(
+        toNumber(srcReEntry.maxDistanceFromMuPct, baseReEntry.maxDistanceFromMuPct),
+        0,
+        1
+      ),
+      minHoldSec: clamp(
+        Math.round(toNumber(srcReEntry.minHoldSec, baseReEntry.minHoldSec)),
+        0,
+        7 * 24 * 60 * 60
+      ),
+      cooldownAfterReEntrySec: clamp(
+        Math.round(toNumber(srcReEntry.cooldownAfterReEntrySec, baseReEntry.cooldownAfterReEntrySec)),
+        0,
+        7 * 24 * 60 * 60
+      ),
+    },
     executionCaps: {
       maxInventorySwapsPerRebalance: clamp(
         Math.round(
@@ -843,6 +976,17 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         100
       ),
       topN: clamp(Math.round(toNumber(srcPoolComparison.topN, basePoolComparison.topN)), 1, 20),
+      minTvlUsd: clamp(toNumber(srcPoolComparison.minTvlUsd, basePoolComparison.minTvlUsd), 0, 1_000_000_000),
+      maxRefCapitalPctOfTvl: clamp(
+        toNumber(srcPoolComparison.maxRefCapitalPctOfTvl, basePoolComparison.maxRefCapitalPctOfTvl),
+        0,
+        1
+      ),
+      requireFeeRateInference: toBool(
+        srcPoolComparison.requireFeeRateInference,
+        basePoolComparison.requireFeeRateInference
+      ),
+      allowLowTvlInTable: toBool(srcPoolComparison.allowLowTvlInTable, basePoolComparison.allowLowTvlInTable),
       rebalanceSwapNotionalPct: clamp(
         toNumber(srcPoolComparison.rebalanceSwapNotionalPct, basePoolComparison.rebalanceSwapNotionalPct),
         0,
@@ -876,6 +1020,12 @@ function defaultState(accountAddress) {
     lastGasTopUpSuccessAt: null,
     lastGasTopUpSkipReason: null,
     activePositionRunId: null,
+    strategyMode: "LP_ACTIVE",
+    holdStartedAtIso: null,
+    escapeCooldownUntilIso: null,
+    reEntryCooldownUntilIso: null,
+    trendingSinceIso: null,
+    meanRevertingSinceIso: null,
     pendingEntrySnapshot: null,
     pendingCompoundUsd: 0,
     rangeStats: {
@@ -2325,6 +2475,7 @@ class Uc6Bot {
       computedAtIso: cached?.computedAtIso || null,
       current: cached?.current || null,
       top5: Array.isArray(cached?.top5) ? cached.top5 : [],
+      notRecommended: Array.isArray(cached?.notRecommended) ? cached.notRecommended : [],
       ref: cached?.ref || {
         currentPool: currentRef,
       },
@@ -4073,6 +4224,198 @@ class Uc6Bot {
         0,
         86_400
       ),
+    };
+  }
+
+  getTrendEscapeSettings() {
+    const cfg =
+      this.settings?.trendEscape && typeof this.settings.trendEscape === "object"
+        ? this.settings.trendEscape
+        : DEFAULT_SETTINGS.trendEscape;
+    return {
+      enabled: Boolean(cfg.enabled),
+      variant: "hybrid",
+      requireRegimeLabel: cfg.requireRegimeLabel === "mean_reverting" ? "mean_reverting" : "trending",
+      minRegimeConfidence: clamp(Number(cfg.minRegimeConfidence || 0), 0, 1),
+      directionLookbackSec: clamp(Math.round(Number(cfg.directionLookbackSec || 0)), 30, 86_400),
+      minTrendMovePct: clamp(Number(cfg.minTrendMovePct || 0), 0, 1),
+      minTrendConfirmSec: clamp(Math.round(Number(cfg.minTrendConfirmSec || 0)), 5, 86_400),
+      cooldownAfterEscapeSec: clamp(Math.round(Number(cfg.cooldownAfterEscapeSec || 0)), 0, 7 * 24 * 60 * 60),
+      minAlphaUsdToEscape: clamp(Number(cfg.minAlphaUsdToEscape || 0), -1_000_000, 1_000_000),
+      emergencyOutOfRangeEdgePct: clamp(Number(cfg.emergencyOutOfRangeEdgePct || 1), 1, 5),
+      emergencyMinOutOfRangeSec: clamp(
+        Math.round(Number(cfg.emergencyMinOutOfRangeSec || 0)),
+        5,
+        7 * 24 * 60 * 60
+      ),
+      uptrendHold: cfg.uptrendHold === "USDC" ? "USDC" : cfg.uptrendHold === "50_50" ? "50_50" : "WETH",
+      downtrendHold: cfg.downtrendHold === "WETH" ? "WETH" : cfg.downtrendHold === "50_50" ? "50_50" : "USDC",
+      fallbackHold: cfg.fallbackHold === "WETH" ? "WETH" : cfg.fallbackHold === "USDC" ? "USDC" : "50_50",
+    };
+  }
+
+  getReEntrySettings() {
+    const cfg =
+      this.settings?.reEntry && typeof this.settings.reEntry === "object"
+        ? this.settings.reEntry
+        : DEFAULT_SETTINGS.reEntry;
+    return {
+      enabled: Boolean(cfg.enabled),
+      requireRegimeLabel: cfg.requireRegimeLabel === "trending" ? "trending" : "mean_reverting",
+      minRegimeConfidence: clamp(Number(cfg.minRegimeConfidence || 0), 0, 1),
+      minMeanRevertConfirmSec: clamp(Math.round(Number(cfg.minMeanRevertConfirmSec || 0)), 5, 86_400),
+      maxDistanceFromMuPct: clamp(Number(cfg.maxDistanceFromMuPct || 0), 0, 1),
+      minHoldSec: clamp(Math.round(Number(cfg.minHoldSec || 0)), 0, 7 * 24 * 60 * 60),
+      cooldownAfterReEntrySec: clamp(Math.round(Number(cfg.cooldownAfterReEntrySec || 0)), 0, 7 * 24 * 60 * 60),
+    };
+  }
+
+  getStrategyMode() {
+    const mode = String(this.state?.strategyMode || "LP_ACTIVE");
+    if (mode === "HOLD_WETH" || mode === "HOLD_USDC" || mode === "HOLD_50_50") return mode;
+    return "LP_ACTIVE";
+  }
+
+  holdModeFromTarget(target) {
+    if (target === "WETH") return "HOLD_WETH";
+    if (target === "USDC") return "HOLD_USDC";
+    return "HOLD_50_50";
+  }
+
+  holdTargetFromMode(mode = null) {
+    const value = String(mode || this.getStrategyMode());
+    if (value === "HOLD_WETH") return "WETH";
+    if (value === "HOLD_USDC") return "USDC";
+    return "50_50";
+  }
+
+  isoMs(v) {
+    const ms = Date.parse(String(v || ""));
+    return Number.isFinite(ms) ? ms : NaN;
+  }
+
+  cooldownRemainingSec(iso) {
+    const ms = this.isoMs(iso);
+    if (!(Number.isFinite(ms) && ms > Date.now())) return 0;
+    return Math.max(0, Math.ceil((ms - Date.now()) / 1000));
+  }
+
+  setStrategyModeState(mode, extra = {}) {
+    this.state.strategyMode = mode;
+    if ("holdStartedAtIso" in extra) this.state.holdStartedAtIso = extra.holdStartedAtIso || null;
+    if ("escapeCooldownUntilIso" in extra) this.state.escapeCooldownUntilIso = extra.escapeCooldownUntilIso || null;
+    if ("reEntryCooldownUntilIso" in extra) this.state.reEntryCooldownUntilIso = extra.reEntryCooldownUntilIso || null;
+  }
+
+  getRegimeLookbackSample(lookbackSec) {
+    const samples = Array.isArray(this.regimeState?.samples) ? this.regimeState.samples : [];
+    if (!samples.length) return null;
+    const targetTsSec = Math.floor(Date.now() / 1000) - Math.max(1, Math.round(Number(lookbackSec || 0)));
+    let candidate = null;
+    for (const sample of samples) {
+      const tsSec = Number(sample?.tsSec || 0);
+      if (!Number.isFinite(tsSec) || tsSec > targetTsSec) break;
+      candidate = sample;
+    }
+    return candidate;
+  }
+
+  updateTrendConfirmState(trendCtx) {
+    const now = nowIso();
+    if (trendCtx?.trendingCondition) {
+      if (!this.state.trendingSinceIso) this.state.trendingSinceIso = now;
+    } else {
+      this.state.trendingSinceIso = null;
+    }
+    if (trendCtx?.meanRevertingCondition) {
+      if (!this.state.meanRevertingSinceIso) this.state.meanRevertingSinceIso = now;
+    } else {
+      this.state.meanRevertingSinceIso = null;
+    }
+  }
+
+  buildTrendContext(primary = null, { persistState = true } = {}) {
+    const trendCfg = this.getTrendEscapeSettings();
+    const reEntryCfg = this.getReEntrySettings();
+    const latestRegime = this.state.latest?.regime || null;
+    const priceNow = Number(primary?.priceUsdcPerWeth || this.getSpotUsdcPerWeth() || 0);
+    const tickNow = Number(primary?.tick ?? this.state.latest?.primary?.tick ?? this.state.latest?.fallback?.tick ?? NaN);
+    const logPriceNow = Number.isFinite(tickNow) ? tickNow * Math.log(1.0001) : null;
+    const lookbackSample = this.getRegimeLookbackSample(trendCfg.directionLookbackSec);
+    const logPriceLookback = Number.isFinite(Number(lookbackSample?.logPrice || NaN))
+      ? Number(lookbackSample.logPrice)
+      : null;
+    const trendMovePct =
+      Number.isFinite(logPriceNow) && Number.isFinite(logPriceLookback)
+        ? Math.exp(logPriceNow - logPriceLookback) - 1
+        : null;
+    let direction = "flat";
+    if (Number.isFinite(trendMovePct)) {
+      if (trendMovePct >= trendCfg.minTrendMovePct) direction = "up";
+      else if (trendMovePct <= -trendCfg.minTrendMovePct) direction = "down";
+    }
+    const muLogPrice = Number(latestRegime?.mu);
+    const distanceFromMuPct =
+      Number.isFinite(logPriceNow) && Number.isFinite(muLogPrice)
+        ? Math.abs(Math.exp(logPriceNow - muLogPrice) - 1)
+        : null;
+    const regimeLabel = String(latestRegime?.label || "unknown");
+    const regimeConfidence = clamp(Number(latestRegime?.confidence || 0), 0, 1);
+    const trendingCondition =
+      trendCfg.enabled &&
+      regimeLabel === trendCfg.requireRegimeLabel &&
+      regimeConfidence >= trendCfg.minRegimeConfidence &&
+      Number.isFinite(trendMovePct) &&
+      Math.abs(trendMovePct) >= trendCfg.minTrendMovePct &&
+      (direction === "up" || direction === "down");
+    const meanRevertingCondition =
+      reEntryCfg.enabled &&
+      regimeLabel === reEntryCfg.requireRegimeLabel &&
+      regimeConfidence >= reEntryCfg.minRegimeConfidence &&
+      Number.isFinite(distanceFromMuPct) &&
+      distanceFromMuPct <= reEntryCfg.maxDistanceFromMuPct;
+    const nextTrendingSinceIso = trendingCondition
+      ? this.state.trendingSinceIso || nowIso()
+      : null;
+    const nextMeanRevertingSinceIso = meanRevertingCondition
+      ? this.state.meanRevertingSinceIso || nowIso()
+      : null;
+    if (persistState) {
+      this.state.trendingSinceIso = nextTrendingSinceIso;
+      this.state.meanRevertingSinceIso = nextMeanRevertingSinceIso;
+    }
+    const trendingSinceMs = this.isoMs(nextTrendingSinceIso);
+    const meanRevertingSinceMs = this.isoMs(nextMeanRevertingSinceIso);
+    const trendingConfirmSec =
+      trendingCondition && Number.isFinite(trendingSinceMs) && Date.now() > trendingSinceMs
+        ? Math.round((Date.now() - trendingSinceMs) / 1000)
+        : trendingCondition
+          ? 0
+          : 0;
+    const meanRevertConfirmSec =
+      meanRevertingCondition && Number.isFinite(meanRevertingSinceMs) && Date.now() > meanRevertingSinceMs
+        ? Math.round((Date.now() - meanRevertingSinceMs) / 1000)
+        : meanRevertingCondition
+          ? 0
+          : 0;
+    return {
+      priceNow,
+      trendMovePct,
+      direction,
+      lookbackSec: trendCfg.directionLookbackSec,
+      distanceFromMuPct,
+      trendingCondition,
+      trendingConfirmSec,
+      meanRevertingCondition,
+      meanRevertConfirmSec,
+      regimeLabel,
+      regimeConfidence,
+      trendingSinceIso: nextTrendingSinceIso,
+      meanRevertingSinceIso: nextMeanRevertingSinceIso,
+      muPrice:
+        Number.isFinite(priceNow) && Number.isFinite(logPriceNow) && Number.isFinite(muLogPrice)
+          ? priceNow / Math.exp(logPriceNow - muLogPrice)
+          : null,
     };
   }
 
@@ -6429,6 +6772,455 @@ class Uc6Bot {
     };
   }
 
+  buildTrendEscapeEvaluation(primary, trendCtx, { tradingAllowed = true } = {}) {
+    const cfg = this.getTrendEscapeSettings();
+    const mode = this.getStrategyMode();
+    const hodl = this.computeHodlGateSnapshot();
+    const cooldownRemainingSec = this.cooldownRemainingSec(this.state.reEntryCooldownUntilIso);
+    const emergencyAllowed =
+      Boolean(hodl.outOfRange) &&
+      Number(hodl.outOfRangeDurationSec || 0) >= cfg.emergencyMinOutOfRangeSec &&
+      Number(hodl.distanceBeyondEdgePct || 0) >= cfg.emergencyOutOfRangeEdgePct;
+    let holdTarget = cfg.fallbackHold;
+    if (trendCtx?.direction === "up") holdTarget = cfg.uptrendHold;
+    else if (trendCtx?.direction === "down") holdTarget = cfg.downtrendHold;
+
+    let eligible = true;
+    let reasonIfBlocked = "ok";
+    if (!cfg.enabled) {
+      eligible = false;
+      reasonIfBlocked = "disabled";
+    } else if (this.settings.venue === "uniswapv3") {
+      eligible = false;
+      reasonIfBlocked = "venue_read_only";
+    } else if (mode !== "LP_ACTIVE") {
+      eligible = false;
+      reasonIfBlocked = `mode_${mode.toLowerCase()}`;
+    } else if (!this.state.position?.tokenId) {
+      eligible = false;
+      reasonIfBlocked = "no_active_lp";
+    } else if (!tradingAllowed) {
+      eligible = false;
+      reasonIfBlocked = "trading_blocked";
+    } else if (cooldownRemainingSec > 0) {
+      eligible = false;
+      reasonIfBlocked = "reentry_cooldown";
+    } else if (!this.settings?.regime?.enabled) {
+      eligible = false;
+      reasonIfBlocked = "regime_disabled";
+    } else if (String(trendCtx?.regimeLabel || "unknown") !== cfg.requireRegimeLabel) {
+      eligible = false;
+      reasonIfBlocked = "regime_label_mismatch";
+    } else if (Number(trendCtx?.regimeConfidence || 0) < cfg.minRegimeConfidence) {
+      eligible = false;
+      reasonIfBlocked = "regime_confidence_low";
+    } else if (!Number.isFinite(Number(trendCtx?.trendMovePct))) {
+      eligible = false;
+      reasonIfBlocked = "trend_move_unavailable";
+    } else if (!(Math.abs(Number(trendCtx?.trendMovePct || 0)) >= cfg.minTrendMovePct)) {
+      eligible = false;
+      reasonIfBlocked = "trend_move_too_small";
+    } else if (Number(trendCtx?.trendingConfirmSec || 0) < cfg.minTrendConfirmSec) {
+      eligible = false;
+      reasonIfBlocked = "trend_not_confirmed";
+    } else if (!(Number(hodl.alphaLiveUsd || 0) >= cfg.minAlphaUsdToEscape || emergencyAllowed)) {
+      eligible = false;
+      reasonIfBlocked = "alpha_gate";
+    }
+
+    return {
+      enabled: cfg.enabled,
+      eligible,
+      holdTargetIfEscape: holdTarget,
+      reasonIfBlocked,
+      cooldownUntilIso: this.state.reEntryCooldownUntilIso || null,
+      cooldownRemainingSec,
+      emergencyAllowed,
+      hodlSnapshot: hodl,
+    };
+  }
+
+  buildReEntryEvaluation(primary, trendCtx, { tradingAllowed = true } = {}) {
+    const cfg = this.getReEntrySettings();
+    const mode = this.getStrategyMode();
+    const holdStartedAtMs = this.isoMs(this.state.holdStartedAtIso);
+    const minHoldReadyAtMs = Number.isFinite(holdStartedAtMs) ? holdStartedAtMs + cfg.minHoldSec * 1000 : NaN;
+    const escapeCooldownMs = this.isoMs(this.state.escapeCooldownUntilIso);
+    const reEntryCooldownMs = this.isoMs(this.state.reEntryCooldownUntilIso);
+    const eligibleAtMs = [minHoldReadyAtMs, escapeCooldownMs, reEntryCooldownMs]
+      .filter((ms) => Number.isFinite(ms))
+      .reduce((max, ms) => Math.max(max, ms), 0);
+    let eligible = true;
+    let reasonIfBlocked = "ok";
+    if (!cfg.enabled) {
+      eligible = false;
+      reasonIfBlocked = "disabled";
+    } else if (this.settings.venue === "uniswapv3") {
+      eligible = false;
+      reasonIfBlocked = "venue_read_only";
+    } else if (!mode.startsWith("HOLD_")) {
+      eligible = false;
+      reasonIfBlocked = "not_in_hold_mode";
+    } else if (!tradingAllowed) {
+      eligible = false;
+      reasonIfBlocked = "trading_blocked";
+    } else if (Number.isFinite(eligibleAtMs) && Date.now() < eligibleAtMs) {
+      eligible = false;
+      reasonIfBlocked =
+        Number.isFinite(minHoldReadyAtMs) && Date.now() < minHoldReadyAtMs
+          ? "min_hold_not_met"
+          : Number.isFinite(escapeCooldownMs) && Date.now() < escapeCooldownMs
+            ? "escape_cooldown"
+            : "reentry_cooldown";
+    } else if (!this.settings?.regime?.enabled) {
+      eligible = false;
+      reasonIfBlocked = "regime_disabled";
+    } else if (String(trendCtx?.regimeLabel || "unknown") !== cfg.requireRegimeLabel) {
+      eligible = false;
+      reasonIfBlocked = "regime_label_mismatch";
+    } else if (Number(trendCtx?.regimeConfidence || 0) < cfg.minRegimeConfidence) {
+      eligible = false;
+      reasonIfBlocked = "regime_confidence_low";
+    } else if (Number(trendCtx?.meanRevertConfirmSec || 0) < cfg.minMeanRevertConfirmSec) {
+      eligible = false;
+      reasonIfBlocked = "mean_revert_not_confirmed";
+    } else if (!Number.isFinite(Number(trendCtx?.distanceFromMuPct))) {
+      eligible = false;
+      reasonIfBlocked = "distance_from_mu_unavailable";
+    } else if (Number(trendCtx?.distanceFromMuPct || 0) > cfg.maxDistanceFromMuPct) {
+      eligible = false;
+      reasonIfBlocked = "too_far_from_mu";
+    }
+    return {
+      enabled: cfg.enabled,
+      eligible,
+      reasonIfBlocked,
+      meanRevertConfirmSec: Number(trendCtx?.meanRevertConfirmSec || 0),
+      distanceFromMuPct:
+        Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
+      eligibleAtIso: Number.isFinite(eligibleAtMs) && eligibleAtMs > 0 ? new Date(eligibleAtMs).toISOString() : null,
+    };
+  }
+
+  async appendStrategyLifecycleEvent(type, { positionRunId = null, tokenId = null, details = {}, band = null, txHashes = [] } = {}) {
+    const runId = positionRunId || this.state.activePositionRunId || null;
+    if (!runId) return null;
+    return await this.appendLifecycleEvent(
+      this.lifecycleCommonFields({
+        type,
+        positionRunId: String(runId),
+        tokenId: tokenId == null ? this.state.position?.tokenId || null : tokenId,
+        band: band || undefined,
+        txHashes,
+        details,
+      })
+    ).catch((err) => {
+      this.setLastError(err);
+      return null;
+    });
+  }
+
+  async rebalanceWalletToTargetMix({ snapshot, router, target = "50_50", maxSwaps = 1, reserveUsdc = null, eventType = null, positionRunId = null }) {
+    const caps = this.getExecutionCapsConfig();
+    const maxSwapCount = Math.max(0, Math.min(Math.round(Number(maxSwaps || 0)), Math.round(Number(caps.maxInventorySwapsPerRebalance || 0)), 2));
+    if (maxSwapCount <= 0) return { swaps: [], holdTarget: target };
+    const minSwapUsd = Number(caps.minSwapUsd || 0);
+    const reserveTargetUsdc = reserveUsdc == null ? 0 : Math.max(0, Number(reserveUsdc || 0));
+    let swapsUsed = 0;
+    const swaps = [];
+
+    while (swapsUsed < maxSwapCount) {
+      const usdcRaw = await this.readTokenBalance(this.usdc);
+      const wethRaw = await this.readTokenBalance(this.weth);
+      const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
+      const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+      const spot = Number(snapshot?.priceUsdcPerWeth || this.getSpotUsdcPerWeth() || 0);
+      if (!(spot > 0)) break;
+      let plannedSwap = null;
+
+      if (target === "WETH") {
+        const swappableUsdc = Math.max(0, usdc - reserveTargetUsdc);
+        if (swappableUsdc >= minSwapUsd) {
+          plannedSwap = {
+            tokenIn: this.usdc,
+            tokenOut: this.weth,
+            amountIn: parseUnits(swappableUsdc.toFixed(6), USDC_DECIMALS),
+          };
+        }
+      } else if (target === "USDC") {
+        const wethUsd = weth * spot;
+        if (wethUsd >= minSwapUsd) {
+          plannedSwap = {
+            tokenIn: this.weth,
+            tokenOut: this.usdc,
+            amountIn: parseUnits(weth.toFixed(18), WETH_DECIMALS),
+          };
+        }
+      } else {
+        const totalUsd = Math.max(0, usdc - reserveTargetUsdc) + weth * spot;
+        const deployableUsdc = Math.max(0, usdc - reserveTargetUsdc);
+        if (totalUsd > 0) {
+          const desiredUsdc = totalUsd / 2;
+          const deltaUsdc = deployableUsdc - desiredUsdc;
+          const tolHalf = Number(caps.targetRatioTolerancePct || 0) / 2;
+          const share = deployableUsdc / totalUsd;
+          if (share > 0.5 + tolHalf && deltaUsdc >= minSwapUsd) {
+            plannedSwap = {
+              tokenIn: this.usdc,
+              tokenOut: this.weth,
+              amountIn: parseUnits(deltaUsdc.toFixed(6), USDC_DECIMALS),
+            };
+          } else if (share < 0.5 - tolHalf) {
+            const deltaUsd = desiredUsdc - deployableUsdc;
+            const wethIn = Math.min(weth, deltaUsd / spot);
+            if (wethIn * spot >= minSwapUsd && wethIn > 0) {
+              plannedSwap = {
+                tokenIn: this.weth,
+                tokenOut: this.usdc,
+                amountIn: parseUnits(wethIn.toFixed(18), WETH_DECIMALS),
+              };
+            }
+          }
+        }
+      }
+
+      if (!plannedSwap?.amountIn || plannedSwap.amountIn <= 0n) break;
+      const swapRes = await this.swapExactInputSingle({
+        router,
+        tokenIn: plannedSwap.tokenIn,
+        tokenOut: plannedSwap.tokenOut,
+        amountIn: plannedSwap.amountIn,
+        slippageBps: this.settings.slippageBps,
+        fee: snapshot?.fee,
+        tickSpacing: snapshot?.tickSpacing,
+        snapshot,
+      });
+      if (!swapRes) break;
+      swaps.push(swapRes);
+      swapsUsed += 1;
+      if (eventType) {
+        await this.appendStrategyLifecycleEvent(eventType, {
+          positionRunId,
+          txHashes: this.activeAction?.txHashes?.length ? [this.activeAction.txHashes[this.activeAction.txHashes.length - 1]] : [],
+          details: {
+            holdTarget: target,
+            tokenIn: swapRes.tokenIn,
+            tokenOut: swapRes.tokenOut,
+            actualIn: String(swapRes.actualIn || 0n),
+            actualOut: String(swapRes.actualOut || 0n),
+            quoteOut: String(swapRes.quoteOut || 0n),
+            slippageBpsReal:
+              swapRes.slippageBpsReal == null || !Number.isFinite(Number(swapRes.slippageBpsReal))
+                ? null
+                : Number(swapRes.slippageBpsReal),
+          },
+        });
+      }
+      if (target === "WETH" || target === "USDC") break;
+    }
+
+    return { swaps, holdTarget: target };
+  }
+
+  async executeTrendEscape(primary, trendCtx, escapeEval) {
+    const currentTokenId = this.state.position?.tokenId;
+    if (!currentTokenId) return false;
+    const runId = this.ensureActivePositionRun({
+      reason: "trend_escape",
+      snapshot: primary,
+      tokenId: currentTokenId,
+    });
+    const holdTarget = escapeEval?.holdTargetIfEscape || "50_50";
+    const holdMode = this.holdModeFromTarget(holdTarget);
+    const currentBand = {
+      bandHalfBps: Number(this.state.position?.bandHalfBps || this.settings.bandHalfBps || 0),
+      tickLower: Number(this.state.position?.tickLower || 0),
+      tickUpper: Number(this.state.position?.tickUpper || 0),
+    };
+    await this.appendStrategyLifecycleEvent("TREND_ESCAPE_START", {
+      positionRunId: runId,
+      tokenId: currentTokenId,
+      band: currentBand,
+      details: {
+        reason: "trend_escape",
+        holdTarget,
+        trendMovePct: Number(trendCtx?.trendMovePct || 0),
+        direction: String(trendCtx?.direction || "flat"),
+        alphaLiveUsd: Number(escapeEval?.hodlSnapshot?.alphaLiveUsd || 0),
+        regime: {
+          label: String(trendCtx?.regimeLabel || "unknown"),
+          confidence: Number(trendCtx?.regimeConfidence || 0),
+          halfLifeSec: Number(this.state.latest?.regime?.halfLifeSec || 0) || null,
+        },
+      },
+    });
+
+    this.beginAction("trend_escape", "trend_escape");
+    let closeResult = null;
+    try {
+      let preCloseCollectable = this.state.latest?.collectableNow || { usdc: 0, weth: 0, usd: 0 };
+      try {
+        preCloseCollectable = await this.collectableNowSnapshot();
+      } catch {}
+      this.setLifecyclePhaseContext({
+        phase: "final_close",
+        positionRunId: runId,
+        tokenId: currentTokenId,
+        band: currentBand,
+      });
+      try {
+        closeResult = await this.closePosition({
+          npmAddress: this.slipstreamNpm,
+          tokenId: currentTokenId,
+          feeValueOverrideUsd: Number(preCloseCollectable?.usd || 0),
+          feeBreakdownOverride: preCloseCollectable,
+        });
+      } finally {
+        this.clearLifecyclePhaseContext();
+      }
+      this.state.position = {
+        ...this.state.position,
+        tokenId: null,
+        bandHalfBps: null,
+        tickLower: null,
+        tickUpper: null,
+        centerTick: null,
+        liquidity: null,
+        inRange: null,
+      };
+      await this.appendStrategyLifecycleEvent("TREND_ESCAPE_CLOSE_LP", {
+        positionRunId: runId,
+        tokenId: currentTokenId,
+        txHashes: Array.isArray(closeResult?.txHashes) ? closeResult.txHashes : [],
+        details: closeResult || {},
+      });
+
+      const walletSnapshot = this.state.latest?.wallet;
+      const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(Number(walletSnapshot?.valuesUsd?.total || 0));
+      await this.rebalanceWalletToTargetMix({
+        snapshot: primary,
+        router: this.slipstreamRouter,
+        target: holdTarget,
+        maxSwaps: 1,
+        reserveUsdc: holdTarget === "WETH" ? reserveTargetUsdc : 0,
+        eventType: "TREND_ESCAPE_HOLD_SWAP",
+        positionRunId: runId,
+      });
+      const holdStartedAtIso = nowIso();
+      this.setStrategyModeState(holdMode, {
+        holdStartedAtIso,
+        escapeCooldownUntilIso:
+          this.getReEntrySettings().minHoldSec >= 0
+            ? new Date(Date.now() + this.getTrendEscapeSettings().cooldownAfterEscapeSec * 1000).toISOString()
+            : null,
+      });
+      this.state.pendingEntrySnapshot = null;
+      this.setDecision({
+        action: "trend_escape",
+        reason: "trend_escape",
+        mode: holdMode,
+        holdTarget,
+        trendMovePct: Number(trendCtx?.trendMovePct || 0),
+        alphaLiveUsd: Number(escapeEval?.hodlSnapshot?.alphaLiveUsd || 0),
+      });
+      await this.refreshWalletBalancesHeavy().catch((err) => this.setLastError(err));
+      this.finalizeActiveAction("trend_escape", "trend_escape", {
+        mode: holdMode,
+        holdTarget,
+      });
+      await this.appendStrategyLifecycleEvent("TREND_ESCAPE_DONE", {
+        positionRunId: runId,
+        details: { mode: holdMode, holdTarget },
+      });
+      return true;
+    } catch (err) {
+      if (!this.state.position?.tokenId && closeResult) {
+        const holdStartedAtIso = nowIso();
+        this.setStrategyModeState("HOLD_50_50", {
+          holdStartedAtIso,
+          escapeCooldownUntilIso: new Date(
+            Date.now() + this.getTrendEscapeSettings().cooldownAfterEscapeSec * 1000
+          ).toISOString(),
+        });
+      }
+      this.finalizeActiveAction("error", "trend_escape_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+      this.setLastError(err);
+      return false;
+    }
+  }
+
+  async executeReEntry(primary, effectiveBandHalfBps, trendCtx) {
+    const runId = this.ensureActivePositionRun({
+      reason: "reentry",
+      snapshot: primary,
+      tokenId: null,
+      bandHalfBpsOverride: effectiveBandHalfBps,
+    });
+    const priorMode = this.getStrategyMode();
+    await this.appendStrategyLifecycleEvent("REENTRY_START", {
+      positionRunId: runId,
+      details: {
+        priorMode,
+        distanceFromMuPct:
+          Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
+        regime: {
+          label: String(trendCtx?.regimeLabel || "unknown"),
+          confidence: Number(trendCtx?.regimeConfidence || 0),
+          halfLifeSec: Number(this.state.latest?.regime?.halfLifeSec || 0) || null,
+        },
+      },
+    });
+    this.beginAction("reentry", "mean_reversion_reentry");
+    try {
+      await this.rebalanceSlipstream(primary, { bandHalfBps: effectiveBandHalfBps });
+      if (!this.state.position?.tokenId) {
+        throw new Error("reentry finished without active LP token");
+      }
+      this.setStrategyModeState("LP_ACTIVE", {
+        holdStartedAtIso: null,
+        escapeCooldownUntilIso: null,
+        reEntryCooldownUntilIso: new Date(
+          Date.now() + this.getReEntrySettings().cooldownAfterReEntrySec * 1000
+        ).toISOString(),
+      });
+      const mintedTokenId = String(this.state.position?.tokenId || "");
+      await this.appendStrategyLifecycleEvent("REENTRY_MINT", {
+        positionRunId: runId,
+        tokenId: mintedTokenId,
+        band: this.currentBandDescriptor(),
+        txHashes: this.activeAction?.txHashes || [],
+        details: {
+          tokenId: mintedTokenId,
+          bandHalfBps: Number(this.state.position?.bandHalfBps || effectiveBandHalfBps || 0),
+        },
+      });
+      this.setDecision({
+        action: "reentry",
+        reason: "mean_reversion_reentry",
+        mode: "LP_ACTIVE",
+        tokenId: mintedTokenId,
+      });
+      this.finalizeActiveAction("reentry", "mean_reversion_reentry", {
+        mode: "LP_ACTIVE",
+        tokenId: mintedTokenId,
+      });
+      await this.appendStrategyLifecycleEvent("REENTRY_DONE", {
+        positionRunId: runId,
+        tokenId: mintedTokenId,
+        details: { mode: "LP_ACTIVE", tokenId: mintedTokenId },
+      });
+      return true;
+    } catch (err) {
+      this.finalizeActiveAction("error", "reentry_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+      this.setLastError(err);
+      return false;
+    }
+  }
+
   async reconcilePositionFromChain() {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return;
@@ -7080,12 +7872,17 @@ class Uc6Bot {
       minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
       bandHalfBps: Number(this.settings.bandHalfBps || 0),
     };
+    const trendCtx = this.buildTrendContext(primary);
     const gate = this.getRebalanceGate({
       minRebalanceIntervalSec: effectiveThresholds.minRebalanceIntervalSec,
     });
     const trigger = this.getPositionTrigger(primary.tick, {
       edgeRebalancePct: effectiveThresholds.edgeRebalancePct,
     });
+    const strategyMode = this.getStrategyMode();
+    const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
+    const trendEscapeEval = this.buildTrendEscapeEvaluation(primary, trendCtx, { tradingAllowed });
+    const reEntryEval = this.buildReEntryEvaluation(primary, trendCtx, { tradingAllowed });
     const recoveryRetry = Boolean(this.state.forceRebalanceRecoveryPending) && trigger.reason === "no_position";
     let effectiveTrigger = forceRebalance
       ? { ...trigger, trigger: true, reason: "manual_force" }
@@ -7115,6 +7912,7 @@ class Uc6Bot {
       this.setDecision({
         action: "monitor",
         reason,
+        mode: strategyMode,
         gate: { allowed: false, reason, remainingSec: null },
       });
       this.pushEvent({ type: "blocked", reason });
@@ -7125,6 +7923,7 @@ class Uc6Bot {
       this.setDecision({
         action: "monitor",
         reason: "kill_switch_active",
+        mode: strategyMode,
         tradingEnabled: false,
         gate,
         forceRebalanceRequestedAt: forceRequestedAt,
@@ -7137,11 +7936,32 @@ class Uc6Bot {
       this.setDecision({
         action: "monitor",
         reason: effectiveTrigger.reason,
+        mode: strategyMode,
         tradingEnabled: false,
         gate,
         forceRebalanceRequestedAt: forceRequestedAt,
       });
       this.pushEvent({ type: "blocked", reason: "trading_disabled" });
+      return;
+    }
+
+    if (strategyMode !== "LP_ACTIVE") {
+      if (reEntryEval.eligible) {
+        await this.executeReEntry(primary, effectiveThresholds.bandHalfBps, trendCtx);
+        return;
+      }
+      this.setDecision({
+        action: "hold",
+        reason: reEntryEval.reasonIfBlocked || "hold_mode",
+        mode: strategyMode,
+        trendMovePct: Number.isFinite(Number(trendCtx?.trendMovePct)) ? Number(trendCtx.trendMovePct) : null,
+        reEntryEligible: Boolean(reEntryEval.eligible),
+      });
+      return;
+    }
+
+    if (trendEscapeEval.eligible) {
+      await this.executeTrendEscape(primary, trendCtx, trendEscapeEval);
       return;
     }
 
@@ -7155,6 +7975,7 @@ class Uc6Bot {
       this.setDecision({
         action: "monitor",
         reason: trigger.reason,
+        mode: strategyMode,
         edgeProgress: trigger.edgeProgress,
         gate,
       });
@@ -7173,6 +7994,7 @@ class Uc6Bot {
       this.setDecision({
         action: "skipped",
         reason: effectiveTrigger.reason,
+        mode: strategyMode,
         note: "uniswapv3 execution path is intentionally read-only in this version",
       });
       return;
@@ -7197,6 +8019,7 @@ class Uc6Bot {
       this.setDecision({
         action: "skipped",
         reason: effectiveTrigger.reason,
+        mode: strategyMode,
         gate: gateBlock,
         hodlGate: {
           alphaLiveUsd: Number(hodlGate.snapshot?.alphaLiveUsd || 0),
@@ -7412,6 +8235,15 @@ class Uc6Bot {
     const timeInRangePct = eligibleTradingMs > 0 ? inRangeEligibleMs / eligibleTradingMs : null;
     const hodlGateEval = this.evaluateHodlGateForClose();
     const hodlGateSnapshot = hodlGateEval.snapshot || this.computeHodlGateSnapshot();
+    const strategyMode = this.getStrategyMode();
+    const trendCtx = this.buildTrendContext(primary || fallback || null, { persistState: false });
+    const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
+    const trendEscapeEval = this.buildTrendEscapeEvaluation(primary || fallback || null, trendCtx, {
+      tradingAllowed,
+    });
+    const reEntryEval = this.buildReEntryEvaluation(primary || fallback || null, trendCtx, {
+      tradingAllowed,
+    });
 
     return {
       ok: true,
@@ -7456,6 +8288,8 @@ class Uc6Bot {
         dashboardRecommendedPollMs: this.settings.dashboardRecommendedPollMs,
         regime: this.settings.regime,
         hodlGate: this.settings.hodlGate,
+        trendEscape: this.settings.trendEscape,
+        reEntry: this.settings.reEntry,
         executionCaps: this.settings.executionCaps,
         gasTopUp: this.settings.gasTopUp,
         poolComparison: this.settings.poolComparison,
@@ -7576,6 +8410,34 @@ class Uc6Bot {
         },
         adviceReason: this.settings.regime?.enabled ? "regime_not_estimated_yet" : "regime_disabled",
         waitRecommended: false,
+      },
+      strategyMode,
+      trend: {
+        movePct: Number.isFinite(Number(trendCtx?.trendMovePct)) ? Number(trendCtx.trendMovePct) : null,
+        direction: String(trendCtx?.direction || "flat"),
+        lookbackSec: Number(trendCtx?.lookbackSec || this.getTrendEscapeSettings().directionLookbackSec),
+        confirmSec: Number(trendCtx?.trendingConfirmSec || 0),
+        meanRevertConfirmSec: Number(trendCtx?.meanRevertConfirmSec || 0),
+        distanceFromMuPct:
+          Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
+      },
+      trendEscape: {
+        enabled: Boolean(trendEscapeEval.enabled),
+        eligible: Boolean(trendEscapeEval.eligible),
+        holdTargetIfEscape: trendEscapeEval.holdTargetIfEscape || null,
+        reasonIfBlocked: String(trendEscapeEval.reasonIfBlocked || "ok"),
+        cooldownUntilIso: trendEscapeEval.cooldownUntilIso || null,
+      },
+      reEntry: {
+        enabled: Boolean(reEntryEval.enabled),
+        eligible: Boolean(reEntryEval.eligible),
+        reasonIfBlocked: String(reEntryEval.reasonIfBlocked || "ok"),
+        meanRevertConfirmSec: Number(reEntryEval.meanRevertConfirmSec || 0),
+        distanceFromMuPct:
+          reEntryEval.distanceFromMuPct == null || !Number.isFinite(Number(reEntryEval.distanceFromMuPct))
+            ? null
+            : Number(reEntryEval.distanceFromMuPct),
+        eligibleAtIso: reEntryEval.eligibleAtIso || null,
       },
       hodlGate: {
         enabled: Boolean(hodlGateSnapshot.enabled),
