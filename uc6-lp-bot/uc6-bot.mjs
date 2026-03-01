@@ -2214,6 +2214,8 @@ class Uc6Bot {
         closeTxHashes: [],
         allTxHashes: [],
       },
+      closeReason: null,
+      closeHoldTarget: null,
       status: "OPEN",
       notes: null,
       createdAtIso: seed.createdAtIso || nowIso(),
@@ -3073,6 +3075,18 @@ class Uc6Bot {
     rec.updatedAtIso = nowIso();
   }
 
+  applyLifecycleCloseContext(rec, { closeReason = null, closeHoldTarget = null } = {}) {
+    if (!rec) return;
+    if (closeReason != null) {
+      const nextReason = String(closeReason || "").trim();
+      if (nextReason) rec.closeReason = nextReason;
+    }
+    if (closeHoldTarget != null) {
+      const nextTarget = String(closeHoldTarget || "").trim();
+      rec.closeHoldTarget = nextTarget || null;
+    }
+  }
+
   applyLifecycleEventToRecords(ev) {
     if (!ev || typeof ev !== "object") return;
     const runId = String(ev.positionRunId || "");
@@ -3196,12 +3210,27 @@ class Uc6Bot {
         rec.activity.harvests += 1;
         this.recomputeLifecycleRecordDerived(rec);
       }
+    } else if (type === "TREND_ESCAPE_START") {
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        this.applyLifecycleCloseContext(rec, {
+          closeReason: ev.details?.reason || "trend_escape",
+          closeHoldTarget: ev.details?.holdTarget || null,
+        });
+        this.recomputeLifecycleRecordDerived(rec);
+      }
     } else if (type === "REBALANCE_START") {
       const closingTokenId = resolveTokenId(ev.tokenId, currentTokenId);
       const rec = getRecordForToken(closingTokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
         rec.activity.rebalances += 1;
+        this.applyLifecycleCloseContext(rec, {
+          closeReason: ev.details?.reason || "rebalance",
+          closeHoldTarget: null,
+        });
         this.recomputeLifecycleRecordDerived(rec);
       }
       this.getOrCreatePendingOpenForRun(runId, {
@@ -3231,6 +3260,10 @@ class Uc6Bot {
       const rec = getRecordForToken(tokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
+        this.applyLifecycleCloseContext(rec, {
+          closeReason: ev.details?.reason || rec.closeReason || "close_position",
+          closeHoldTarget: ev.details?.holdTarget || rec.closeHoldTarget || null,
+        });
         this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
         this.recomputeLifecycleRecordDerived(rec);
       }
@@ -3239,6 +3272,10 @@ class Uc6Bot {
       const rec = getRecordForToken(tokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
+        this.applyLifecycleCloseContext(rec, {
+          closeReason: rec.closeReason || ev.details?.reason || "close_position",
+          closeHoldTarget: rec.closeHoldTarget || ev.details?.holdTarget || null,
+        });
         this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
         const principalOut = ev.details?.principalOut || {};
         this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: ev.atIso || null });

@@ -206,6 +206,8 @@ type PositionLifecycleRecord = {
     closeTxHashes?: string[];
     allTxHashes?: string[];
   };
+  closeReason?: string | null;
+  closeHoldTarget?: string | null;
   status?: "OPEN" | "CLOSED" | string;
   notes?: string | null;
   createdAtIso?: string;
@@ -1952,9 +1954,8 @@ export default function Uc6Page() {
                       "Alpha vs HODL",
                       "Req Fees to Beat HODL",
                       "Cost/Fee",
-                      "Fee APR",
-                      "Alpha APR vs HODL",
-                      "Absolute APR",
+                      "Close Reason",
+                      "Hold Target",
                       "Entry/Exit Price",
                       "Actions",
                     ].map((h) => (
@@ -1967,7 +1968,7 @@ export default function Uc6Page() {
                 <tbody>
                   {closedPositionRecords.length === 0 ? (
                     <tr>
-                      <td style={styles.td} colSpan={22}>
+                      <td style={styles.td} colSpan={21}>
                         No closed position records yet.
                       </td>
                     </tr>
@@ -1982,6 +1983,12 @@ export default function Uc6Page() {
                       const netUsd = n(rec.performance?.netProfitUsd, 0);
                       const alphaVsHodlUsd = n(rec.performance?.alphaVsHodlUsd, 0);
                       const requiredFeesToBeatHodlUsd = n(rec.performance?.requiredFeesToBeatHodlUsd, 0);
+                      const closeReason = String(rec.closeReason || "—")
+                        .replaceAll("_", " ")
+                        .replace(/\b\w/g, (m) => m.toUpperCase());
+                      const closeHoldTarget = rec.closeReason === "trend_escape"
+                        ? String(rec.closeHoldTarget || "—")
+                        : "—";
                       return (
                         <tr key={rec.id}>
                           <td style={styles.td}>{`${rec.pair?.base || "WETH"}/${rec.pair?.quote || "USDC"}`}</td>
@@ -2007,9 +2014,8 @@ export default function Uc6Page() {
                           <td style={{ ...styles.td, color: alphaVsHodlUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.alphaVsHodlUsd)}</td>
                           <td style={styles.td}>{fmtUsd(requiredFeesToBeatHodlUsd)}</td>
                           <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
-                          <td style={styles.td}>{fmtPct(rec.performance?.feeApr ?? 0)}</td>
-                          <td style={styles.td}>{fmtPct(rec.performance?.alphaApr ?? 0)}</td>
-                          <td style={styles.td}>{fmtPct(rec.performance?.absoluteApr ?? rec.performance?.apr ?? 0)}</td>
+                          <td style={styles.td}>{closeReason}</td>
+                          <td style={styles.td}>{closeHoldTarget}</td>
                           <td style={styles.td}>
                             {fmtSpotPrice(rec.entry?.spotPriceUsdcPerWeth)} -&gt; {fmtSpotPrice(rec.exit?.spotPriceUsdcPerWeth)}
                           </td>
