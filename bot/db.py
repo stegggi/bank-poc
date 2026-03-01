@@ -144,6 +144,10 @@ def _classify_close_reason(tag: Optional[str], reason_json: Optional[str]) -> st
       reason_text = str(reason_json).strip().lower()
 
   blob = f"{tag_text} {reason_text}"
+  if "regime_end" in blob:
+    return "regime_end"
+  if "regime_flip" in blob:
+    return "regime_flip"
   if "confidence" in blob or "close_confidence" in blob:
     return "confidence_change"
   if (
@@ -495,6 +499,55 @@ class DailyDbManager:
     rows.sort(key=lambda x: int(x["ts_ms"]))
     return rows
 
+  def get_recent_bars(self, lookback_seconds: int, bar_seconds: int, now_ms: Optional[int] = None) -> List[Dict[str, Any]]:
+    if now_ms is None:
+      now_ms = int(time.time() * 1000)
+    lookback_seconds = max(60, int(lookback_seconds))
+    bar_seconds = max(1, int(bar_seconds))
+    from_ms = now_ms - lookback_seconds * 1000
+    bucket_ms = bar_seconds * 1000
+    ticks = self.load_ticks(from_ms, now_ms)
+    if not ticks:
+      return []
+
+    bars: List[Dict[str, Any]] = []
+    bucket_t: Optional[int] = None
+    prices: List[float] = []
+    volume_count = 0
+
+    def _flush(bucket_time: Optional[int], bucket_prices: List[float], tick_count: int) -> None:
+      if bucket_time is None or not bucket_prices:
+        return
+      bars.append(
+        {
+          "t": int(bucket_time),
+          "o": float(bucket_prices[0]),
+          "h": float(max(bucket_prices)),
+          "l": float(min(bucket_prices)),
+          "c": float(bucket_prices[-1]),
+          "v": float(tick_count),
+        }
+      )
+
+    for row in ticks:
+      ts_ms = int(row.get("ts_ms") or 0)
+      price = _f(row.get("price"))
+      if price is None or price <= 0:
+        continue
+      current_bucket = (ts_ms // bucket_ms) * bucket_ms
+      if bucket_t is None:
+        bucket_t = current_bucket
+      if current_bucket != bucket_t:
+        _flush(bucket_t, prices, volume_count)
+        bucket_t = current_bucket
+        prices = []
+        volume_count = 0
+      prices.append(float(price))
+      volume_count += 1
+
+    _flush(bucket_t, prices, volume_count)
+    return bars
+
   def load_latest_metric(self, now_ms: Optional[int] = None) -> Dict[str, Any]:
     if now_ms is None:
       now_ms = int(time.time() * 1000)
@@ -672,10 +725,11 @@ class DailyDbManager:
         markers.append(marker)
 
     confidence: List[Dict[str, Any]] = []
+    regime_strength: List[Dict[str, Any]] = []
     for conn in self._connections_for_range(from_ms, now_ms):
       cur = conn.execute(
         """
-        SELECT ts_ms, p_up
+        SELECT ts_ms, p_up, regime, desired, reason
         FROM decisions
         WHERE ts_ms >= ? AND ts_ms <= ? AND p_up IS NOT NULL
         ORDER BY ts_ms ASC
@@ -687,15 +741,27 @@ class DailyDbManager:
           p_up = float(r[1])
         except Exception:
           continue
+        state = str(r[2] or "")
+        desired = str(r[3] or "")
         confidence.append(
           {
             "t": int(r[0]),
             "pUp": max(0.0, min(1.0, p_up)),
           }
         )
+        regime_strength.append(
+          {
+            "t": int(r[0]),
+            "strength": max(0.0, min(1.0, p_up)),
+            "state": state,
+            "direction": ("UP" if desired == "LONG" else ("DOWN" if desired == "SHORT" else None)),
+            "reason": str(r[4] or ""),
+          }
+        )
 
     markers.sort(key=lambda x: int(x["t"]))
     confidence.sort(key=lambda x: int(x["t"]))
+    regime_strength.sort(key=lambda x: int(x["t"]))
     wanted_days = set(self._days_for_range(from_ms, now_ms))
     present_days = {
       day_key
@@ -707,6 +773,7 @@ class DailyDbManager:
       "candles": candles[-1440:],
       "markers": markers[-500:],
       "confidence": _downsample_series(confidence, 3000),
+      "regimeStrength": _downsample_series(regime_strength, 3000),
       "partial24h": partial_24h,
       "missingDays": sorted(list(wanted_days - present_days)),
     }
@@ -777,6 +844,8 @@ class DailyDbManager:
     day_ago = now_ms - 24 * 60 * 60 * 1000
     realized_24h = sum(float(p or 0.0) for (ts, p) in closed if ts >= day_ago and p is not None)
     closed_by_confidence = sum(1 for r in close_reasons if r == "confidence_change")
+    closed_by_regime_end = sum(1 for r in close_reasons if r == "regime_end")
+    closed_by_regime_flip = sum(1 for r in close_reasons if r == "regime_flip")
     closed_by_risk = sum(1 for r in close_reasons if r == "risk_loop")
     closed_by_other = sum(1 for r in close_reasons if r == "other")
 
@@ -788,6 +857,8 @@ class DailyDbManager:
       "realizedPnlTotal": sum(pnls) if pnls else 0.0,
       "realizedPnlToday": realized_24h,
       "closedByConfidence": closed_by_confidence,
+      "closedByRegimeEnd": closed_by_regime_end,
+      "closedByRegimeFlip": closed_by_regime_flip,
       "closedByRiskLoop": closed_by_risk,
       "closedByOther": closed_by_other,
     }

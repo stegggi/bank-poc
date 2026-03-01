@@ -14,8 +14,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (req.method === "POST") {
     try {
       const body = req.body || {};
-      const cfg = Uc5ConfigSchema.parse(body.config);
       const current = await getVmConfigCached(15_000);
+      const rawCfg = body.config;
+      if (!rawCfg || typeof rawCfg !== "object" || Array.isArray(rawCfg)) {
+        return res.status(400).json({ error: "Invalid config payload" });
+      }
 
       const owner = current.ownerAddress || process.env.UC5_OWNER_ADDRESS || process.env.NEXT_PUBLIC_UC5_OWNER_ADDRESS || "";
       if (!owner) return res.status(400).json({ error: "Missing UC5_OWNER_ADDRESS" });
@@ -28,10 +31,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         action: "SET_CONFIG",
         nonce: auth.nonce || "",
         issuedAt: Number(auth.issuedAt || 0),
-        payload: cfg,
+        payload: rawCfg,
       });
 
       if (!v.ok) return res.status(403).json({ error: v.error || "Forbidden" });
+
+      const cfg = Uc5ConfigSchema.parse({
+        ...current,
+        ...rawCfg,
+      });
 
       // Keep owner stable; only owner wallet can update config.
       // Preserve signer-link state from current config so normal "Save settings"
@@ -41,6 +49,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ownerAddress: normAddr(owner),
         botSignerAddress: current.botSignerAddress || "",
         botSignerLinked: Boolean(current.botSignerLinked),
+        pollIntervalSeconds: Math.max(1, Math.round(Number(cfg.ingestIntervalSec || current.ingestIntervalSec || 0.5))),
+        reassessIntervalSec: Number(cfg.inPositionReassessIntervalSec || current.inPositionReassessIntervalSec || 8),
+        cooldownAfterCloseSec: Number(cfg.flipCooldownSec || current.flipCooldownSec || current.cooldownAfterCloseSec || 15),
+        entryMakerPreferred: true,
+        entryMarketFallbackEnabled: false,
+        minExpectedMoveBps: 0,
+        edgeCostMultiplier: 0,
+        emergencyBreakoutEnabled: false,
       };
 
       await postVmConfig(nextCfg);

@@ -35,6 +35,10 @@ export function defaultUc5Config(): Uc5Config {
     killSwitch: false,
     pollIntervalSeconds: 1,
     ingestIntervalSec: Number(process.env.UC5_INGEST_INTERVAL_SEC || 0.5),
+    regimeLookbackSeconds: 1800,
+    regimeBarSeconds: 1,
+    trendEntryStrength: 0.7,
+    flipCooldownSec: 15,
     reassessIntervalSec: 8,
     decisionLoopIntervalSec: 4,
     inPositionReassessIntervalSec: 8,
@@ -244,9 +248,10 @@ export type VmChartResponse = {
     type: "ENTRY" | "EXIT";
     side?: string | null;
     eventType?: string;
-    closeReason?: "confidence_change" | "risk_loop" | "other";
+    closeReason?: "regime_end" | "regime_flip" | "confidence_change" | "risk_loop" | "other";
   }>;
   confidence?: Array<{ t: number; pUp: number }>;
+  regimeStrength?: Array<{ t: number; strength: number; state: string; direction?: string | null; reason?: string }>;
   partial24h?: boolean;
   missingDays?: string[];
 };
@@ -270,6 +275,8 @@ export type VmTradesSummary = {
   avgLoss: number;
   realizedPnlTotal: number;
   realizedPnlToday: number;
+  closedByRegimeEnd: number;
+  closedByRegimeFlip: number;
   closedByConfidence: number;
   closedByRiskLoop: number;
   closedByOther: number;
@@ -309,7 +316,7 @@ export async function getVmTradingCached(ttlMs = 2_000): Promise<VmTradingStatus
 export async function getVmChartCached(range = "24h", resolution = "1m", ttlMs = 4_000): Promise<VmChartResponse> {
   const key = `chart:${range}:${resolution}`;
   const path = `/uc5/chart?range=${encodeURIComponent(range)}&resolution=${encodeURIComponent(resolution)}`;
-  return getVmJsonCached<VmChartResponse>(key, path, ttlMs, { candles: [], markers: [], confidence: [] });
+  return getVmJsonCached<VmChartResponse>(key, path, ttlMs, { candles: [], markers: [], confidence: [], regimeStrength: [] });
 }
 
 export async function getVmPortfolioCached(ttlMs = 3_000): Promise<VmPortfolio> {
@@ -324,6 +331,8 @@ export async function getVmTradesSummaryCached(ttlMs = 5_000): Promise<VmTradesS
     avgLoss: 0,
     realizedPnlTotal: 0,
     realizedPnlToday: 0,
+    closedByRegimeEnd: 0,
+    closedByRegimeFlip: 0,
     closedByConfidence: 0,
     closedByRiskLoop: 0,
     closedByOther: 0,

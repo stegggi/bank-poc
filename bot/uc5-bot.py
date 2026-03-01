@@ -20,6 +20,7 @@ import math
 import uuid
 import asyncio
 import threading
+from pathlib import Path
 from decimal import Decimal, ROUND_DOWN, ROUND_UP
 from urllib.parse import parse_qs, urlparse
 from typing import Any, Dict, List, Optional, Tuple
@@ -39,12 +40,12 @@ except Exception:
 from db import DailyDbManager
 from strategy import (
   PositionState,
-  SignalResult,
+  RegimeDecision,
   StrategyConfig,
   clamp,
+  desired_position_from_regime,
   evaluate_risk_exit,
-  make_signal,
-  should_close_for_confidence,
+  should_exit_for_regime,
   size_liquidity_multiplier,
   update_position_extremes,
 )
@@ -141,7 +142,10 @@ RUNTIME_CONFIG_PATH = os.environ.get(
 TELEMETRY_HOST = os.environ.get("UC5_TELEMETRY_HOST", "0.0.0.0")
 TELEMETRY_PORT = int(os.environ.get("UC5_TELEMETRY_PORT", "8787"))
 WS_STALE_RECONNECT_MS = int(os.environ.get("UC5_WS_STALE_RECONNECT_MS", "15000"))
-BOT_VERSION = "uc5-bot/1.0 (maker-chase+ws-quotes+daily-db)"
+BOT_DIR = Path(__file__).resolve().parent
+NODE_BIN = os.environ.get("UC5_NODE_BIN", "node")
+REGIME_RUNNER_PATH = str(BOT_DIR / "regime_runner.mjs")
+BOT_VERSION = "uc5-bot/2.0 (regime-node+maker-chase+ws-quotes+daily-db)"
 
 if not BOT_TOKEN:
   raise SystemExit("Missing env: UC5_BOT_TOKEN")
@@ -222,6 +226,10 @@ def default_runtime_config() -> Dict[str, Any]:
     "killSwitch": False,
     "pollIntervalSeconds": 1,
     "ingestIntervalSec": float(ingest_default),
+    "regimeLookbackSeconds": 1800,
+    "regimeBarSeconds": 1,
+    "trendEntryStrength": 0.70,
+    "flipCooldownSec": 15,
     "predictionHorizonSeconds": 30,
     "reassessIntervalSec": 8,
     "decisionLoopIntervalSec": 4,
@@ -327,6 +335,11 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["pollIntervalSeconds"] = max(1, int(round(_to_float(base.get("ingestIntervalSec", 0.5), 0.5))))
 
   base["ingestIntervalSec"] = clamp(_to_float(base.get("ingestIntervalSec", 0.5), 0.5), 0.2, 60.0)
+  base["regimeLookbackSeconds"] = clamp(_to_int(base.get("regimeLookbackSeconds", 1800), 1800), 60, 86400)
+  base["regimeBarSeconds"] = clamp(_to_int(base.get("regimeBarSeconds", 1), 1), 1, 60)
+  base["trendEntryStrength"] = clamp(_to_float(base.get("trendEntryStrength", 0.70), 0.70), 0.5, 0.99)
+  legacy_flip_cooldown = _to_int(base.get("cooldownAfterCloseSec", 15), 15)
+  base["flipCooldownSec"] = clamp(_to_int(base.get("flipCooldownSec", legacy_flip_cooldown), legacy_flip_cooldown), 0, 600)
   base["riskLoopIntervalSec"] = clamp(_to_int(base.get("riskLoopIntervalSec", 1), 1), 1, 5)
   base["decisionLoopIntervalSec"] = clamp(_to_int(base.get("decisionLoopIntervalSec", 4), 4), 3, 60)
 
@@ -528,11 +541,15 @@ def confidence_band(conf: float) -> str:
   return "LOW"
 
 
-def explain_agent_reason(raw_reason: str, desired: str, conf: float) -> Tuple[str, str]:
-  conf_pct = int(clamp(conf, 0.0, 1.0) * 100)
+def explain_agent_reason(raw_reason: str, desired: str, conf: float, regime_state: str, regime_direction: Optional[str]) -> Tuple[str, str]:
+  strength_pct = int(clamp(conf, 0.0, 1.0) * 100)
   band = "High" if conf >= 0.75 else ("Medium" if conf >= 0.6 else "Low")
-  direction = {"LONG": "bullish", "SHORT": "bearish", "FLAT": "neutral"}.get(desired, "neutral")
-  human = f"{band} confidence ({conf_pct}%). Model is {direction}."
+  if regime_state == "TREND":
+    human = f"{band} trend strength ({strength_pct}%). Regime is trending {str(regime_direction or '').lower() or 'unknown'}."
+  elif regime_state == "RANGE":
+    human = f"{band} range strength ({strength_pct}%). Regime is non-trending."
+  else:
+    human = f"{band} regime strength ({strength_pct}%). Regime is unknown."
   return human, raw_reason
 
 
@@ -1625,24 +1642,6 @@ def _calc_limit_price(
   return quantize_price_to_tick(float(mid), tick_size, side_int, aggressive=aggressive)
 
 
-def _estimate_expected_move_bps(signal: SignalResult, horizon_sec: int) -> float:
-  conf = clamp(abs(float(signal.p_up) - 0.5) * 2.0, 0.0, 1.0)
-  horizon = max(10.0, float(horizon_sec))
-
-  feats = signal.features if isinstance(signal.features, list) else []
-  abs_rets = [abs(float(feats[i])) for i in range(min(4, len(feats)))]
-  ret_move_bps = (max(abs_rets) * 10_000.0) if abs_rets else 0.0
-
-  atr_move_bps = max(0.0, float(signal.atr_pct)) * 10_000.0 * math.sqrt(horizon / 10.0)
-  regime_mult = 1.10 if signal.regime == "momentum" else (0.95 if signal.regime == "mean_reversion" else 0.80)
-
-  est = max(
-    ret_move_bps * (0.35 + 0.95 * conf),
-    atr_move_bps * (0.30 + 0.90 * conf) * regime_mult,
-  )
-  return max(0.0, float(est))
-
-
 def _realized_pnl(side: Optional[str], entry_price: Optional[float], exit_price: Optional[float], qty: float) -> Optional[float]:
   if not side or not entry_price or not exit_price or qty <= 0:
     return None
@@ -1843,6 +1842,87 @@ async def _run_ws_book_depth_loop(
           await ws_client.close()
         except Exception:
           pass
+
+
+class NodeRegimeRunner:
+  def __init__(self, node_bin: str, runner_path: str) -> None:
+    self.node_bin = str(node_bin or "node")
+    self.runner_path = str(runner_path)
+    self.proc: Optional[asyncio.subprocess.Process] = None
+    self._lock = asyncio.Lock()
+    self._req_id = 0
+    self._stderr_task: Optional[asyncio.Task] = None
+
+  async def ensure_started(self) -> None:
+    if self.proc is not None and self.proc.returncode is None:
+      return
+    if not os.path.exists(self.runner_path):
+      raise RuntimeError(f"Missing regime runner: {self.runner_path}")
+    self.proc = await asyncio.create_subprocess_exec(
+      self.node_bin,
+      self.runner_path,
+      stdin=asyncio.subprocess.PIPE,
+      stdout=asyncio.subprocess.PIPE,
+      stderr=asyncio.subprocess.PIPE,
+      cwd=os.path.dirname(self.runner_path),
+    )
+    if self.proc.stderr is not None:
+      self._stderr_task = asyncio.create_task(self._drain_stderr())
+
+  async def _drain_stderr(self) -> None:
+    assert self.proc is not None
+    assert self.proc.stderr is not None
+    while True:
+      line = await self.proc.stderr.readline()
+      if not line:
+        return
+      msg = line.decode("utf-8", errors="replace").strip()
+      if msg:
+        print(f"[REGIME_NODE] {msg}")
+
+  async def stop(self) -> None:
+    proc = self.proc
+    self.proc = None
+    if proc is None:
+      return
+    try:
+      proc.terminate()
+      await asyncio.wait_for(proc.wait(), timeout=3.0)
+    except Exception:
+      try:
+        proc.kill()
+      except Exception:
+        pass
+    if self._stderr_task is not None:
+      self._stderr_task.cancel()
+      self._stderr_task = None
+
+  async def evaluate(self, payload: Dict[str, Any], timeout_sec: float = 5.0) -> Dict[str, Any]:
+    async with self._lock:
+      await self.ensure_started()
+      assert self.proc is not None and self.proc.stdin is not None and self.proc.stdout is not None
+      self._req_id += 1
+      req_id = self._req_id
+      req = {"id": req_id, "payload": payload}
+      self.proc.stdin.write((json.dumps(req) + "\n").encode("utf-8"))
+      await self.proc.stdin.drain()
+      try:
+        raw_line = await asyncio.wait_for(self.proc.stdout.readline(), timeout=timeout_sec)
+      except Exception:
+        await self.stop()
+        raise
+      if not raw_line:
+        await self.stop()
+        raise RuntimeError("Node regime runner exited without response")
+      resp = json.loads(raw_line.decode("utf-8"))
+      if int(resp.get("id") or -1) != req_id:
+        raise RuntimeError(f"Node regime runner response id mismatch: expected {req_id}, got {resp.get('id')}")
+      if not bool(resp.get("ok")):
+        raise RuntimeError(str(resp.get("error") or "regime runner error"))
+      result = resp.get("result")
+      if not isinstance(result, dict):
+        raise RuntimeError("regime runner returned invalid result")
+      return result
 
 
 def _maker_touch_price(
@@ -2354,8 +2434,8 @@ async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[
 
 def _build_strategy_cfg(cfg: Dict[str, Any]) -> StrategyConfig:
   return StrategyConfig(
-    open_confidence_threshold=float(cfg.get("openConfidenceThreshold", 0.65)),
-    close_confidence_threshold=float(cfg.get("closeConfidenceThreshold", 0.55)),
+    trend_entry_strength=float(cfg.get("trendEntryStrength", 0.70)),
+    flip_cooldown_sec=int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))),
     min_hold_seconds=int(cfg.get("minHoldSeconds", 5)),
     max_hold_seconds=int(cfg.get("maxHoldSeconds", 7200)),
     stop_loss_pct=_to_opt_float(cfg.get("stopLossPct")),
@@ -2365,6 +2445,53 @@ def _build_strategy_cfg(cfg: Dict[str, Any]) -> StrategyConfig:
     trailing_stop_pct=_to_opt_float(cfg.get("trailingStopPct")),
     max_spread_bps_for_trade=float(cfg.get("maxSpreadBpsForTrade", 12.0)),
   )
+
+
+def _regime_from_runner_result(result: Dict[str, Any], now_ms: int) -> RegimeDecision:
+  state = str(result.get("state") or "UNKNOWN").upper()
+  if state not in ("TREND", "RANGE", "UNKNOWN"):
+    state = "UNKNOWN"
+  direction = str(result.get("direction") or "").upper()
+  if direction not in ("UP", "DOWN"):
+    direction = None
+  return RegimeDecision(
+    state=state,
+    direction=direction,
+    strength=clamp(float(result.get("strength") or 0.0), 0.0, 1.0),
+    reason=str(result.get("reason") or ""),
+    ts_ms=int(result.get("ts") or now_ms),
+  )
+
+
+async def evaluate_regime(
+  regime_runner: NodeRegimeRunner,
+  cfg: Dict[str, Any],
+  now_ms: int,
+) -> Tuple[RegimeDecision, List[Dict[str, Any]]]:
+  lookback_seconds = int(cfg.get("regimeLookbackSeconds", 1800))
+  bar_seconds = int(cfg.get("regimeBarSeconds", 1))
+  bars = DB_MANAGER.get_recent_bars(lookback_seconds, bar_seconds, now_ms=now_ms)
+  if not bars:
+    return (
+      RegimeDecision(
+        state="UNKNOWN",
+        direction=None,
+        strength=0.0,
+        reason="no bars",
+        ts_ms=now_ms,
+      ),
+      [],
+    )
+
+  result = await regime_runner.evaluate(
+    {
+      "bars": bars,
+      "regimeLookbackSeconds": lookback_seconds,
+      "regimeBarSeconds": bar_seconds,
+      "trendHalfLifeMinSec": max(60, int(min(lookback_seconds, 900))),
+    }
+  )
+  return (_regime_from_runner_result(result, now_ms), bars)
 
 
 async def main():
@@ -2377,6 +2504,7 @@ async def main():
     raise SystemExit("Missing env UC5_BOT_SIGNER_PRIVATE_KEY (bot signer private key).")
 
   client: Optional[AsyncRESTClient] = None
+  regime_runner = NodeRegimeRunner(NODE_BIN, REGIME_RUNNER_PATH)
   ws_quote_cache = WsQuoteCache()
   ws_quote_task: Optional[asyncio.Task] = None
   cached_product_id = ""
@@ -2396,8 +2524,10 @@ async def main():
 
   last_reason = "warming up"
   last_desired = "FLAT"
-  last_conf = 0.5
-  last_regime = "no_data"
+  last_conf = 0.0
+  last_regime_state = "UNKNOWN"
+  last_regime_direction: Optional[str] = None
+  last_regime_change_ms: Optional[int] = None
 
   last_decision_at_ms: Optional[int] = None
   next_decision_ms = 0
@@ -2412,6 +2542,8 @@ async def main():
   current_trade_entry_price: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
+  last_regime_exit_ts_ms: Optional[int] = None
+  last_regime_exit_reason: Optional[str] = None
   last_entry_fill_audit: Optional[Dict[str, Any]] = None
   last_exit_fill_audit: Optional[Dict[str, Any]] = None
   fills_audit_last20: Optional[Dict[str, Any]] = None
@@ -2760,7 +2892,7 @@ async def main():
             mark_price=float(last_mid),
             atr_pct=float(metrics_cache.get("atrPct") or 0.0),
             now_ms=now_ms,
-            min_hold_enforced=True,
+            min_hold_enforced=False,
           )
           if risk_result.should_exit and position_state.side and position_state.qty > 0:
             cerr = await ensure_client_ready()
@@ -2865,7 +2997,7 @@ async def main():
                 "info": {"error": cerr or "SDK client unavailable"},
               }
 
-      # Decision loop (flat) every ~3-5s default
+      # Regime loop while flat: only TREND opens are allowed.
       if (
         not position_state.open
         and trading_enabled
@@ -2875,30 +3007,36 @@ async def main():
         and now_ms >= next_decision_ms
       ):
         next_decision_ms = now_ms + int(cfg.get("decisionLoopIntervalSec", 4)) * 1000
-
-        ticks = DB_MANAGER.load_ticks(now_ms - (6 * 60 * 60 * 1000), now_ms)
-        latest_metric = DB_MANAGER.load_latest_metric(now_ms)
-        merged_metric = {**metrics_cache, **latest_metric}
-
         strategy_cfg = _build_strategy_cfg(cfg)
-        signal = make_signal(ticks=ticks, metrics=merged_metric, cfg=strategy_cfg, now_ms=now_ms)
+        regime_decision, _bars = await evaluate_regime(regime_runner, cfg, now_ms)
+        desired = desired_position_from_regime(regime_decision, strategy_cfg)
+
+        if (regime_decision.state, regime_decision.direction) != (last_regime_state, last_regime_direction):
+          last_regime_change_ms = int(regime_decision.ts_ms or now_ms)
 
         last_decision_at_ms = now_ms
-        last_reason = signal.reason
-        last_desired = signal.desired
-        last_conf = float(signal.p_up)
-        last_regime = signal.regime
-        metrics_cache["regime"] = signal.regime
-        metrics_cache["atrPct"] = signal.atr_pct
+        last_reason = regime_decision.reason
+        last_desired = desired
+        last_conf = float(regime_decision.strength)
+        last_regime_state = regime_decision.state
+        last_regime_direction = regime_decision.direction
+        metrics_cache["regime"] = regime_decision.state
 
         DB_MANAGER.insert_decision(
           ts_ms=now_ms,
-          p_up=signal.p_up,
-          desired=signal.desired,
-          regime=signal.regime,
-          reason=signal.reason,
-          horizon_sec=int(cfg.get("predictionHorizonSeconds", 30)),
-          features=signal.features,
+          p_up=regime_decision.strength,
+          desired=desired,
+          regime=regime_decision.state,
+          reason=regime_decision.reason,
+          horizon_sec=int(cfg.get("regimeLookbackSeconds", 1800)),
+          features=[
+            float(1.0 if regime_decision.state == "TREND" else 0.0),
+            float(1.0 if regime_decision.direction == "UP" else (-1.0 if regime_decision.direction == "DOWN" else 0.0)),
+            float(regime_decision.strength),
+            0.0,
+            0.0,
+            0.0,
+          ],
         )
 
         max_daily_loss = float(cfg.get("maxDailyLossUsd", 0.0))
@@ -2906,10 +3044,16 @@ async def main():
         realized_today = DB_MANAGER.query_realized_pnl_since(day_start_ms)
         daily_loss_hit = max_daily_loss > 0 and realized_today <= -abs(max_daily_loss)
 
-        # order rate cap
         now_sec = time.time()
         last_order_ts[:] = [x for x in last_order_ts if now_sec - x < 3600]
         can_open = len(last_order_ts) < int(cfg.get("maxOrdersPerHour", 120))
+        flip_cooldown_sec = int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15)))
+        cooldown_until_ms = (
+          (int(last_regime_exit_ts_ms) + flip_cooldown_sec * 1000)
+          if (last_regime_exit_ts_ms and flip_cooldown_sec > 0)
+          else None
+        )
+        in_cooldown = bool(cooldown_until_ms is not None and now_ms < int(cooldown_until_ms))
 
         if daily_loss_hit:
           last_action = {
@@ -2917,281 +3061,231 @@ async def main():
             "ok": False,
             "info": {"realizedToday": realized_today, "maxDailyLossUsd": max_daily_loss},
           }
-        elif signal.desired in ("LONG", "SHORT") and can_open:
-          directional_prob = float(signal.p_up) if signal.desired == "LONG" else (1.0 - float(signal.p_up))
-          expected_move_bps = _estimate_expected_move_bps(signal, int(cfg.get("predictionHorizonSeconds", 30)))
-          fee_bps = float(cfg.get("feeEstimateBps", 3.0))
-          slippage_bps = float(cfg.get("slippageBufferBps", 4.0))
-          edge_mult = float(cfg.get("edgeCostMultiplier", 0.0))
-          min_expected_move_bps = float(cfg.get("minExpectedMoveBps", 0.0))
-          cost_bps = max(0.0, fee_bps) + max(0.0, float(signal.spread_bps)) + max(0.0, slippage_bps)
-          required_move_bps = 0.0
-          if edge_mult > 0 or min_expected_move_bps > 0:
-            required_move_bps = max(max(0.0, min_expected_move_bps), max(0.0, edge_mult) * cost_bps)
-          cooldown_after_close_sec = int(cfg.get("cooldownAfterCloseSec", 5))
-          cooldown_until_ms = (
-            (int(last_close_ts_ms) + cooldown_after_close_sec * 1000)
-            if (last_close_ts_ms and cooldown_after_close_sec > 0)
-            else None
-          )
-          in_cooldown = bool(cooldown_until_ms is not None and now_ms < int(cooldown_until_ms))
-
-          emergency_breakout = False
-          if in_cooldown:
-            emergency_breakout = (
-              bool(cfg.get("emergencyBreakoutEnabled", False))
-              and signal.regime == "momentum"
-              and directional_prob >= float(cfg.get("emergencyBreakoutMinProb", 0.94))
-              and signal.atr_pctile >= float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85))
-              and expected_move_bps >= max(required_move_bps, float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)))
-              and signal.spread_bps <= float(cfg.get("maxSpreadBpsForTrade", 12.0))
-            )
-
-          if in_cooldown and not emergency_breakout:
-            last_action = {
-              "type": "COOLDOWN_ACTIVE",
-              "ok": True,
-              "info": {
-                "cooldownAfterCloseSec": cooldown_after_close_sec,
-                "cooldownUntil": cooldown_until_ms,
-                "cooldownRemainingSec": to_countdown_sec(cooldown_until_ms, now_ms),
-                "directionalProb": directional_prob,
-              },
-            }
-          elif required_move_bps > 0 and expected_move_bps < required_move_bps:
-            last_action = {
-              "type": "EDGE_FILTER_BLOCKED",
-              "ok": True,
-              "info": {
-                "expectedMoveBps": expected_move_bps,
-                "requiredMoveBps": required_move_bps,
-                "costBps": cost_bps,
-                "spreadBps": signal.spread_bps,
-                "feeEstimateBps": fee_bps,
-                "slippageBufferBps": slippage_bps,
-                "edgeMultiplier": edge_mult,
-                "cooldownBypassed": emergency_breakout,
-              },
-            }
-          else:
-            snap = fetch_portfolio_snapshot(eth_base, sub_id)
-            avail = _f(snap.get("availableMarginUsd"))
-            pv = _f(snap.get("portfolioValueUsd"))
-
-            max_margin = float(cfg.get("maxMarginUsd", 100.0))
-            if pv and pv > 0:
-              max_margin = min(max_margin, pv * float(cfg.get("maxMarginPct", 25.0)) / 100.0)
-            if avail is not None:
-              max_margin = min(max_margin, avail)
-
-            confidence = clamp(abs(signal.p_up - 0.5) * 2.0, 0.0, 1.0)
-            size_mult = size_liquidity_multiplier(signal.spread_bps, signal.liquidity_score)
-            if signal.spread_bps > float(cfg.get("maxSpreadBpsForTrade", 12.0)):
-              size_mult = 0.0
-
-            notional = max_margin * float(cfg.get("maxLeverage", 2.0)) * confidence * size_mult
-            qty_raw = (notional / float(last_mid)) if last_mid and last_mid > 0 else 0.0
-            qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
-
-            if qty > 0:
-              cerr = await ensure_client_ready()
-              if not cerr and client is not None:
-                guard_ms = int(cfg.get("orderGuardMs", 200))
-                if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
-                  await asyncio.sleep(0.2)
-
-                side_int = _side_to_int(signal.desired)
-                exec_result = await execute_maker_chase(
-                  client=client,
-                  eth_base=eth_base,
-                  sub_id=sub_id,
-                  product_id=product_id,
-                  ticker=ticker,
-                  sender=owner_addr,
-                  subaccount=subaccount_name,
-                  order_side_int=side_int,
-                  target_qty=qty,
-                  lot_size=cached_lot_size,
-                  tick_size=cached_tick_size,
-                  last_mid=last_mid,
-                  last_bid=last_bid,
-                  last_ask=last_ask,
-                  quote_cache=ws_quote_cache,
-                  chase_max_sec=float(cfg.get("entryChaseMaxSec", 10.0)),
-                  reprice_ms=int(cfg.get("executionRepriceMs", 350)),
-                  gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
-                  last_order_submit_ms=last_order_submit_ms,
-                  order_guard_ms=guard_ms,
-                  position_mode="entry",
-                  expected_side=signal.desired,
-                  reduce_only=False,
-                  allow_market_safety=False,
-                  min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
-                  replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
-                  improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
-                  improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
-                  entry_min_fill_ratio=float(cfg.get("entryMinFillRatio", 0.50)),
-                )
-                last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
-                _print_chase_attempts(f"ENTRY_{signal.desired}", exec_result)
-                maker_entry_chases += 1
-                filled = float(exec_result.get("filledQty") or 0.0)
-                remain = float(exec_result.get("remainingQty") or 0.0)
-                submitted_any = int(exec_result.get("submittedCount") or 0) > 0
-                maker_err = "; ".join([str(x) for x in (exec_result.get("errors") or []) if x])[:500]
-                used_market_fallback = False
-
-                pos_final = fetch_active_position(eth_base, sub_id, product_id)
-                of, sf, szf, _, epf, etsf = parse_position(pos_final)
-                opened_qty = abs(float(szf)) if of and sf == signal.desired else 0.0
-                try:
-                  last_entry_fill_audit = await fetch_fills_audit(
-                    client,
-                    sub_id,
-                    product_id,
-                    limit=20,
-                    created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
-                  )
-                  fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
-                  _print_maker_audit("ENTRY", last_entry_fill_audit or {})
-                  _print_maker_audit("LAST20", fills_audit_last20 or {})
-                  fills_list = (last_entry_fill_audit or {}).get("fills") if isinstance(last_entry_fill_audit, dict) else []
-                  if isinstance(fills_list, list) and fills_list and isinstance(fills_list[0], dict):
-                    last_entry_fill_info = fills_list[0]
-                except Exception:
-                  pass
-
-                if opened_qty <= 0:
-                  if bool(exec_result.get("timedOut")):
-                    maker_entry_timeouts += 1
-                  if submitted_any:
-                    last_order_ts.append(time.time())
-                  last_action = {
-                    "type": "SKIP_ENTRY_UNFILLED",
-                    "ok": True,
-                    "info": {
-                      "desired": signal.desired,
-                      "qty": qty,
-                      "filled": filled,
-                      "remain": remain,
-                      "preferMaker": True,
-                      "marketFallbackAllowed": False,
-                      "marketFallbackUsed": False,
-                      "directionalProb": directional_prob,
-                      "fallbackMinProb": None,
-                      "makerError": maker_err or None,
-                      "expectedMoveBps": expected_move_bps,
-                      "requiredMoveBps": required_move_bps,
-                      "chaseAttempts": int(exec_result.get("attemptCount") or 0),
-                    },
-                  }
-                else:
-                  maker_entry_opened += 1
-                  if bool(exec_result.get("acceptedPartial")):
-                    maker_entry_partial_accepts += 1
-                  ttf = exec_result.get("timeToFirstFillMs")
-                  try:
-                    ttf_i = int(ttf) if ttf is not None else None
-                  except Exception:
-                    ttf_i = None
-                  if ttf_i is not None and ttf_i >= 0:
-                    maker_entry_ttf_ms_samples.append(ttf_i)
-                    if len(maker_entry_ttf_ms_samples) > 200:
-                      maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
-                  entry_px = float(last_mid)
-                  if epf and epf > 0:
-                    entry_px = epf
-
-                  entry_mode = "maker"
-                  if opened_qty > filled > 0:
-                    entry_mode = "maker_partial"
-
-                  DB_MANAGER.insert_trade_event(
-                    trade_id=str(uuid.uuid4()),
-                    ts_ms=now_ms,
-                    event_type="ENTRY",
-                    side=signal.desired,
-                    qty=opened_qty,
-                    price=entry_px,
-                    pnl=None,
-                    tag="model_entry",
-                    reason_json=json.dumps(
-                      {
-                        "reason": signal.reason,
-                        "regime": signal.regime,
-                        "p_up": signal.p_up,
-                        "openThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
-                        "expectedMoveBps": expected_move_bps,
-                        "requiredMoveBps": required_move_bps,
-                        "costBps": cost_bps,
-                        "entryMode": entry_mode,
-                        "makerFilledQty": filled,
-                        "marketFallbackUsed": False,
-                        "cooldownBypassed": emergency_breakout,
-                        "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
-                        "entryTimedOut": bool(exec_result.get("timedOut")),
-                        "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
-                        "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
-                      }
-                    ),
-                    entry_ts=etsf or now_ms,
-                    entry_price=entry_px,
-                  )
-
-                  current_trade_entry_price = entry_px
-                  current_trade_entry_ts = etsf or now_ms
-                  if submitted_any:
-                    last_order_ts.append(time.time())
-
-                  last_action = {
-                    "type": f"OPEN_{signal.desired}",
-                    "ok": True,
-                    "info": {
-                      "qty": opened_qty,
-                      "qtyRaw": qty_raw,
-                      "lotSize": cached_lot_size,
-                      "tickSize": cached_tick_size,
-                      "confidence": confidence,
-                      "sizeMultiplier": size_mult,
-                      "expectedMoveBps": expected_move_bps,
-                      "requiredMoveBps": required_move_bps,
-                      "costBps": cost_bps,
-                      "makerFilledQty": filled,
-                      "marketFallbackUsed": False,
-                      "cooldownBypassed": emergency_breakout,
-                      "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
-                      "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
-                      "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
-                    },
-                  }
-              else:
-                last_action = {
-                  "type": "SKIP_CLIENT_UNAVAILABLE",
-                  "ok": False,
-                  "info": {"error": cerr or "SDK client unavailable"},
-                }
-            else:
-              last_action = {
-                "type": "SKIP_QTY_BELOW_LOT",
-                "ok": False,
-                "info": {
-                  "qtyRaw": qty_raw,
-                  "lotSize": cached_lot_size,
-                  "spreadBps": signal.spread_bps,
-                  "expectedMoveBps": expected_move_bps,
-                  "requiredMoveBps": required_move_bps,
-                },
-              }
-        elif signal.desired in ("LONG", "SHORT") and not can_open:
+        elif desired in ("LONG", "SHORT") and not can_open:
           last_action = {
             "type": "RATE_LIMITED",
             "ok": False,
             "info": {"maxOrdersPerHour": int(cfg.get("maxOrdersPerHour", 120))},
           }
-        else:
-          last_action = {"type": "SKIP_NO_SIGNAL", "ok": True, "info": {"desired": signal.desired}}
+        elif desired in ("LONG", "SHORT") and in_cooldown:
+          last_action = {
+            "type": "FLIP_COOLDOWN",
+            "ok": True,
+            "info": {
+              "flipCooldownSec": flip_cooldown_sec,
+              "cooldownUntil": cooldown_until_ms,
+              "cooldownRemainingSec": to_countdown_sec(cooldown_until_ms, now_ms),
+              "lastRegimeExitReason": last_regime_exit_reason,
+            },
+          }
+        elif desired in ("LONG", "SHORT"):
+          snap = fetch_portfolio_snapshot(eth_base, sub_id)
+          avail = _f(snap.get("availableMarginUsd"))
+          pv = _f(snap.get("portfolioValueUsd"))
+          max_margin = float(cfg.get("maxMarginUsd", 100.0))
+          if pv and pv > 0:
+            max_margin = min(max_margin, pv * float(cfg.get("maxMarginPct", 25.0)) / 100.0)
+          if avail is not None:
+            max_margin = min(max_margin, avail)
 
-      # In-position reassessment loop (5-15s default)
+          spread_bps = (
+            ((last_ask - last_bid) / last_mid * 10_000.0)
+            if (last_ask and last_bid and last_mid and last_mid > 0)
+            else 999.0
+          )
+          liquidity_score = clamp(1.0 - max(0.0, spread_bps - 2.0) / 20.0, 0.0, 1.0)
+          size_mult = size_liquidity_multiplier(spread_bps, liquidity_score)
+          if spread_bps > float(cfg.get("maxSpreadBpsForTrade", 12.0)):
+            size_mult = 0.0
+
+          strength = clamp(float(regime_decision.strength), 0.25, 1.0)
+          notional = max_margin * float(cfg.get("maxLeverage", 2.0)) * strength * size_mult
+          qty_raw = (notional / float(last_mid)) if last_mid and last_mid > 0 else 0.0
+          qty = quantize_qty_to_lot(qty_raw, cached_lot_size)
+
+          if qty > 0:
+            cerr = await ensure_client_ready()
+            if not cerr and client is not None:
+              guard_ms = int(cfg.get("orderGuardMs", 200))
+              if not _order_guard_ok(now_ms, last_order_submit_ms, guard_ms):
+                await asyncio.sleep(0.2)
+
+              side_int = _side_to_int(desired)
+              exec_result = await execute_maker_chase(
+                client=client,
+                eth_base=eth_base,
+                sub_id=sub_id,
+                product_id=product_id,
+                ticker=ticker,
+                sender=owner_addr,
+                subaccount=subaccount_name,
+                order_side_int=side_int,
+                target_qty=qty,
+                lot_size=cached_lot_size,
+                tick_size=cached_tick_size,
+                last_mid=last_mid,
+                last_bid=last_bid,
+                last_ask=last_ask,
+                quote_cache=ws_quote_cache,
+                chase_max_sec=float(cfg.get("entryChaseMaxSec", 5.0)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
+                last_order_submit_ms=last_order_submit_ms,
+                order_guard_ms=guard_ms,
+                position_mode="entry",
+                expected_side=desired,
+                reduce_only=False,
+                allow_market_safety=False,
+                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+                entry_min_fill_ratio=float(cfg.get("entryMinFillRatio", 0.50)),
+              )
+              last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
+              _print_chase_attempts(f"ENTRY_{desired}", exec_result)
+              maker_entry_chases += 1
+              filled = float(exec_result.get("filledQty") or 0.0)
+              remain = float(exec_result.get("remainingQty") or 0.0)
+              submitted_any = int(exec_result.get("submittedCount") or 0) > 0
+              maker_err = "; ".join([str(x) for x in (exec_result.get("errors") or []) if x])[:500]
+
+              pos_final = fetch_active_position(eth_base, sub_id, product_id)
+              of, sf, szf, _, epf, etsf = parse_position(pos_final)
+              opened_qty = abs(float(szf)) if of and sf == desired else 0.0
+              try:
+                last_entry_fill_audit = await fetch_fills_audit(
+                  client,
+                  sub_id,
+                  product_id,
+                  limit=20,
+                  created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
+                )
+                fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
+                _print_maker_audit("ENTRY", last_entry_fill_audit or {})
+                _print_maker_audit("LAST20", fills_audit_last20 or {})
+                fills_list = (last_entry_fill_audit or {}).get("fills") if isinstance(last_entry_fill_audit, dict) else []
+                if isinstance(fills_list, list) and fills_list and isinstance(fills_list[0], dict):
+                  last_entry_fill_info = fills_list[0]
+                if any(isinstance(f, dict) and not bool(f.get("isMaker")) for f in (fills_list or [])):
+                  print("[MAKER ENTRY VIOLATION] entry fill reported taker")
+              except Exception:
+                pass
+
+              if opened_qty <= 0:
+                if bool(exec_result.get("timedOut")):
+                  maker_entry_timeouts += 1
+                if submitted_any:
+                  last_order_ts.append(time.time())
+                last_action = {
+                  "type": "SKIP_ENTRY_UNFILLED",
+                  "ok": True,
+                  "info": {
+                    "desired": desired,
+                    "qty": qty,
+                    "filled": filled,
+                    "remain": remain,
+                    "regimeState": regime_decision.state,
+                    "regimeDirection": regime_decision.direction,
+                    "regimeStrength": regime_decision.strength,
+                    "makerError": maker_err or None,
+                    "chaseAttempts": int(exec_result.get("attemptCount") or 0),
+                  },
+                }
+              else:
+                maker_entry_opened += 1
+                if bool(exec_result.get("acceptedPartial")):
+                  maker_entry_partial_accepts += 1
+                ttf = exec_result.get("timeToFirstFillMs")
+                try:
+                  ttf_i = int(ttf) if ttf is not None else None
+                except Exception:
+                  ttf_i = None
+                if ttf_i is not None and ttf_i >= 0:
+                  maker_entry_ttf_ms_samples.append(ttf_i)
+                  if len(maker_entry_ttf_ms_samples) > 200:
+                    maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
+                entry_px = float(epf if epf and epf > 0 else last_mid)
+                entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
+
+                DB_MANAGER.insert_trade_event(
+                  trade_id=str(uuid.uuid4()),
+                  ts_ms=now_ms,
+                  event_type="ENTRY",
+                  side=desired,
+                  qty=opened_qty,
+                  price=entry_px,
+                  pnl=None,
+                  tag="regime_entry",
+                  reason_json=json.dumps(
+                    {
+                      "reason": "regime_entry",
+                      "regimeState": regime_decision.state,
+                      "regimeDirection": regime_decision.direction,
+                      "regimeStrength": regime_decision.strength,
+                      "entryMode": entry_mode,
+                      "makerFilledQty": filled,
+                      "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
+                      "entryTimedOut": bool(exec_result.get("timedOut")),
+                      "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
+                      "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
+                    }
+                  ),
+                  entry_ts=etsf or now_ms,
+                  entry_price=entry_px,
+                )
+
+                current_trade_entry_price = entry_px
+                current_trade_entry_ts = etsf or now_ms
+                if submitted_any:
+                  last_order_ts.append(time.time())
+
+                last_action = {
+                  "type": f"OPEN_{desired}",
+                  "ok": True,
+                  "info": {
+                    "qty": opened_qty,
+                    "qtyRaw": qty_raw,
+                    "regimeState": regime_decision.state,
+                    "regimeDirection": regime_decision.direction,
+                    "regimeStrength": regime_decision.strength,
+                    "sizeMultiplier": size_mult,
+                    "makerFilledQty": filled,
+                    "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
+                    "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
+                    "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
+                  },
+                }
+            else:
+              last_action = {
+                "type": "SKIP_CLIENT_UNAVAILABLE",
+                "ok": False,
+                "info": {"error": cerr or "SDK client unavailable"},
+              }
+          else:
+            last_action = {
+              "type": "SKIP_QTY_BELOW_LOT",
+              "ok": False,
+              "info": {
+                "qtyRaw": qty_raw,
+                "lotSize": cached_lot_size,
+                "regimeStrength": regime_decision.strength,
+                "maxSpreadBpsForTrade": float(cfg.get("maxSpreadBpsForTrade", 12.0)),
+              },
+            }
+        else:
+          last_action = {
+            "type": "SKIP_NO_TREND",
+            "ok": True,
+            "info": {
+              "desired": desired,
+              "regimeState": regime_decision.state,
+              "regimeDirection": regime_decision.direction,
+              "regimeStrength": regime_decision.strength,
+            },
+          }
+
+      # Regime reassessment while in position: exit on regime end/flip, subject to minHold; risk exits are handled above.
       if (
         position_state.open
         and trading_enabled
@@ -3201,33 +3295,39 @@ async def main():
         and now_ms >= next_reassess_ms
       ):
         next_reassess_ms = now_ms + int(cfg.get("inPositionReassessIntervalSec", 8)) * 1000
-
-        ticks = DB_MANAGER.load_ticks(now_ms - (6 * 60 * 60 * 1000), now_ms)
-        latest_metric = DB_MANAGER.load_latest_metric(now_ms)
-        merged_metric = {**metrics_cache, **latest_metric}
         strategy_cfg = _build_strategy_cfg(cfg)
-        signal = make_signal(ticks=ticks, metrics=merged_metric, cfg=strategy_cfg, now_ms=now_ms)
+        regime_decision, _bars = await evaluate_regime(regime_runner, cfg, now_ms)
+        desired = desired_position_from_regime(regime_decision, strategy_cfg)
+
+        if (regime_decision.state, regime_decision.direction) != (last_regime_state, last_regime_direction):
+          last_regime_change_ms = int(regime_decision.ts_ms or now_ms)
 
         last_decision_at_ms = now_ms
-        last_reason = signal.reason
-        last_desired = signal.desired
-        last_conf = float(signal.p_up)
-        last_regime = signal.regime
+        last_reason = regime_decision.reason
+        last_desired = desired
+        last_conf = float(regime_decision.strength)
+        last_regime_state = regime_decision.state
+        last_regime_direction = regime_decision.direction
 
         DB_MANAGER.insert_decision(
           ts_ms=now_ms,
-          p_up=signal.p_up,
-          desired=signal.desired,
-          regime=signal.regime,
-          reason=signal.reason,
-          horizon_sec=int(cfg.get("predictionHorizonSeconds", 30)),
-          features=signal.features,
+          p_up=regime_decision.strength,
+          desired=desired,
+          regime=regime_decision.state,
+          reason=regime_decision.reason,
+          horizon_sec=int(cfg.get("regimeLookbackSeconds", 1800)),
+          features=[
+            float(1.0 if regime_decision.state == "TREND" else 0.0),
+            float(1.0 if regime_decision.direction == "UP" else (-1.0 if regime_decision.direction == "DOWN" else 0.0)),
+            float(regime_decision.strength),
+            0.0,
+            0.0,
+            0.0,
+          ],
         )
 
-        close_thr = float(cfg.get("closeConfidenceThreshold", 0.55))
-        should_close = should_close_for_confidence(position_state.side or "", signal.p_up, close_thr)
-
-        if should_close and position_state.side and position_state.qty > 0:
+        regime_exit_reason = should_exit_for_regime(position_state.side or "", regime_decision)
+        if regime_exit_reason and position_state.side and position_state.qty > 0:
           held_sec = (
             max(0, int((now_ms - int(position_state.entry_ts_ms)) / 1000))
             if position_state.entry_ts_ms
@@ -3258,8 +3358,8 @@ async def main():
                 last_ask=last_ask,
                 quote_cache=ws_quote_cache,
                 chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 350)),
-                gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
+                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
                 last_order_submit_ms=last_order_submit_ms,
                 order_guard_ms=guard_ms,
                 position_mode="exit",
@@ -3272,7 +3372,7 @@ async def main():
                 improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
               )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
-              _print_chase_attempts("EXIT_CONFIDENCE", exec_result)
+              _print_chase_attempts(f"EXIT_{regime_exit_reason}", exec_result)
               last_order_ts.append(time.time())
               try:
                 last_exit_fill_audit = await fetch_fills_audit(
@@ -3283,7 +3383,7 @@ async def main():
                   created_after_ms=int(exec_result.get("startMs") or now_ms) - 2000,
                 )
                 fills_audit_last20 = await fetch_fills_audit(client, sub_id, product_id, limit=20)
-                _print_maker_audit("EXIT_CONFIDENCE", last_exit_fill_audit or {})
+                _print_maker_audit(f"EXIT_{regime_exit_reason}", last_exit_fill_audit or {})
                 _print_maker_audit("LAST20", fills_audit_last20 or {})
               except Exception:
                 pass
@@ -3291,6 +3391,7 @@ async def main():
 
               px = float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
+              close_tag = "regime_flip" if regime_exit_reason == "REGIME_FLIP" else "regime_end"
               DB_MANAGER.insert_trade_event(
                 trade_id=str(uuid.uuid4()),
                 ts_ms=now_ms,
@@ -3299,13 +3400,13 @@ async def main():
                 qty=position_state.qty,
                 price=px,
                 pnl=pnl,
-                tag="close_confidence",
+                tag=close_tag,
                 reason_json=json.dumps(
                   {
-                    "reason": "close_confidence",
-                    "p_up": signal.p_up,
-                    "closeThreshold": close_thr,
-                    "regime": signal.regime,
+                    "reason": close_tag,
+                    "regimeState": regime_decision.state,
+                    "regimeDirection": regime_decision.direction,
+                    "regimeStrength": regime_decision.strength,
                     "exitMethod": ("market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"),
                   }
                 ),
@@ -3315,12 +3416,15 @@ async def main():
                 exit_price=px,
               )
               last_close_ts_ms = now_ms
+              last_regime_exit_ts_ms = now_ms
+              last_regime_exit_reason = regime_exit_reason
               last_action = {
-                "type": "CLOSE_CONFIDENCE",
+                "type": regime_exit_reason,
                 "ok": True,
                 "info": {
-                  "pUp": signal.p_up,
-                  "closeThreshold": close_thr,
+                  "regimeState": regime_decision.state,
+                  "regimeDirection": regime_decision.direction,
+                  "regimeStrength": regime_decision.strength,
                   "execution": {
                     "attempts": int(exec_result.get("attemptCount") or 0),
                     "timedOut": bool(exec_result.get("timedOut")),
@@ -3338,7 +3442,7 @@ async def main():
             last_action = {
               "type": "HOLD_MIN_HOLD",
               "ok": True,
-              "info": {"heldSec": held_sec, "minHoldSeconds": int(cfg.get("minHoldSeconds", 5))},
+              "info": {"heldSec": held_sec, "minHoldSeconds": int(cfg.get("minHoldSeconds", 5)), "exitReason": regime_exit_reason},
             }
         else:
           last_action = {
@@ -3346,8 +3450,9 @@ async def main():
             "ok": True,
             "info": {
               "side": position_state.side,
-              "pUp": signal.p_up,
-              "closeThreshold": close_thr,
+              "regimeState": regime_decision.state,
+              "regimeDirection": regime_decision.direction,
+              "regimeStrength": regime_decision.strength,
             },
           }
 
@@ -3371,12 +3476,21 @@ async def main():
         else None
       )
       cooldown_until = (
-        int(last_close_ts_ms) + int(cfg.get("cooldownAfterCloseSec", 5)) * 1000
-        if (last_close_ts_ms and int(cfg.get("cooldownAfterCloseSec", 5)) > 0)
+        int(last_regime_exit_ts_ms) + int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))) * 1000
+        if (
+          last_regime_exit_ts_ms
+          and int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))) > 0
+        )
         else None
       )
 
-      human_reason, raw_reason = explain_agent_reason(last_reason, last_desired, float(last_conf))
+      human_reason, raw_reason = explain_agent_reason(
+        last_reason,
+        last_desired,
+        float(last_conf),
+        last_regime_state,
+        last_regime_direction,
+      )
 
       status_payload = {
         "updatedAt": int(time.time() * 1000),
@@ -3390,32 +3504,22 @@ async def main():
           "ingestionEnabled": ingest_enabled,
           "tradingEnabled": trading_enabled,
           "ingestIntervalSec": float(cfg.get("ingestIntervalSec", 0.5)),
+          "regimeLookbackSeconds": int(cfg.get("regimeLookbackSeconds", 1800)),
+          "regimeBarSeconds": int(cfg.get("regimeBarSeconds", 1)),
+          "trendEntryStrength": float(cfg.get("trendEntryStrength", 0.70)),
+          "flipCooldownSec": int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))),
           "riskLoopIntervalSec": int(cfg.get("riskLoopIntervalSec", 1)),
           "decisionLoopIntervalSec": int(cfg.get("decisionLoopIntervalSec", 4)),
           "inPositionReassessIntervalSec": int(cfg.get("inPositionReassessIntervalSec", 8)),
           "metricsLoopIntervalSec": int(cfg.get("metricsLoopIntervalSec", 45)),
           "reassessIntervalSec": int(cfg.get("inPositionReassessIntervalSec", 8)),
-          "predictionHorizonSeconds": int(cfg.get("predictionHorizonSeconds", 30)),
           "minHoldSeconds": int(cfg.get("minHoldSeconds", 5)),
           "maxHoldSeconds": int(cfg.get("maxHoldSeconds", 7200)),
           "maxLeverage": float(cfg.get("maxLeverage", 2)),
           "maxMarginUsd": float(cfg.get("maxMarginUsd", 100)),
           "maxMarginPct": float(cfg.get("maxMarginPct", 25.0)),
-          "confidenceThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
-          "openConfidenceThreshold": float(cfg.get("openConfidenceThreshold", 0.65)),
-          "closeConfidenceThreshold": float(cfg.get("closeConfidenceThreshold", 0.55)),
-          "feeEstimateBps": float(cfg.get("feeEstimateBps", 3.0)),
-          "slippageBufferBps": float(cfg.get("slippageBufferBps", 4.0)),
-          "minExpectedMoveBps": float(cfg.get("minExpectedMoveBps", 0.0)),
-          "edgeCostMultiplier": float(cfg.get("edgeCostMultiplier", 0.0)),
           "entryMakerPreferred": True,
           "entryMarketFallbackEnabled": False,
-          "entryMarketFallbackMinProb": float(cfg.get("entryMarketFallbackMinProb", 0.90)),
-          "cooldownAfterCloseSec": int(cfg.get("cooldownAfterCloseSec", 5)),
-          "emergencyBreakoutEnabled": bool(cfg.get("emergencyBreakoutEnabled", False)),
-          "emergencyBreakoutMinProb": float(cfg.get("emergencyBreakoutMinProb", 0.94)),
-          "emergencyBreakoutMinMoveBps": float(cfg.get("emergencyBreakoutMinMoveBps", 35.0)),
-          "emergencyBreakoutMinAtrPercentile": float(cfg.get("emergencyBreakoutMinAtrPercentile", 0.85)),
           "entryChaseMaxSec": float(cfg.get("entryChaseMaxSec", 10.0)),
           "exitChaseMaxSec": float(cfg.get("exitChaseMaxSec", 5.0)),
           "executionRepriceMs": int(cfg.get("executionRepriceMs", 350)),
@@ -3462,12 +3566,16 @@ async def main():
           "desired": last_desired,
           "confidence": float(last_conf),
           "confidenceBand": confidence_band(float(last_conf)),
-          "regime": last_regime,
+          "regime": last_regime_state,
+          "regimeState": last_regime_state,
+          "regimeDirection": last_regime_direction,
+          "regimeStrength": float(last_conf),
+          "lastRegimeChangeAt": last_regime_change_ms,
           "reason": raw_reason,
           "reasonHuman": human_reason,
           "reasonRaw": raw_reason,
           "lastDecisionAt": last_decision_at_ms,
-          "decisionHorizonSeconds": int(cfg.get("predictionHorizonSeconds", 30)),
+          "decisionHorizonSeconds": int(cfg.get("regimeLookbackSeconds", 1800)),
           "decisionIntervalSeconds": int(cfg.get("decisionLoopIntervalSec", 4)),
           "inPositionIntervalSeconds": int(cfg.get("inPositionReassessIntervalSec", 8)),
           "nextReassessAt": next_reassess_ms if position_state.open else None,

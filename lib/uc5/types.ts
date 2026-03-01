@@ -23,6 +23,10 @@ export const Uc5ConfigSchema = z.object({
   tradingEnabled: z.boolean().default(true),
   killSwitch: z.boolean().default(false), // legacy compat
   ingestIntervalSec: z.number().min(0.2).max(60).default(0.5),
+  regimeLookbackSeconds: z.number().int().min(60).max(86400).default(1800),
+  regimeBarSeconds: z.number().int().min(1).max(60).default(1),
+  trendEntryStrength: z.number().min(0.5).max(0.99).default(0.7),
+  flipCooldownSec: z.number().int().min(0).max(600).default(15),
   reassessIntervalSec: z.number().int().min(5).max(86400).default(8), // legacy alias
   decisionLoopIntervalSec: z.number().int().min(3).max(60).default(4),
   inPositionReassessIntervalSec: z.number().int().min(5).max(300).default(8),
@@ -130,6 +134,10 @@ export type Uc5Status = {
     ingestionEnabled?: boolean;
     tradingEnabled?: boolean;
     ingestIntervalSec?: number;
+    regimeLookbackSeconds?: number;
+    regimeBarSeconds?: number;
+    trendEntryStrength?: number;
+    flipCooldownSec?: number;
     riskLoopIntervalSec?: number;
     decisionLoopIntervalSec?: number;
     inPositionReassessIntervalSec?: number;
@@ -186,6 +194,10 @@ export type Uc5Status = {
     desired?: "LONG" | "SHORT" | "FLAT";
     confidence?: number;
     confidenceBand?: "HIGH" | "MEDIUM" | "LOW";
+    regimeState?: "TREND" | "RANGE" | "UNKNOWN" | string;
+    regimeDirection?: "UP" | "DOWN" | null | string;
+    regimeStrength?: number;
+    lastRegimeChangeAt?: number;
     reason?: string;
     reasonHuman?: string;
     reasonRaw?: string;
@@ -234,6 +246,8 @@ export type Uc5Status = {
       subscribed?: boolean;
       lastError?: string | null;
       productId?: string;
+      stale?: boolean;
+      staleAfterMs?: number;
     };
     lastEntryFill?: {
       isMaker?: boolean;

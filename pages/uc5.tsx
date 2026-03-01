@@ -65,6 +65,8 @@ function fmtPct(v?: number | null, digits = 1) {
 }
 
 function closeReasonLabel(reason?: ChartMarker["closeReason"]) {
+  if (reason === "regime_end") return "regime end";
+  if (reason === "regime_flip") return "regime flip";
   if (reason === "confidence_change") return "confidence change";
   if (reason === "risk_loop") return "risk loop";
   return "other/manual";
@@ -72,6 +74,8 @@ function closeReasonLabel(reason?: ChartMarker["closeReason"]) {
 
 function markerColor(marker: ChartMarker) {
   if (marker.type === "ENTRY") return "#15803d";
+  if (marker.closeReason === "regime_flip") return "#7a271a";
+  if (marker.closeReason === "regime_end") return "#b54708";
   if (marker.closeReason === "confidence_change") return "#b54708";
   if (marker.closeReason === "risk_loop") return "#b42318";
   return "#475467";
@@ -133,35 +137,29 @@ async function ensureWalletChain(eth: Eip1193Provider, chainIdHex: string) {
 }
 
 function normalizeEdit(c: Uc5Config): Uc5Config {
-  const openThreshold = c.openConfidenceThreshold ?? c.confidenceThreshold ?? 0.65;
-  const closeThreshold = c.closeConfidenceThreshold ?? Math.max(0.5, openThreshold - 0.1);
   const inPos = c.inPositionReassessIntervalSec ?? c.reassessIntervalSec ?? 8;
   return {
     ...c,
     ingestionEnabled: c.ingestionEnabled ?? true,
     ingestIntervalSec: c.ingestIntervalSec ?? c.pollIntervalSeconds ?? 0.5,
+    regimeLookbackSeconds: c.regimeLookbackSeconds ?? 1800,
+    regimeBarSeconds: c.regimeBarSeconds ?? 1,
+    trendEntryStrength: c.trendEntryStrength ?? 0.7,
+    flipCooldownSec: c.flipCooldownSec ?? c.cooldownAfterCloseSec ?? 15,
     reassessIntervalSec: inPos,
     decisionLoopIntervalSec: c.decisionLoopIntervalSec ?? 4,
     inPositionReassessIntervalSec: inPos,
     riskLoopIntervalSec: c.riskLoopIntervalSec ?? 1,
     metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
-    confidenceThreshold: openThreshold,
-    openConfidenceThreshold: openThreshold,
-    closeConfidenceThreshold: closeThreshold,
     minHoldSeconds: c.minHoldSeconds ?? 5,
     maxMarginPct: c.maxMarginPct ?? 25,
-    feeEstimateBps: c.feeEstimateBps ?? 3,
-    slippageBufferBps: c.slippageBufferBps ?? 4,
     minExpectedMoveBps: 0,
     edgeCostMultiplier: 0,
     entryMakerPreferred: true,
     entryMarketFallbackEnabled: false,
     entryMarketFallbackMinProb: c.entryMarketFallbackMinProb ?? 0.9,
-    cooldownAfterCloseSec: c.cooldownAfterCloseSec ?? 5,
+    cooldownAfterCloseSec: c.cooldownAfterCloseSec ?? c.flipCooldownSec ?? 15,
     emergencyBreakoutEnabled: false,
-    emergencyBreakoutMinProb: c.emergencyBreakoutMinProb ?? 0.94,
-    emergencyBreakoutMinMoveBps: c.emergencyBreakoutMinMoveBps ?? 35,
-    emergencyBreakoutMinAtrPercentile: c.emergencyBreakoutMinAtrPercentile ?? 0.85,
     entryChaseMaxSec: c.entryChaseMaxSec ?? 10,
     exitChaseMaxSec: c.exitChaseMaxSec ?? 5,
     executionRepriceMs: c.executionRepriceMs ?? 350,
@@ -172,6 +170,39 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     makerImproveMinSpreadTicks: c.makerImproveMinSpreadTicks ?? 3,
     entryMinFillRatio: c.entryMinFillRatio ?? 0.5,
   };
+}
+
+const LEGACY_DECISION_PAYLOAD_KEYS = [
+  "confidenceThreshold",
+  "openConfidenceThreshold",
+  "closeConfidenceThreshold",
+  "predictionHorizonSeconds",
+  "feeEstimateBps",
+  "slippageBufferBps",
+  "minExpectedMoveBps",
+  "edgeCostMultiplier",
+  "entryMarketFallbackEnabled",
+  "entryMarketFallbackMinProb",
+  "cooldownAfterCloseSec",
+  "emergencyBreakoutEnabled",
+  "emergencyBreakoutMinProb",
+  "emergencyBreakoutMinMoveBps",
+  "emergencyBreakoutMinAtrPercentile",
+] as const;
+
+function buildConfigPayload(edit: Uc5Config, ownerAddress: string): Record<string, unknown> {
+  const normalized = normalizeEdit(edit);
+  const payload: Record<string, unknown> = {
+    ...normalized,
+    ownerAddress,
+    pollIntervalSeconds: Math.max(1, Math.round(normalized.ingestIntervalSec)),
+    reassessIntervalSec: normalized.inPositionReassessIntervalSec,
+    entryMakerPreferred: true,
+  };
+  for (const key of LEGACY_DECISION_PAYLOAD_KEYS) {
+    delete payload[key];
+  }
+  return payload;
 }
 
 function parseErrorText(raw: unknown, fallback: string): string {
@@ -204,7 +235,7 @@ export default function Uc5Page() {
   const [status, setStatus] = useState<Uc5Status | null>(null);
   const [ingestion, setIngestion] = useState<VmIngestionStatus | null>(null);
   const [trading, setTrading] = useState<VmTradingStatus | null>(null);
-  const [chart, setChart] = useState<VmChartResponse>({ candles: [], markers: [], confidence: [] });
+  const [chart, setChart] = useState<VmChartResponse>({ candles: [], markers: [], confidence: [], regimeStrength: [] });
   const [portfolio, setPortfolio] = useState<VmPortfolio | null>(null);
   const [tradeSummary, setTradeSummary] = useState<VmTradesSummary | null>(null);
   const [setup, setSetup] = useState<VmSetupStatus | null>(null);
@@ -290,14 +321,17 @@ export default function Uc5Page() {
     if (!edit) return errors;
     if (edit.maxLeverage < 1 || edit.maxLeverage > 20) errors.maxLeverage = "Max leverage must be 1.0 to 20.0";
     if (edit.maxMarginPct < 0 || edit.maxMarginPct > 100) errors.maxMarginPct = "Max margin % must be 0 to 100";
-    if (edit.openConfidenceThreshold < 0.5 || edit.openConfidenceThreshold > 0.95) {
-      errors.openConfidenceThreshold = "Open threshold must be 0.50 to 0.95";
+    if ((edit.regimeLookbackSeconds ?? 1800) < 60 || (edit.regimeLookbackSeconds ?? 1800) > 86400) {
+      errors.regimeLookbackSeconds = "Regime lookback must be 60 to 86400 sec";
     }
-    if (edit.closeConfidenceThreshold < 0.45 || edit.closeConfidenceThreshold > 0.9) {
-      errors.closeConfidenceThreshold = "Close threshold must be 0.45 to 0.90";
+    if ((edit.regimeBarSeconds ?? 1) < 1 || (edit.regimeBarSeconds ?? 1) > 60) {
+      errors.regimeBarSeconds = "Regime bar size must be 1 to 60 sec";
     }
-    if (edit.closeConfidenceThreshold > edit.openConfidenceThreshold) {
-      errors.closeConfidenceThreshold = "Close threshold should be <= open threshold";
+    if ((edit.trendEntryStrength ?? 0.7) < 0.5 || (edit.trendEntryStrength ?? 0.7) > 0.99) {
+      errors.trendEntryStrength = "Trend entry strength must be 0.50 to 0.99";
+    }
+    if ((edit.flipCooldownSec ?? 15) < 0 || (edit.flipCooldownSec ?? 15) > 600) {
+      errors.flipCooldownSec = "Flip cooldown must be 0 to 600 sec";
     }
     if (edit.minHoldSeconds < 5 || edit.minHoldSeconds > 259200) {
       errors.minHoldSeconds = "Min hold must be 5 to 259200 sec";
@@ -307,9 +341,6 @@ export default function Uc5Page() {
     }
     if (edit.maxHoldSeconds < edit.minHoldSeconds) {
       errors.maxHoldSeconds = "Max hold must be >= min hold";
-    }
-    if (edit.predictionHorizonSeconds < 10 || edit.predictionHorizonSeconds > 259200) {
-      errors.predictionHorizonSeconds = "Entry horizon must be 10 to 259200 sec";
     }
     if (edit.ingestIntervalSec < 0.2 || edit.ingestIntervalSec > 60) {
       errors.ingestIntervalSec = "Ingest interval must be 0.2 to 60 sec";
@@ -325,33 +356,6 @@ export default function Uc5Page() {
     }
     if (edit.metricsLoopIntervalSec < 30 || edit.metricsLoopIntervalSec > 300) {
       errors.metricsLoopIntervalSec = "Slow metrics interval must be 30 to 300 sec";
-    }
-    if (edit.feeEstimateBps < 0 || edit.feeEstimateBps > 100) {
-      errors.feeEstimateBps = "Fee estimate must be 0 to 100 bps";
-    }
-    if (edit.slippageBufferBps < 0 || edit.slippageBufferBps > 100) {
-      errors.slippageBufferBps = "Slippage buffer must be 0 to 100 bps";
-    }
-    if (edit.minExpectedMoveBps < 0 || edit.minExpectedMoveBps > 500) {
-      errors.minExpectedMoveBps = "Min expected move must be 0 to 500 bps";
-    }
-    if (edit.edgeCostMultiplier < 0 || edit.edgeCostMultiplier > 5) {
-      errors.edgeCostMultiplier = "Edge multiplier must be 0.0 to 5.0";
-    }
-    if (edit.entryMarketFallbackMinProb < 0.5 || edit.entryMarketFallbackMinProb > 0.99) {
-      errors.entryMarketFallbackMinProb = "Fallback min probability must be 0.50 to 0.99";
-    }
-    if (edit.cooldownAfterCloseSec < 0 || edit.cooldownAfterCloseSec > 600) {
-      errors.cooldownAfterCloseSec = "Cooldown after close must be 0 to 600 sec";
-    }
-    if (edit.emergencyBreakoutMinProb < 0.5 || edit.emergencyBreakoutMinProb > 0.99) {
-      errors.emergencyBreakoutMinProb = "Emergency breakout min probability must be 0.50 to 0.99";
-    }
-    if (edit.emergencyBreakoutMinMoveBps < 1 || edit.emergencyBreakoutMinMoveBps > 1000) {
-      errors.emergencyBreakoutMinMoveBps = "Emergency breakout min move must be 1 to 1000 bps";
-    }
-    if (edit.emergencyBreakoutMinAtrPercentile < 0 || edit.emergencyBreakoutMinAtrPercentile > 1) {
-      errors.emergencyBreakoutMinAtrPercentile = "Emergency breakout ATR percentile must be 0.00 to 1.00";
     }
     return errors;
   }, [edit]);
@@ -397,27 +401,13 @@ export default function Uc5Page() {
     const pendingId = addNotice("info", "Saving settings...", true);
     setBusy("save");
     try {
-      const normalized = normalizeEdit(edit);
-      const payload: Uc5Config = {
-        ...normalized,
-        ownerAddress: cfg.ownerAddress,
-        pollIntervalSeconds: Math.max(1, Math.round(normalized.ingestIntervalSec)),
-        confidenceThreshold: normalized.openConfidenceThreshold,
-        reassessIntervalSec: normalized.inPositionReassessIntervalSec,
-        entryMakerPreferred: true,
-        entryMarketFallbackEnabled: false,
-        minExpectedMoveBps: 0,
-        edgeCostMultiplier: 0,
-        emergencyBreakoutEnabled: false,
-      };
+      const payload = buildConfigPayload(edit, cfg.ownerAddress);
       const auth = await signOwnerAction("SET_CONFIG", payload);
       await readJson<{ ok: true }>("/api/uc5/config", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ config: payload, auth }),
       });
-      setCfg(payload);
-      setEdit(payload);
       updateNotice(pendingId, { kind: "success", text: "Settings saved.", pending: false });
       await Promise.all([refreshConfig(), refreshFast()]);
     } catch (e: unknown) {
@@ -610,13 +600,25 @@ export default function Uc5Page() {
     [chart.candles]
   );
   const markerRows = useMemo(() => chart.markers.filter((m) => m.price != null), [chart.markers]);
-  const confidenceRows = useMemo(
-    () =>
-      (chart.confidence || []).map((p) => ({
-        t: p.t,
-        confidencePct: Math.max(0, Math.min(100, Number(p.pUp || 0) * 100)),
-      })),
-    [chart.confidence]
+  const regimeRows = useMemo(
+    () => {
+      return (chart.regimeStrength && chart.regimeStrength.length > 0
+        ? chart.regimeStrength.map((p) => ({
+            t: p.t,
+            strengthPct: Math.max(0, Math.min(100, Number(p.strength || 0) * 100)),
+            state: p.state,
+            direction: p.direction || null,
+            reason: p.reason || "",
+          }))
+        : (chart.confidence || []).map((p) => ({
+            t: p.t,
+            strengthPct: Math.max(0, Math.min(100, Number(p.pUp || 0) * 100)),
+            state: "",
+            direction: null,
+            reason: "",
+          }))) as Array<{ t: number; strengthPct: number; state: string; direction: string | null; reason: string }>;
+    },
+    [chart.confidence, chart.regimeStrength]
   );
 
   const marginCapAmount = useMemo(() => {
@@ -644,7 +646,7 @@ export default function Uc5Page() {
     const pad = Math.max((max - min) * 0.02, 10);
     return [min - pad, max + pad];
   }, [chartRows]);
-  const openThresholdPct = useMemo(
+  const trendEntryStrengthPct = useMemo(
     () =>
       Math.max(
         0,
@@ -652,49 +654,14 @@ export default function Uc5Page() {
           100,
           100 *
             Number(
-              status?.runtime?.openConfidenceThreshold ??
-                edit?.openConfidenceThreshold ??
-                cfg?.openConfidenceThreshold ??
-                cfg?.confidenceThreshold ??
-                0.65
+              status?.runtime?.trendEntryStrength ??
+                edit?.trendEntryStrength ??
+                cfg?.trendEntryStrength ??
+                0.7
             )
         )
       ),
-    [cfg?.confidenceThreshold, cfg?.openConfidenceThreshold, edit?.openConfidenceThreshold, status?.runtime?.openConfidenceThreshold]
-  );
-  const closeThresholdPct = useMemo(
-    () =>
-      Math.max(
-        0,
-        Math.min(
-          100,
-          100 *
-            Number(
-              status?.runtime?.closeConfidenceThreshold ??
-                edit?.closeConfidenceThreshold ??
-                cfg?.closeConfidenceThreshold ??
-                Math.max(
-                  0.5,
-                  Number(
-                    status?.runtime?.openConfidenceThreshold ??
-                      edit?.openConfidenceThreshold ??
-                      cfg?.openConfidenceThreshold ??
-                      cfg?.confidenceThreshold ??
-                      0.65
-                  ) - 0.1
-                )
-            )
-        )
-      ),
-    [
-      cfg?.closeConfidenceThreshold,
-      cfg?.confidenceThreshold,
-      cfg?.openConfidenceThreshold,
-      edit?.closeConfidenceThreshold,
-      edit?.openConfidenceThreshold,
-      status?.runtime?.closeConfidenceThreshold,
-      status?.runtime?.openConfidenceThreshold,
-    ]
+    [cfg?.trendEntryStrength, edit?.trendEntryStrength, status?.runtime?.trendEntryStrength]
   );
   const renderChartTooltip = useCallback(
     (ctx: unknown) => {
@@ -731,17 +698,19 @@ export default function Uc5Page() {
       };
       if (!raw.active || !raw.payload?.length) return null;
       const ts = Number(raw.label || 0);
-      const confidence = typeof raw.payload[0]?.value === "number" ? raw.payload[0].value : null;
+      const strength = typeof raw.payload[0]?.value === "number" ? raw.payload[0].value : null;
+      const hit = regimeRows.find((row) => Math.abs(row.t - ts) <= 30_000) || null;
       return (
         <div style={tooltipBox}>
           <div style={{ fontWeight: 800 }}>{new Date(ts).toLocaleString()}</div>
-          <div>Confidence: {confidence != null ? `${confidence.toFixed(1)}%` : "—"}</div>
-          <div>Open threshold: {openThresholdPct.toFixed(1)}%</div>
-          <div>Close threshold: {closeThresholdPct.toFixed(1)}%</div>
+          <div>Trend strength: {strength != null ? `${strength.toFixed(1)}%` : "—"}</div>
+          <div>Entry threshold: {trendEntryStrengthPct.toFixed(1)}%</div>
+          <div>State: {hit?.state || "—"}</div>
+          <div>Direction: {hit?.direction || "—"}</div>
         </div>
       );
     },
-    [closeThresholdPct, openThresholdPct]
+    [regimeRows, trendEntryStrengthPct]
   );
 
   return (
@@ -959,60 +928,61 @@ export default function Uc5Page() {
               </div>
             </Field>
 
-            <Field
-              label="Open confidence threshold"
-              help="Flat -> long if p_up >= open, short if p_up <= 1-open."
-              error={validation.openConfidenceThreshold}
-            >
+            <Field label="Regime lookback (sec)" help="Bar history window sent into the UC5 regime engine." error={validation.regimeLookbackSeconds}>
+              <input
+                style={input}
+                type="number"
+                min={60}
+                max={86400}
+                step={60}
+                value={edit?.regimeLookbackSeconds ?? 1800}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, regimeLookbackSeconds: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Regime bar size (sec)" help="SQLite ticks are aggregated to this bar size before regime evaluation." error={validation.regimeBarSeconds}>
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={60}
+                step={1}
+                value={edit?.regimeBarSeconds ?? 1}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, regimeBarSeconds: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Trend entry strength" help="Only TREND regimes at or above this strength may open a position." error={validation.trendEntryStrength}>
               <input
                 style={input}
                 type="number"
                 min={0.5}
-                max={0.95}
+                max={0.99}
                 step={0.01}
-                value={edit?.openConfidenceThreshold ?? 0.65}
+                value={edit?.trendEntryStrength ?? 0.7}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, trendEntryStrength: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Flip cooldown (sec)" help="Cooldown after REGIME_END or REGIME_FLIP exit to avoid whipsaw re-entry." error={validation.flipCooldownSec}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={600}
+                step={1}
+                value={edit?.flipCooldownSec ?? 15}
                 disabled={!isOwner}
                 onChange={(e) =>
                   setEdit((p) =>
                     p
-                      ? {
-                          ...p,
-                          confidenceThreshold: Number(e.target.value),
-                          openConfidenceThreshold: Number(e.target.value),
-                        }
+                      ? { ...p, flipCooldownSec: Number(e.target.value), cooldownAfterCloseSec: Number(e.target.value) }
                       : p
                   )
                 }
-              />
-            </Field>
-
-            <Field
-              label="Close confidence threshold"
-              help="Long holds while p_up >= close; short holds while p_up <= 1-close."
-              error={validation.closeConfidenceThreshold}
-            >
-              <input
-                style={input}
-                type="number"
-                min={0.45}
-                max={0.9}
-                step={0.01}
-                value={edit?.closeConfidenceThreshold ?? 0.55}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, closeConfidenceThreshold: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Entry horizon (sec)" help="Minimum 10 sec." error={validation.predictionHorizonSeconds}>
-              <input
-                style={input}
-                type="number"
-                min={10}
-                max={259200}
-                step={1}
-                value={edit?.predictionHorizonSeconds ?? 30}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, predictionHorizonSeconds: Number(e.target.value) } : p))}
               />
             </Field>
 
@@ -1129,63 +1099,55 @@ export default function Uc5Page() {
               />
             </Field>
 
-            <Field label="feeEstimateBps" help="Estimated taker fee in bps for edge filter." error={validation.feeEstimateBps}>
+            <Field label="Max spread (bps)" help="Skip entries when live spread is wider than this." error={undefined}>
               <input
                 style={input}
                 type="number"
-                min={0}
+                min={1}
                 max={100}
                 step={0.1}
-                value={edit?.feeEstimateBps ?? 3}
+                value={edit?.maxSpreadBpsForTrade ?? 12}
                 disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, feeEstimateBps: Number(e.target.value) } : p))}
+                onChange={(e) => setEdit((p) => (p ? { ...p, maxSpreadBpsForTrade: Number(e.target.value) } : p))}
               />
             </Field>
 
-            <Field label="slippageBufferBps" help="Extra cost cushion for expected-edge filter." error={validation.slippageBufferBps}>
+            <Field label="Entry chase max (sec)" help="Abort unfilled maker entry after this many seconds and stay flat." error={undefined}>
               <input
                 style={input}
                 type="number"
-                min={0}
-                max={100}
-                step={0.1}
-                value={edit?.slippageBufferBps ?? 4}
+                min={0.5}
+                max={30}
+                step={0.5}
+                value={edit?.entryChaseMaxSec ?? 10}
                 disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, slippageBufferBps: Number(e.target.value) } : p))}
+                onChange={(e) => setEdit((p) => (p ? { ...p, entryChaseMaxSec: Number(e.target.value) } : p))}
               />
             </Field>
 
-            <Field
-              label="minExpectedMoveBps"
-              help="Disabled for higher trading frequency (locked to 0)."
-              error={validation.minExpectedMoveBps}
-            >
+            <Field label="Exit chase max (sec)" help="After this window, market safety override is allowed on exit." error={undefined}>
               <input
                 style={input}
                 type="number"
-                min={0}
-                max={500}
-                step={1}
-                value={0}
-                disabled
-                onChange={() => {}}
+                min={0.5}
+                max={30}
+                step={0.5}
+                value={edit?.exitChaseMaxSec ?? 5}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, exitChaseMaxSec: Number(e.target.value) } : p))}
               />
             </Field>
 
-            <Field
-              label="edgeCostMultiplier"
-              help="Disabled for higher trading frequency (locked to 0)."
-              error={validation.edgeCostMultiplier}
-            >
+            <Field label="Execution reprice (ms)" help="Cancel/replace cadence for active maker chases." error={undefined}>
               <input
                 style={input}
                 type="number"
-                min={0}
-                max={5}
-                step={0.1}
-                value={0}
-                disabled
-                onChange={() => {}}
+                min={100}
+                max={2000}
+                step={50}
+                value={edit?.executionRepriceMs ?? 350}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, executionRepriceMs: Number(e.target.value) } : p))}
               />
             </Field>
 
@@ -1206,22 +1168,6 @@ export default function Uc5Page() {
             </Field>
 
             <Field
-              label="entryMarketFallbackEnabled"
-              help="Disabled to prevent taker entries."
-              error={undefined}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked={false}
-                  disabled
-                  onChange={() => {}}
-                />
-                Market entry fallback OFF (locked)
-              </label>
-            </Field>
-
-            <Field
               label="exitMakerFirstSafety"
               help="Exit uses post-only chasing first, then market safety override after ~5s."
               error={undefined}
@@ -1232,105 +1178,62 @@ export default function Uc5Page() {
               </label>
             </Field>
 
-            <Field
-              label="entryMarketFallbackMinProb"
-              help="Inactive while market entry fallback is locked OFF."
-              error={validation.entryMarketFallbackMinProb}
-            >
+            <Field label="Maker min rest (ms)" help="Minimum rest time before replacing a resting maker order." error={undefined}>
               <input
                 style={input}
                 type="number"
-                min={0.5}
-                max={0.99}
-                step={0.01}
-                value={edit?.entryMarketFallbackMinProb ?? 0.9}
-                disabled
-                onChange={() => {}}
-              />
-            </Field>
-
-            <Field
-              label="cooldownAfterCloseSec"
-              help="Block re-entry for this many seconds after a close."
-              error={validation.cooldownAfterCloseSec}
-            >
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={600}
-                step={1}
-                value={edit?.cooldownAfterCloseSec ?? 5}
+                min={100}
+                max={5000}
+                step={50}
+                value={edit?.makerMinRestMs ?? 700}
                 disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, cooldownAfterCloseSec: Number(e.target.value) } : p))}
+                onChange={(e) => setEdit((p) => (p ? { ...p, makerMinRestMs: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Entry min fill ratio" help="Accept partial maker fills once this share of target size is filled." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0.1}
+                max={1}
+                step={0.05}
+                value={edit?.entryMinFillRatio ?? 0.5}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, entryMinFillRatio: Number(e.target.value) } : p))}
               />
             </Field>
 
             <Field
-              label="emergencyBreakoutEnabled"
-              help="Disabled by default to keep re-entry behavior simple."
+              label="makerReplaceOnlyOnTouchMove"
+              help="Preserve queue priority unless the touch actually moves."
               error={undefined}
             >
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
                 <input
                   type="checkbox"
-                  checked={Boolean(edit?.emergencyBreakoutEnabled ?? false)}
-                  disabled
-                  onChange={() => {}}
+                  checked={Boolean(edit?.makerReplaceOnlyOnTouchMove ?? true)}
+                  disabled={!isOwner}
+                  onChange={(e) => setEdit((p) => (p ? { ...p, makerReplaceOnlyOnTouchMove: e.target.checked } : p))}
                 />
-                Emergency breakout bypass (inactive by default)
+                Replace only on touch move
               </label>
             </Field>
 
             <Field
-              label="emergencyBreakoutMinProb"
-              help="Inactive unless emergency breakout is enabled."
-              error={validation.emergencyBreakoutMinProb}
+              label="makerImproveOneTickOnWideSpread"
+              help="When spread is wide enough, improve by one tick while staying post-only."
+              error={undefined}
             >
-              <input
-                style={input}
-                type="number"
-                min={0.5}
-                max={0.99}
-                step={0.01}
-                value={edit?.emergencyBreakoutMinProb ?? 0.94}
-                disabled
-                onChange={() => {}}
-              />
-            </Field>
-
-            <Field
-              label="emergencyBreakoutMinMoveBps"
-              help="Inactive unless emergency breakout is enabled."
-              error={validation.emergencyBreakoutMinMoveBps}
-            >
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={1000}
-                step={1}
-                value={edit?.emergencyBreakoutMinMoveBps ?? 35}
-                disabled
-                onChange={() => {}}
-              />
-            </Field>
-
-            <Field
-              label="emergencyBreakoutMinAtrPercentile"
-              help="Inactive unless emergency breakout is enabled."
-              error={validation.emergencyBreakoutMinAtrPercentile}
-            >
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={1}
-                step={0.01}
-                value={edit?.emergencyBreakoutMinAtrPercentile ?? 0.85}
-                disabled
-                onChange={() => {}}
-              />
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(edit?.makerImproveOneTickOnWideSpread ?? true)}
+                  disabled={!isOwner}
+                  onChange={(e) => setEdit((p) => (p ? { ...p, makerImproveOneTickOnWideSpread: e.target.checked } : p))}
+                />
+                Improve one tick on wide spread
+              </label>
             </Field>
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
@@ -1344,7 +1247,7 @@ export default function Uc5Page() {
           <h2 style={sectionTitle}>Market</h2>
           <div style={card}>
             <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
-              24h chart ({chart.candles.length} points). Markers: green=entry, amber=close by confidence, red=close by risk loop, gray=other close.
+              24h chart ({chart.candles.length} points). Markers: green=entry, amber=regime end, brown=regime flip, red=risk exit, gray=other/manual close.
             </div>
             {chart.partial24h ? (
               <div style={{ fontSize: 12, color: "#b54708", marginBottom: 8 }}>
@@ -1390,14 +1293,14 @@ export default function Uc5Page() {
               </div>
             )}
             <div style={{ fontSize: 13, color: "#666", margin: "12px 0 8px" }}>
-              Confidence history (0-100%), with open/close thresholds.
+              Regime strength history (0-100%), with TREND entry threshold.
             </div>
-            {confidenceRows.length === 0 ? (
-              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No confidence data yet.</div>
+            {regimeRows.length === 0 ? (
+              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No regime data yet.</div>
             ) : (
               <div style={{ width: "100%", minWidth: 0, height: CONFIDENCE_CHART_HEIGHT, minHeight: CONFIDENCE_CHART_HEIGHT }}>
                 <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={CONFIDENCE_CHART_HEIGHT}>
-                  <ComposedChart data={confidenceRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
+                  <ComposedChart data={regimeRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
                     <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
                     <XAxis
                       dataKey="t"
@@ -1414,9 +1317,8 @@ export default function Uc5Page() {
                       width={58}
                     />
                     <Tooltip content={renderConfidenceTooltip} />
-                    <ReferenceLine y={openThresholdPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
-                    <ReferenceLine y={closeThresholdPct} stroke="#1d2939" strokeDasharray="4 4" ifOverflow="extendDomain" />
-                    <Line dataKey="confidencePct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    <ReferenceLine y={trendEntryStrengthPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
+                    <Line dataKey="strengthPct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
@@ -1439,7 +1341,8 @@ export default function Uc5Page() {
             <div style={card}>
               <div style={cardTitle}>Trade Stats</div>
               <KV k="Total trades" v={String(tradeSummary?.totalTrades ?? 0)} />
-              <KV k="Closed by confidence change" v={String(tradeSummary?.closedByConfidence ?? 0)} />
+              <KV k="Closed by regime end" v={String(tradeSummary?.closedByRegimeEnd ?? 0)} />
+              <KV k="Closed by regime flip" v={String(tradeSummary?.closedByRegimeFlip ?? 0)} />
               <KV k="Closed by risk loop" v={String(tradeSummary?.closedByRiskLoop ?? 0)} />
               <KV k="Closed by other/manual" v={String(tradeSummary?.closedByOther ?? 0)} />
               <KV k="Win rate" v={fmtPct((tradeSummary?.winRate ?? 0) * 100)} />
@@ -1465,13 +1368,19 @@ export default function Uc5Page() {
           <h2 style={sectionTitle}>Agent</h2>
           <div style={card}>
             <KV k="Desired" v={status?.agent?.desired || "—"} />
+            <KV k="Regime state" v={status?.agent?.regimeState || status?.agent?.regime || "—"} />
+            <KV k="Regime direction" v={status?.agent?.regimeDirection || "—"} />
             <KV
-              k="Confidence"
+              k="Trend strength"
               v={
-                status?.agent?.confidence != null
-                  ? `${(status.agent.confidence * 100).toFixed(1)}% (${status.agent.confidenceBand || "—"})`
+                status?.agent?.regimeStrength != null
+                  ? `${(status.agent.regimeStrength * 100).toFixed(1)}% (${status.agent.confidenceBand || "—"})`
                   : "—"
               }
+            />
+            <KV
+              k="Last regime change"
+              v={status?.agent?.lastRegimeChangeAt ? new Date(status.agent.lastRegimeChangeAt).toLocaleString() : "—"}
             />
             <KV k="Reason" v={status?.agent?.reasonHuman || status?.agent?.reason || "—"} />
             <details style={{ marginTop: 10 }}>
