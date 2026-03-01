@@ -45,7 +45,8 @@ function handleRequest(line) {
   const bars = Array.isArray(payload.bars) ? payload.bars : [];
   const lookbackSeconds = Math.max(60, Math.round(Number(payload.regimeLookbackSeconds ?? payload.windowSec ?? 1800)));
   const barSeconds = Math.max(1, Math.round(Number(payload.regimeBarSeconds ?? payload.sampleEverySec ?? 1)));
-  const minSamples = Math.max(5, Math.round(Number(payload.minSamples ?? Math.min(60, Math.max(5, Math.floor(lookbackSeconds / Math.max(barSeconds, 1) / 3))))));
+  const sampleEverySec = Math.max(1, Math.round(Number(payload.regimeSampleEverySec ?? payload.sampleEverySec ?? 12)));
+  const minSamples = Math.max(5, Math.round(Number(payload.minSamples ?? Math.min(60, Math.max(5, Math.floor(lookbackSeconds / Math.max(sampleEverySec, 1) / 3))))));
   const trendHalfLifeMinSec = Math.max(60, Math.round(Number(payload.trendHalfLifeMinSec ?? 900)));
 
   return normalizeResponse(
@@ -53,7 +54,7 @@ function handleRequest(line) {
     evaluateUc5Regime({
       bars,
       windowSec: lookbackSeconds,
-      sampleEverySec: barSeconds,
+      sampleEverySec,
       minSamples,
       trendHalfLifeMinSec,
     })

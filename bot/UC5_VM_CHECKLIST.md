@@ -44,7 +44,7 @@ curl -s http://127.0.0.1:8787/trading | python3 -m json.tool
 Expected:
 
 - `bot.alive = true`
-- `runtime.regimeLookbackSeconds`, `runtime.regimeBarSeconds`, `runtime.trendEntryStrength`, `runtime.flipCooldownSec` present
+- `runtime.regimeLookbackSeconds`, `runtime.regimeBarSeconds`, `runtime.regimeSampleEverySec`, `runtime.trendEntryStrength`, `runtime.flipCooldownSec` present
 - `execution.makerOnlyEntry = true`
 - `execution.makerFirstExitWithMarketSafety = true`
 - `execution.quoteSource = "ws_bookdepth"` once WS is healthy

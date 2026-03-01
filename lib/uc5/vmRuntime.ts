@@ -37,6 +37,7 @@ export function defaultUc5Config(): Uc5Config {
     ingestIntervalSec: Number(process.env.UC5_INGEST_INTERVAL_SEC || 0.5),
     regimeLookbackSeconds: 1800,
     regimeBarSeconds: 1,
+    regimeSampleEverySec: 12,
     trendEntryStrength: 0.7,
     flipCooldownSec: 15,
     reassessIntervalSec: 8,

@@ -228,6 +228,7 @@ def default_runtime_config() -> Dict[str, Any]:
     "ingestIntervalSec": float(ingest_default),
     "regimeLookbackSeconds": 1800,
     "regimeBarSeconds": 1,
+    "regimeSampleEverySec": 12,
     "trendEntryStrength": 0.70,
     "flipCooldownSec": 15,
     "predictionHorizonSeconds": 30,
@@ -337,6 +338,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["ingestIntervalSec"] = clamp(_to_float(base.get("ingestIntervalSec", 0.5), 0.5), 0.2, 60.0)
   base["regimeLookbackSeconds"] = clamp(_to_int(base.get("regimeLookbackSeconds", 1800), 1800), 60, 86400)
   base["regimeBarSeconds"] = clamp(_to_int(base.get("regimeBarSeconds", 1), 1), 1, 60)
+  base["regimeSampleEverySec"] = clamp(_to_int(base.get("regimeSampleEverySec", max(12, int(base["regimeBarSeconds"]))), max(12, int(base["regimeBarSeconds"]))), 1, 300)
   base["trendEntryStrength"] = clamp(_to_float(base.get("trendEntryStrength", 0.70), 0.70), 0.5, 0.99)
   legacy_flip_cooldown = _to_int(base.get("cooldownAfterCloseSec", 15), 15)
   base["flipCooldownSec"] = clamp(_to_int(base.get("flipCooldownSec", legacy_flip_cooldown), legacy_flip_cooldown), 0, 600)
@@ -2470,6 +2472,7 @@ async def evaluate_regime(
 ) -> Tuple[RegimeDecision, List[Dict[str, Any]]]:
   lookback_seconds = int(cfg.get("regimeLookbackSeconds", 1800))
   bar_seconds = int(cfg.get("regimeBarSeconds", 1))
+  sample_every_sec = int(cfg.get("regimeSampleEverySec", max(12, bar_seconds)))
   bars = DB_MANAGER.get_recent_bars(lookback_seconds, bar_seconds, now_ms=now_ms)
   if not bars:
     return (
@@ -2488,6 +2491,7 @@ async def evaluate_regime(
       "bars": bars,
       "regimeLookbackSeconds": lookback_seconds,
       "regimeBarSeconds": bar_seconds,
+      "regimeSampleEverySec": sample_every_sec,
       "trendHalfLifeMinSec": max(60, int(min(lookback_seconds, 900))),
     }
   )
@@ -3506,6 +3510,7 @@ async def main():
           "ingestIntervalSec": float(cfg.get("ingestIntervalSec", 0.5)),
           "regimeLookbackSeconds": int(cfg.get("regimeLookbackSeconds", 1800)),
           "regimeBarSeconds": int(cfg.get("regimeBarSeconds", 1)),
+          "regimeSampleEverySec": int(cfg.get("regimeSampleEverySec", max(12, int(cfg.get("regimeBarSeconds", 1))))),
           "trendEntryStrength": float(cfg.get("trendEntryStrength", 0.70)),
           "flipCooldownSec": int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))),
           "riskLoopIntervalSec": int(cfg.get("riskLoopIntervalSec", 1)),

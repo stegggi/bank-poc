@@ -144,6 +144,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     ingestIntervalSec: c.ingestIntervalSec ?? c.pollIntervalSeconds ?? 0.5,
     regimeLookbackSeconds: c.regimeLookbackSeconds ?? 1800,
     regimeBarSeconds: c.regimeBarSeconds ?? 1,
+    regimeSampleEverySec: c.regimeSampleEverySec ?? Math.max(12, c.regimeBarSeconds ?? 1),
     trendEntryStrength: c.trendEntryStrength ?? 0.7,
     flipCooldownSec: c.flipCooldownSec ?? c.cooldownAfterCloseSec ?? 15,
     reassessIntervalSec: inPos,
@@ -326,6 +327,9 @@ export default function Uc5Page() {
     }
     if ((edit.regimeBarSeconds ?? 1) < 1 || (edit.regimeBarSeconds ?? 1) > 60) {
       errors.regimeBarSeconds = "Regime bar size must be 1 to 60 sec";
+    }
+    if ((edit.regimeSampleEverySec ?? Math.max(12, edit.regimeBarSeconds ?? 1)) < 1 || (edit.regimeSampleEverySec ?? Math.max(12, edit.regimeBarSeconds ?? 1)) > 300) {
+      errors.regimeSampleEverySec = "Regime sample cadence must be 1 to 300 sec";
     }
     if ((edit.trendEntryStrength ?? 0.7) < 0.5 || (edit.trendEntryStrength ?? 0.7) > 0.99) {
       errors.trendEntryStrength = "Trend entry strength must be 0.50 to 0.99";
@@ -794,6 +798,7 @@ export default function Uc5Page() {
               <KV k="Time since entry" v={fmtCountdown(trading?.timeSinceEntrySec)} />
               <KV k="Risk loop" v={`${status?.runtime?.riskLoopIntervalSec ?? edit?.riskLoopIntervalSec ?? 1}s`} />
               <KV k="Flat decision loop" v={`${status?.runtime?.decisionLoopIntervalSec ?? edit?.decisionLoopIntervalSec ?? 4}s`} />
+              <KV k="Regime sample cadence" v={`${status?.runtime?.regimeSampleEverySec ?? edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}s`} />
               <KV
                 k="In-position loop"
                 v={`${status?.runtime?.inPositionReassessIntervalSec ?? edit?.inPositionReassessIntervalSec ?? 8}s`}
@@ -951,6 +956,19 @@ export default function Uc5Page() {
                 value={edit?.regimeBarSeconds ?? 1}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, regimeBarSeconds: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Regime sample cadence (sec)" help="UC6 regime estimator ingests one bar every N seconds. Default 12s matches UC6." error={validation.regimeSampleEverySec}>
+              <input
+                style={input}
+                type="number"
+                min={1}
+                max={300}
+                step={1}
+                value={edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, regimeSampleEverySec: Number(e.target.value) } : p))}
               />
             </Field>
 

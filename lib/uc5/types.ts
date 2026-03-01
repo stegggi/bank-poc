@@ -25,6 +25,7 @@ export const Uc5ConfigSchema = z.object({
   ingestIntervalSec: z.number().min(0.2).max(60).default(0.5),
   regimeLookbackSeconds: z.number().int().min(60).max(86400).default(1800),
   regimeBarSeconds: z.number().int().min(1).max(60).default(1),
+  regimeSampleEverySec: z.number().int().min(1).max(300).default(12),
   trendEntryStrength: z.number().min(0.5).max(0.99).default(0.7),
   flipCooldownSec: z.number().int().min(0).max(600).default(15),
   reassessIntervalSec: z.number().int().min(5).max(86400).default(8), // legacy alias
@@ -136,6 +137,7 @@ export type Uc5Status = {
     ingestIntervalSec?: number;
     regimeLookbackSeconds?: number;
     regimeBarSeconds?: number;
+    regimeSampleEverySec?: number;
     trendEntryStrength?: number;
     flipCooldownSec?: number;
     riskLoopIntervalSec?: number;
