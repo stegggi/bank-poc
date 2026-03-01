@@ -11,6 +11,15 @@ from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
 UTC = timezone.utc
 DAY_RE = re.compile(r"^uc5_(\d{4}-\d{2}-\d{2})\.sqlite$")
 
+
+def _f(x: Any) -> Optional[float]:
+  try:
+    if x is None:
+      return None
+    return float(x)
+  except Exception:
+    return None
+
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
