@@ -89,6 +89,8 @@ const POOL_COMPARISON_CHECK_INTERVAL_MS = 60 * 60 * 1000;
 const POOL_COMPARISON_STALE_MS = 24 * 60 * 60 * 1000;
 const TX_LOOKUP_PROVIDER_PREFERENCE = ["ankr_http", "base_public_http", "infura_http", "alchemy_http"];
 const INFURA_DAILY_RETRY_HOUR_UTC = 5;
+const MULTICALL_BATCH_SIZE = 50;
+const TOP_UP_FAILURE_COOLDOWN_SEC = 900;
 
 const POOL_ABI = [
   {
@@ -528,10 +530,10 @@ const DEFAULT_SETTINGS = {
   slippageBps: 30,
   pollIntervalMs: 2000,
   wsEnabled: true,
-  slot0RefreshEverySec: 12,
-  balancesRefreshEverySec: 60,
-  positionRefreshEverySec: 60,
-  inventoryRefreshEverySec: 300,
+  slot0RefreshEverySec: 20,
+  balancesRefreshEverySec: 120,
+  positionRefreshEverySec: 180,
+  inventoryRefreshEverySec: 900,
   collectableRefreshEverySec: 1800,
   dashboardRecommendedPollMs: 12000,
   maxDeployUsdc: 50_000,
@@ -631,6 +633,16 @@ function utcDayKey(ms = Date.now()) {
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
+}
+
+function chunkArray(items, size) {
+  const out = [];
+  const arr = Array.isArray(items) ? items : [];
+  const chunkSize = Math.max(1, Math.floor(Number(size || 1)));
+  for (let i = 0; i < arr.length; i += chunkSize) {
+    out.push(arr.slice(i, i + chunkSize));
+  }
+  return out;
 }
 
 function toNumber(v, fallback) {
@@ -1026,6 +1038,7 @@ function defaultState(accountAddress) {
     reEntryCooldownUntilIso: null,
     trendingSinceIso: null,
     meanRevertingSinceIso: null,
+    topUpRetryAfterIso: null,
     pendingEntrySnapshot: null,
     pendingCompoundUsd: 0,
     rangeStats: {
@@ -1653,6 +1666,8 @@ class Uc6Bot {
     });
     this.publicClient = {
       readContract: (args) => this.httpPool.invoke("readContract", (p) => p.publicClient.readContract(args), { timeoutMs: 8_000, retries: 2 }),
+      multicall: (args) =>
+        this.httpPool.invoke("multicall", (p) => p.publicClient.multicall(args), { timeoutMs: 12_000, retries: 2 }),
       simulateContract: (args) =>
         this.httpPool.invoke("simulateContract", (p) => p.publicClient.simulateContract(args), { timeoutMs: 12_000, retries: 2 }),
       getBalance: (args) => this.httpPool.invoke("getBalance", (p) => p.publicClient.getBalance(args), { timeoutMs: 8_000, retries: 2 }),
@@ -4007,11 +4022,35 @@ class Uc6Bot {
     const key = getAddress(poolAddress);
     const cached = this.poolMetaCache.get(key);
     if (cached) return cached;
-    // Keep metadata reads serialized to avoid startup bursts on credit-metered providers.
-    const token0 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token0" });
-    const token1 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token1" });
-    const tickSpacing = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "tickSpacing" });
-    const fee = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "fee" }).catch(() => 3000);
+    let token0 = null;
+    let token1 = null;
+    let tickSpacing = null;
+    let fee = 3000;
+    try {
+      const results = await this.publicClient.multicall({
+        allowFailure: true,
+        contracts: [
+          { address: key, abi: POOL_ABI, functionName: "token0" },
+          { address: key, abi: POOL_ABI, functionName: "token1" },
+          { address: key, abi: POOL_ABI, functionName: "tickSpacing" },
+          { address: key, abi: POOL_ABI, functionName: "fee" },
+        ],
+      });
+      token0 = results?.[0]?.status === "success" ? results[0].result : null;
+      token1 = results?.[1]?.status === "success" ? results[1].result : null;
+      tickSpacing = results?.[2]?.status === "success" ? results[2].result : null;
+      fee = results?.[3]?.status === "success" ? Number(results[3].result) : 3000;
+    } catch {
+      // Fall back to individual reads when multicall is unavailable or degraded.
+    }
+    if (!token0) token0 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token0" });
+    if (!token1) token1 = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "token1" });
+    if (tickSpacing == null) {
+      tickSpacing = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "tickSpacing" });
+    }
+    if (!(Number.isFinite(Number(fee)) && Number(fee) > 0)) {
+      fee = await this.publicClient.readContract({ address: key, abi: POOL_ABI, functionName: "fee" }).catch(() => 3000);
+    }
     const meta = {
       token0: getAddress(token0),
       token1: getAddress(token1),
@@ -4123,9 +4162,8 @@ class Uc6Bot {
   }
 
   async refreshWalletBalancesHeavy() {
-    const [usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw] = await Promise.all([
-      this.readTokenBalance(this.usdc),
-      this.readTokenBalance(this.weth),
+    const [{ usdcBalanceRaw, wethBalanceRaw }, ethBalanceRaw] = await Promise.all([
+      this.readWalletPairBalances(),
       this.publicClient.getBalance({ address: this.account.address }),
     ]);
     const primary = this.state.latest?.primary || null;
@@ -4225,6 +4263,7 @@ class Uc6Bot {
   }
 
   async maybeRefreshPositionInventory({ force = false } = {}) {
+    if (!force && !this.state.position?.tokenId && this.getStrategyMode() !== "LP_ACTIVE") return;
     if (!this.isTtlDue("inventoryMs", this.settings.inventoryRefreshEverySec, { force })) return;
     try {
       await this.refreshOwnedSlipstreamPositionInventory();
@@ -4654,14 +4693,12 @@ class Uc6Bot {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
     const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
-    const posRaw = await this.publicClient.readContract({
-      address: npm,
-      abi: NPM_POSITION_ABI,
-      functionName: "positions",
-      args: [BigInt(tokenId)],
-    });
-    const token0 = getAddress(posRaw.token0 ?? posRaw[2]);
-    const token1 = getAddress(posRaw.token1 ?? posRaw[3]);
+    const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const activePool = venueActive === "uniswapv3"
+      ? this.state.latest?.fallback || this.state.latest?.primary || null
+      : this.state.latest?.primary || this.state.latest?.fallback || null;
+    const token0 = getAddress(activePool?.token0 || this.weth);
+    const token1 = getAddress(activePool?.token1 || this.usdc);
     try {
       const sim = await this.publicClient.simulateContract({
         address: npm,
@@ -4714,6 +4751,40 @@ class Uc6Bot {
       functionName: "balanceOf",
       args: [this.account.address],
     });
+  }
+
+  async readWalletPairBalances() {
+    try {
+      const results = await this.publicClient.multicall({
+        allowFailure: true,
+        contracts: [
+          {
+            address: this.usdc,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [this.account.address],
+          },
+          {
+            address: this.weth,
+            abi: erc20Abi,
+            functionName: "balanceOf",
+            args: [this.account.address],
+          },
+        ],
+      });
+      const usdcBalanceRaw = results?.[0]?.status === "success" ? BigInt(results[0].result || 0n) : null;
+      const wethBalanceRaw = results?.[1]?.status === "success" ? BigInt(results[1].result || 0n) : null;
+      if (usdcBalanceRaw != null && wethBalanceRaw != null) {
+        return { usdcBalanceRaw, wethBalanceRaw };
+      }
+    } catch {
+      // Fall back to individual reads when multicall is unavailable or degraded.
+    }
+    const [usdcBalanceRaw, wethBalanceRaw] = await Promise.all([
+      this.readTokenBalance(this.usdc),
+      this.readTokenBalance(this.weth),
+    ]);
+    return { usdcBalanceRaw, wethBalanceRaw };
   }
 
   async readAllowance(tokenAddress, spender) {
@@ -5948,6 +6019,8 @@ class Uc6Bot {
     if (!tokenId) return false;
     if (!snapshot) return false;
     if (this.settings.venue !== "slipstream") return false;
+    const topUpRetryAtMs = Date.parse(this.state.topUpRetryAfterIso || "");
+    if (Number.isFinite(topUpRetryAtMs) && topUpRetryAtMs > Date.now()) return false;
     const caps = this.getExecutionCapsConfig();
     const currentTopUps = Number(this.state.position?.topUpsThisCycle || 0);
     if (currentTopUps >= Number(caps.maxTopUpsPerCycle || 0)) return false;
@@ -5982,11 +6055,9 @@ class Uc6Bot {
     try {
       const maxSwapCount = Math.max(0, Math.min(1, Number(caps.maxSwapsOnOpen || 0)));
       let swapsUsed = 0;
-      let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-      let wethBalanceRaw = await this.readTokenBalance(this.weth);
+      let { usdcBalanceRaw, wethBalanceRaw } = await this.readWalletPairBalances();
       const syncWalletPairBalances = async () => {
-        usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-        wethBalanceRaw = await this.readTokenBalance(this.weth);
+        ({ usdcBalanceRaw, wethBalanceRaw } = await this.readWalletPairBalances());
       };
       const applySwapDelta = (swapRes) => {
         if (!swapRes) return;
@@ -6190,8 +6261,7 @@ class Uc6Bot {
       const token0 = snapshot.token0;
       const token1 = snapshot.token1;
       // Re-read once before increaseLiquidity sizing, then keep a dust buffer.
-      const usdcBeforeIncrease = await this.readTokenBalance(this.usdc);
-      const wethBeforeIncrease = await this.readTokenBalance(this.weth);
+      const { usdcBalanceRaw: usdcBeforeIncrease, wethBalanceRaw: wethBeforeIncrease } = await this.readWalletPairBalances();
       const usdcSpendableNow = usdcBeforeIncrease > keepReserveTopUpRaw ? usdcBeforeIncrease - keepReserveTopUpRaw : 0n;
       const usdcCap = usdcSpendableNow < maxDeployRaw ? usdcSpendableNow : maxDeployRaw;
       const wethCap = wethBeforeIncrease;
@@ -6246,8 +6316,7 @@ class Uc6Bot {
 
         // Re-read once and re-size from actual balances (no new swap) before the deeper
         // haircut ladder. This often turns "error -> next-loop topup" into one cycle.
-        const usdcRetryBalance = await this.readTokenBalance(this.usdc);
-        const wethRetryBalance = await this.readTokenBalance(this.weth);
+        const { usdcBalanceRaw: usdcRetryBalance, wethBalanceRaw: wethRetryBalance } = await this.readWalletPairBalances();
         const usdcRetrySpendable = usdcRetryBalance > keepReserveTopUpRaw ? usdcRetryBalance - keepReserveTopUpRaw : 0n;
         const usdcRetryCap = usdcRetrySpendable < maxDeployRaw ? usdcRetrySpendable : maxDeployRaw;
         const wethRetryCap = wethRetryBalance;
@@ -6329,8 +6398,10 @@ class Uc6Bot {
         }
       }
       this.finalizeActiveAction("topup", "idle_deploy");
+      this.state.topUpRetryAfterIso = null;
       return true;
     } catch (err) {
+      this.state.topUpRetryAfterIso = new Date(Date.now() + TOP_UP_FAILURE_COOLDOWN_SEC * 1000).toISOString();
       this.setLastError(err);
       this.setDecision({
         action: "topup_failed",
@@ -6349,20 +6420,12 @@ class Uc6Bot {
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0 };
     await this.assertTxAllowed("harvest_collect");
     const id = BigInt(tokenId);
-    let posRaw = null;
-    try {
-      posRaw = await this.publicClient.readContract({
-        address: npmAddress,
-        abi: NPM_POSITION_ABI,
-        functionName: "positions",
-        args: [id],
-      });
-    } catch {
-      posRaw = null;
-    }
-    const pos = posRaw ? this.parsePositionResult(posRaw) : null;
-    const preUsdc = await this.readTokenBalance(this.usdc);
-    const preWeth = await this.readTokenBalance(this.weth);
+    const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const activePool = venueActive === "uniswapv3"
+      ? this.state.latest?.fallback || this.state.latest?.primary || null
+      : this.state.latest?.primary || this.state.latest?.fallback || null;
+    const pos = activePool ? { token0: activePool.token0, token1: activePool.token1 } : null;
+    const { usdcBalanceRaw: preUsdc, wethBalanceRaw: preWeth } = await this.readWalletPairBalances();
 
     const hashCollect = await this.walletClient.writeContract({
       address: npmAddress,
@@ -6383,8 +6446,7 @@ class Uc6Bot {
 
     const decodedCollect = this.extractCollectedAmountsFromReceipt(receipt, npmAddress, id);
 
-    const postUsdc = await this.readTokenBalance(this.usdc);
-    const postWeth = await this.readTokenBalance(this.weth);
+    const { usdcBalanceRaw: postUsdc, wethBalanceRaw: postWeth } = await this.readWalletPairBalances();
     const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
     const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
     let usdcRaw = usdcDelta;
@@ -7334,66 +7396,121 @@ class Uc6Bot {
       inventory.ownerNftCount = Number.isFinite(owned) ? owned : 0;
 
       const scanCount = Math.min(inventory.ownerNftCount, 200);
-      for (let i = 0; i < scanCount; i += 1) {
-        let tokenIdRaw;
-        try {
-          tokenIdRaw = await this.publicClient.readContract({
-            address: this.slipstreamNpm,
-            abi: NPM_POSITION_ABI,
-            functionName: "tokenOfOwnerByIndex",
-            args: [this.account.address, BigInt(i)],
-          });
-        } catch {
-          continue;
-        }
-
-        let posRaw;
-        try {
-          posRaw = await this.publicClient.readContract({
-            address: this.slipstreamNpm,
-            abi: NPM_POSITION_ABI,
-            functionName: "positions",
-            args: [BigInt(tokenIdRaw)],
-          });
-        } catch (err) {
-          const msg = err instanceof Error ? err.message : String(err || "");
-          if (msg.includes('function "positions" reverted') && /\bID\b/.test(msg)) continue;
-          continue;
-        }
-
-        const pos = this.parsePositionResult(posRaw);
-        if (!pos || pos.liquidity <= 0n) continue;
-
-        let usdValue = 0;
-        let inRange = null;
-        if (sqrtPriceX96Raw && Number.isFinite(currentTick)) {
+      if (scanCount > 0) {
+        const tokenIds = [];
+        for (const batch of chunkArray(Array.from({ length: scanCount }, (_, i) => i), MULTICALL_BATCH_SIZE)) {
+          let batchResults = null;
           try {
-            const amounts = this.lpAmountsFromLiquidity(
-              pos.liquidity,
-              pos.tickLower,
-              pos.tickUpper,
-              sqrtPriceX96Raw,
-              pos.token0,
-              pos.token1
-            );
-            const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
-            const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
-            usdValue = usdc + weth * this.getSpotUsdcPerWeth();
-            inRange = currentTick > pos.tickLower && currentTick < pos.tickUpper;
+            batchResults = await this.publicClient.multicall({
+              allowFailure: true,
+              contracts: batch.map((i) => ({
+                address: this.slipstreamNpm,
+                abi: NPM_POSITION_ABI,
+                functionName: "tokenOfOwnerByIndex",
+                args: [this.account.address, BigInt(i)],
+              })),
+            });
           } catch {
-            usdValue = 0;
-            inRange = null;
+            batchResults = null;
+          }
+          if (!Array.isArray(batchResults)) {
+            for (const i of batch) {
+              try {
+                const tokenIdRaw = await this.publicClient.readContract({
+                  address: this.slipstreamNpm,
+                  abi: NPM_POSITION_ABI,
+                  functionName: "tokenOfOwnerByIndex",
+                  args: [this.account.address, BigInt(i)],
+                });
+                tokenIds.push(tokenIdRaw);
+              } catch {
+                // skip missing index
+              }
+            }
+            continue;
+          }
+          for (const entry of batchResults) {
+            if (entry?.status === "success") tokenIds.push(entry.result);
           }
         }
 
-        inventory.active.push({
-          tokenId: tokenIdRaw.toString(),
-          tickLower: pos.tickLower,
-          tickUpper: pos.tickUpper,
-          liquidity: pos.liquidity.toString(),
-          usdValue,
-          inRange,
-        });
+        for (const batch of chunkArray(tokenIds, MULTICALL_BATCH_SIZE)) {
+          let posResults = null;
+          try {
+            posResults = await this.publicClient.multicall({
+              allowFailure: true,
+              contracts: batch.map((tokenIdRaw) => ({
+                address: this.slipstreamNpm,
+                abi: NPM_POSITION_ABI,
+                functionName: "positions",
+                args: [BigInt(tokenIdRaw)],
+              })),
+            });
+          } catch {
+            posResults = null;
+          }
+          const normalizedResults = Array.isArray(posResults)
+            ? posResults
+            : await Promise.all(
+                batch.map(async (tokenIdRaw) => {
+                  try {
+                    const result = await this.publicClient.readContract({
+                      address: this.slipstreamNpm,
+                      abi: NPM_POSITION_ABI,
+                      functionName: "positions",
+                      args: [BigInt(tokenIdRaw)],
+                    });
+                    return { status: "success", result };
+                  } catch (err) {
+                    return { status: "failure", error: err };
+                  }
+                })
+              );
+
+          for (let idx = 0; idx < batch.length; idx += 1) {
+            const tokenIdRaw = batch[idx];
+            const posEntry = normalizedResults[idx];
+            if (posEntry?.status !== "success") {
+              const msg = posEntry?.error instanceof Error ? posEntry.error.message : String(posEntry?.error || "");
+              if (msg.includes('function "positions" reverted') && /\bID\b/.test(msg)) continue;
+              continue;
+            }
+
+            const pos = this.parsePositionResult(posEntry.result);
+            if (!pos || pos.liquidity <= 0n) continue;
+
+            let usdValue = 0;
+            let inRange = null;
+            if (sqrtPriceX96Raw && Number.isFinite(currentTick)) {
+              try {
+                const amounts = this.lpAmountsFromLiquidity(
+                  pos.liquidity,
+                  pos.tickLower,
+                  pos.tickUpper,
+                  sqrtPriceX96Raw,
+                  pos.token0,
+                  pos.token1
+                );
+                const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
+                const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+                usdValue = usdc + weth * this.getSpotUsdcPerWeth();
+                inRange = currentTick > pos.tickLower && currentTick < pos.tickUpper;
+              } catch {
+                usdValue = 0;
+                inRange = null;
+              }
+            }
+
+            inventory.active.push({
+              tokenId: tokenIdRaw.toString(),
+              tickLower: pos.tickLower,
+              tickUpper: pos.tickUpper,
+              liquidity: pos.liquidity.toString(),
+              usdValue,
+              inRange,
+            });
+          }
+        }
       }
 
       inventory.active.sort((a, b) => Number(b.usdValue || 0) - Number(a.usdValue || 0));
