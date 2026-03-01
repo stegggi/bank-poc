@@ -318,13 +318,13 @@ export function evaluateUc5Regime({
   const est = estimateOU(state);
   const ts = normalizedBars.length > 0 ? Number(normalizedBars[normalizedBars.length - 1]?.t || Date.now()) : Date.now();
   const direction = trendDirectionFromSamples(state.samples);
-  const strength = clamp(Number(est?.confidence || 0), 0, 1);
+  const estimateConfidence = clamp(Number(est?.confidence || 0), 0, 1);
 
   if (!est?.ok) {
     return {
       state: "UNKNOWN",
       direction: null,
-      strength,
+      strength: 0,
       reason: `regime unavailable: ${String(est?.label || "unknown")}`,
       ts,
       diagnostics: {
@@ -338,14 +338,15 @@ export function evaluateUc5Regime({
     return {
       state: "TREND",
       direction,
-      strength,
-      reason: `trending ${direction.toLowerCase()} | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${strength.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
+      strength: estimateConfidence,
+      reason: `trending ${direction.toLowerCase()} | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${estimateConfidence.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
       ts,
       diagnostics: {
         sampleCount: Number(est.sampleCount || 0),
         halfLifeSec: Number(est.halfLifeSec || 0),
         slope: Number(est.slope || 0),
         r2: Number(est.r2 || 0),
+        estimateConfidence,
       },
     };
   }
@@ -354,29 +355,33 @@ export function evaluateUc5Regime({
     return {
       state: "RANGE",
       direction: null,
-      strength,
-      reason: `mean reversion | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${strength.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
+      strength: 0,
+      reason: `mean reversion | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${estimateConfidence.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
       ts,
       diagnostics: {
         sampleCount: Number(est.sampleCount || 0),
         halfLifeSec: Number(est.halfLifeSec || 0),
         slope: Number(est.slope || 0),
         r2: Number(est.r2 || 0),
+        estimateConfidence,
       },
     };
   }
 
+  const halfLifeSec = Number(est.halfLifeSec || 0);
+  const halfLifeText = Number.isFinite(halfLifeSec) && halfLifeSec > 0 ? `${Math.round(halfLifeSec)}s` : "n/a";
   return {
     state: "UNKNOWN",
     direction: null,
-    strength,
-    reason: `uncertain regime | label=${String(est.label || "unknown")} | confidence=${strength.toFixed(2)}`,
+    strength: 0,
+    reason: `uncertain regime | label=${String(est.label || "unknown")} | halfLife=${halfLifeText} | confidence=${estimateConfidence.toFixed(2)}`,
     ts,
     diagnostics: {
       sampleCount: Number(est.sampleCount || 0),
-      halfLifeSec: Number.isFinite(Number(est.halfLifeSec)) ? Number(est.halfLifeSec) : null,
+      halfLifeSec: Number.isFinite(halfLifeSec) ? halfLifeSec : null,
       slope: Number(est.slope || 0),
       r2: Number(est.r2 || 0),
+      estimateConfidence,
     },
   };
 }
