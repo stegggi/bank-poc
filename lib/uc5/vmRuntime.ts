@@ -38,6 +38,7 @@ export function defaultUc5Config(): Uc5Config {
     regimeLookbackSeconds: 1800,
     regimeBarSeconds: 1,
     regimeSampleEverySec: 12,
+    trendHalfLifeMinSec: 450,
     trendEntryStrength: 0.7,
     flipCooldownSec: 15,
     reassessIntervalSec: 8,

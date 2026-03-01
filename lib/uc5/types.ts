@@ -26,6 +26,7 @@ export const Uc5ConfigSchema = z.object({
   regimeLookbackSeconds: z.number().int().min(60).max(86400).default(1800),
   regimeBarSeconds: z.number().int().min(1).max(60).default(1),
   regimeSampleEverySec: z.number().int().min(1).max(300).default(12),
+  trendHalfLifeMinSec: z.number().int().min(60).max(7200).default(450),
   trendEntryStrength: z.number().min(0.5).max(0.99).default(0.7),
   flipCooldownSec: z.number().int().min(0).max(600).default(15),
   reassessIntervalSec: z.number().int().min(5).max(86400).default(8), // legacy alias
@@ -138,6 +139,7 @@ export type Uc5Status = {
     regimeLookbackSeconds?: number;
     regimeBarSeconds?: number;
     regimeSampleEverySec?: number;
+    trendHalfLifeMinSec?: number;
     trendEntryStrength?: number;
     flipCooldownSec?: number;
     riskLoopIntervalSec?: number;
@@ -199,6 +201,7 @@ export type Uc5Status = {
     regimeState?: "TREND" | "RANGE" | "UNKNOWN" | string;
     regimeDirection?: "UP" | "DOWN" | null | string;
     regimeStrength?: number;
+    regimeDiagnostics?: unknown;
     lastRegimeChangeAt?: number;
     reason?: string;
     reasonHuman?: string;
@@ -248,6 +251,9 @@ export type Uc5Status = {
       subscribed?: boolean;
       lastError?: string | null;
       productId?: string;
+      restartCount?: number;
+      lastRestartMs?: number | null;
+      lastRestartReason?: string | null;
       stale?: boolean;
       staleAfterMs?: number;
     };

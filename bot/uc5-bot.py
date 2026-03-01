@@ -229,6 +229,7 @@ def default_runtime_config() -> Dict[str, Any]:
     "regimeLookbackSeconds": 1800,
     "regimeBarSeconds": 1,
     "regimeSampleEverySec": 12,
+    "trendHalfLifeMinSec": 450,
     "trendEntryStrength": 0.70,
     "flipCooldownSec": 15,
     "predictionHorizonSeconds": 30,
@@ -339,6 +340,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["regimeLookbackSeconds"] = clamp(_to_int(base.get("regimeLookbackSeconds", 1800), 1800), 60, 86400)
   base["regimeBarSeconds"] = clamp(_to_int(base.get("regimeBarSeconds", 1), 1), 1, 60)
   base["regimeSampleEverySec"] = clamp(_to_int(base.get("regimeSampleEverySec", max(12, int(base["regimeBarSeconds"]))), max(12, int(base["regimeBarSeconds"]))), 1, 300)
+  base["trendHalfLifeMinSec"] = clamp(_to_int(base.get("trendHalfLifeMinSec", 450), 450), 60, 7200)
   base["trendEntryStrength"] = clamp(_to_float(base.get("trendEntryStrength", 0.70), 0.70), 0.5, 0.99)
   legacy_flip_cooldown = _to_int(base.get("cooldownAfterCloseSec", 15), 15)
   base["flipCooldownSec"] = clamp(_to_int(base.get("flipCooldownSec", legacy_flip_cooldown), legacy_flip_cooldown), 0, 600)
@@ -1821,6 +1823,7 @@ async def _run_ws_book_depth_loop(
     try:
       quote_cache.set_error(None)
       ws_client = AsyncWSClient({"base_url": ws_base, "verbose": False})
+      print(f"[WS_CONNECT] productId={product_id} action=open base={ws_base}")
 
       async def _on_book(data: Dict[str, Any]) -> None:
         quote_cache.update_book(data)
@@ -1828,7 +1831,10 @@ async def _run_ws_book_depth_loop(
       ws_client.callbacks["BookDepth"] = [_on_book]
       await ws_client.open(namespaces=["/v1/stream"])
       quote_cache.set_conn(True)
+      print(f"[WS_CONNECT] productId={product_id} action=open_ok")
+      print(f"[WS_CONNECT] productId={product_id} action=subscribe stream=BookDepth")
       await ws_client.subscribe(stream_type="BookDepth", product_id=product_id)
+      print(f"[WS_CONNECT] productId={product_id} action=subscribe_ok stream=BookDepth")
       while True:
         snap = quote_cache.snapshot()
         last_update_ms = _f(snap.get("lastUpdateMs"))
@@ -1849,6 +1855,7 @@ async def _run_ws_book_depth_loop(
     except Exception as e:
       quote_cache.set_conn(False)
       quote_cache.set_error(str(e))
+      print(f"[WS_CONNECT] productId={product_id} action=error error={str(e)}")
       await asyncio.sleep(2.0)
     finally:
       if ws_client is not None:
@@ -2514,7 +2521,7 @@ async def evaluate_regime(
       "regimeLookbackSeconds": lookback_seconds,
       "regimeBarSeconds": bar_seconds,
       "regimeSampleEverySec": sample_every_sec,
-      "trendHalfLifeMinSec": max(60, int(min(lookback_seconds, 900))),
+      "trendHalfLifeMinSec": int(cfg.get("trendHalfLifeMinSec", min(lookback_seconds, 450))),
     }
   )
   return (_regime_from_runner_result(result, now_ms), bars)
@@ -3596,6 +3603,7 @@ async def main():
           "regimeLookbackSeconds": int(cfg.get("regimeLookbackSeconds", 1800)),
           "regimeBarSeconds": int(cfg.get("regimeBarSeconds", 1)),
           "regimeSampleEverySec": int(cfg.get("regimeSampleEverySec", max(12, int(cfg.get("regimeBarSeconds", 1))))),
+          "trendHalfLifeMinSec": int(cfg.get("trendHalfLifeMinSec", 450)),
           "trendEntryStrength": float(cfg.get("trendEntryStrength", 0.70)),
           "flipCooldownSec": int(cfg.get("flipCooldownSec", cfg.get("cooldownAfterCloseSec", 15))),
           "riskLoopIntervalSec": int(cfg.get("riskLoopIntervalSec", 1)),

@@ -145,6 +145,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     regimeLookbackSeconds: c.regimeLookbackSeconds ?? 1800,
     regimeBarSeconds: c.regimeBarSeconds ?? 1,
     regimeSampleEverySec: c.regimeSampleEverySec ?? Math.max(12, c.regimeBarSeconds ?? 1),
+    trendHalfLifeMinSec: c.trendHalfLifeMinSec ?? 450,
     trendEntryStrength: c.trendEntryStrength ?? 0.7,
     flipCooldownSec: c.flipCooldownSec ?? c.cooldownAfterCloseSec ?? 15,
     reassessIntervalSec: inPos,
@@ -330,6 +331,9 @@ export default function Uc5Page() {
     }
     if ((edit.regimeSampleEverySec ?? Math.max(12, edit.regimeBarSeconds ?? 1)) < 1 || (edit.regimeSampleEverySec ?? Math.max(12, edit.regimeBarSeconds ?? 1)) > 300) {
       errors.regimeSampleEverySec = "Regime sample cadence must be 1 to 300 sec";
+    }
+    if ((edit.trendHalfLifeMinSec ?? 450) < 60 || (edit.trendHalfLifeMinSec ?? 450) > 7200) {
+      errors.trendHalfLifeMinSec = "Trend half-life min must be 60 to 7200 sec";
     }
     if ((edit.trendEntryStrength ?? 0.7) < 0.5 || (edit.trendEntryStrength ?? 0.7) > 0.99) {
       errors.trendEntryStrength = "Trend entry strength must be 0.50 to 0.99";
@@ -799,6 +803,7 @@ export default function Uc5Page() {
               <KV k="Risk loop" v={`${status?.runtime?.riskLoopIntervalSec ?? edit?.riskLoopIntervalSec ?? 1}s`} />
               <KV k="Flat decision loop" v={`${status?.runtime?.decisionLoopIntervalSec ?? edit?.decisionLoopIntervalSec ?? 4}s`} />
               <KV k="Regime sample cadence" v={`${status?.runtime?.regimeSampleEverySec ?? edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}s`} />
+              <KV k="Trend half-life min" v={`${status?.runtime?.trendHalfLifeMinSec ?? edit?.trendHalfLifeMinSec ?? 450}s`} />
               <KV
                 k="In-position loop"
                 v={`${status?.runtime?.inPositionReassessIntervalSec ?? edit?.inPositionReassessIntervalSec ?? 8}s`}
@@ -822,6 +827,14 @@ export default function Uc5Page() {
                 v={
                   status?.execution?.wsQuotes
                     ? `${status.execution.wsQuotes.connected ? "connected" : "disconnected"} / ${status.execution.wsQuotes.subscribed ? "subscribed" : "not subscribed"}`
+                    : "—"
+                }
+              />
+              <KV
+                k="WS restart"
+                v={
+                  status?.execution?.wsQuotes
+                    ? `${status.execution.wsQuotes.restartCount ?? 0} (${status.execution.wsQuotes.lastRestartReason || "—"})`
                     : "—"
                 }
               />
@@ -969,6 +982,19 @@ export default function Uc5Page() {
                 value={edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}
                 disabled={!isOwner}
                 onChange={(e) => setEdit((p) => (p ? { ...p, regimeSampleEverySec: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="Trend half-life min (sec)" help="Minimum OU half-life required before UC5 treats a regime as TREND." error={validation.trendHalfLifeMinSec}>
+              <input
+                style={input}
+                type="number"
+                min={60}
+                max={7200}
+                step={30}
+                value={edit?.trendHalfLifeMinSec ?? 450}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, trendHalfLifeMinSec: Number(e.target.value) } : p))}
               />
             </Field>
 
@@ -1399,6 +1425,16 @@ export default function Uc5Page() {
             <KV
               k="Last regime change"
               v={status?.agent?.lastRegimeChangeAt ? new Date(status.agent.lastRegimeChangeAt).toLocaleString() : "—"}
+            />
+            <KV
+              k="Regime failure code"
+              v={
+                status?.agent?.regimeDiagnostics &&
+                typeof status.agent.regimeDiagnostics === "object" &&
+                "failureCode" in (status.agent.regimeDiagnostics as Record<string, unknown>)
+                  ? String((status.agent.regimeDiagnostics as Record<string, unknown>).failureCode || "—")
+                  : "—"
+              }
             />
             <KV k="Reason" v={status?.agent?.reasonHuman || status?.agent?.reason || "—"} />
             <details style={{ marginTop: 10 }}>
