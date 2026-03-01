@@ -84,8 +84,14 @@ export function estimateOU(state) {
     halfLifeSec: Number.POSITIVE_INFINITY,
     label: "unknown",
     confidence: 0,
+    failureReason: "unknown",
   };
-  if (!state || typeof state !== "object" || !Array.isArray(state.samples)) return unknown;
+  if (!state || typeof state !== "object" || !Array.isArray(state.samples)) {
+    return {
+      ...unknown,
+      failureReason: "invalid_state",
+    };
+  }
   const samples = state.samples.filter(
     (s) => s && Number.isFinite(Number(s.tsSec)) && Number.isFinite(Number(s.logPrice))
   );
@@ -93,6 +99,7 @@ export function estimateOU(state) {
   if (samples.length < minSamples) {
     return {
       ...unknown,
+      failureReason: "insufficient_samples",
       confidence: clamp(samples.length / Math.max(minSamples, 1), 0, 0.49),
     };
   }
@@ -115,12 +122,18 @@ export function estimateOU(state) {
   if (xs.length < minSamples - 1) {
     return {
       ...unknown,
+      failureReason: "insufficient_transitions",
       confidence: clamp(xs.length / Math.max(minSamples - 1, 1), 0, 0.49),
     };
   }
 
   const dtSec = median(dts);
-  if (!(Number.isFinite(dtSec) && dtSec > 0)) return unknown;
+  if (!(Number.isFinite(dtSec) && dtSec > 0)) {
+    return {
+      ...unknown,
+      failureReason: "invalid_dt",
+    };
+  }
 
   const n = xs.length;
   const xMean = xs.reduce((a, b) => a + b, 0) / n;
@@ -135,10 +148,20 @@ export function estimateOU(state) {
     sxy += dx * dy;
     syy += dy * dy;
   }
-  if (!(Number.isFinite(sxx) && sxx > 1e-18)) return unknown;
+  if (!(Number.isFinite(sxx) && sxx > 1e-18)) {
+    return {
+      ...unknown,
+      failureReason: "zero_variance_x",
+    };
+  }
   const b = sxy / sxx;
   const a = yMean - b * xMean;
-  if (!(Number.isFinite(a) && Number.isFinite(b))) return unknown;
+  if (!(Number.isFinite(a) && Number.isFinite(b))) {
+    return {
+      ...unknown,
+      failureReason: "invalid_regression_coefficients",
+    };
+  }
 
   let theta = 0;
   let mu = 0;
@@ -344,7 +367,7 @@ export function evaluateUc5Regime({
   };
 
   if (!est?.ok) {
-    let failureCode = "ou_estimate_unavailable";
+    let failureCode = String(est?.failureReason || "ou_estimate_unavailable");
     if (sampleCount < minSamples) failureCode = "insufficient_samples";
     else if (!(priceRangeBps > 0.01)) failureCode = "flat_price_window";
     else if (coverageSec < Math.max(sampleEverySec, 1) * Math.max(minSamples - 1, 1)) failureCode = "insufficient_window_coverage";

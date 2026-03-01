@@ -2630,6 +2630,12 @@ async def main():
         if ws_last_update_ms is not None and ws_last_update_ms > 0
         else None
       )
+      ws_last_restart_ms = _f(ws_snap.get("lastRestartMs"))
+      ws_since_restart_ms = (
+        max(0, int(now_ms - int(ws_last_restart_ms)))
+        if ws_last_restart_ms is not None and ws_last_restart_ms > 0
+        else None
+      )
       ws_task_done = bool(ws_quote_task is not None and ws_quote_task.done())
       ws_restart_reason: Optional[str] = None
       if AsyncWSClient is not None:
@@ -2637,6 +2643,19 @@ async def main():
           ws_restart_reason = "missing_ws_task"
         elif ws_task_done:
           ws_restart_reason = "ws_task_stopped"
+        elif (
+          bool(ws_snap.get("connected"))
+          and not bool(ws_snap.get("subscribed"))
+          and (ws_since_restart_ms is None or ws_since_restart_ms > 5000)
+        ):
+          ws_restart_reason = "ws_never_subscribed"
+        elif (
+          bool(ws_snap.get("connected"))
+          and bool(ws_snap.get("subscribed"))
+          and ws_age_ms is None
+          and (ws_since_restart_ms is None or ws_since_restart_ms > max(5000, int(WS_STALE_RECONNECT_MS)))
+        ):
+          ws_restart_reason = "ws_no_quote_updates"
         elif ws_age_ms is not None and ws_age_ms > max(5000, int(WS_STALE_RECONNECT_MS)):
           ws_restart_reason = f"ws_stale_{ws_age_ms}ms"
         elif not bool(ws_snap.get("connected")) and (ws_age_ms is None or ws_age_ms > 5000):
