@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Any, Dict, Optional
 
 
 def clamp(x: float, lo: float, hi: float) -> float:
@@ -43,6 +43,7 @@ class RegimeDecision:
   strength: float
   reason: str
   ts_ms: int
+  diagnostics: Optional[Dict[str, Any]] = None
 
 
 @dataclass

@@ -1749,6 +1749,9 @@ class WsQuoteCache:
     self.subscribed = False
     self.last_error: Optional[str] = None
     self.product_id: str = ""
+    self.restart_count = 0
+    self.last_restart_ms: Optional[int] = None
+    self.last_restart_reason: Optional[str] = None
 
   def set_product(self, product_id: str) -> None:
     with self._lock:
@@ -1764,6 +1767,12 @@ class WsQuoteCache:
   def set_error(self, err: Optional[str]) -> None:
     with self._lock:
       self.last_error = str(err) if err else None
+
+  def mark_restart(self, reason: Optional[str]) -> None:
+    with self._lock:
+      self.restart_count += 1
+      self.last_restart_ms = int(time.time() * 1000)
+      self.last_restart_reason = str(reason) if reason else None
 
   def update_book(self, payload: Any) -> None:
     bid, ask = _extract_best_bid_ask_from_ws_payload(payload)
@@ -1788,6 +1797,9 @@ class WsQuoteCache:
         "subscribed": self.subscribed,
         "lastError": self.last_error,
         "productId": self.product_id,
+        "restartCount": self.restart_count,
+        "lastRestartMs": self.last_restart_ms,
+        "lastRestartReason": self.last_restart_reason,
       }
 
 
@@ -2456,12 +2468,14 @@ def _regime_from_runner_result(result: Dict[str, Any], now_ms: int) -> RegimeDec
   direction = str(result.get("direction") or "").upper()
   if direction not in ("UP", "DOWN"):
     direction = None
+  diagnostics = result.get("diagnostics") if isinstance(result.get("diagnostics"), dict) else None
   return RegimeDecision(
     state=state,
     direction=direction,
     strength=clamp(float(result.get("strength") or 0.0), 0.0, 1.0),
     reason=str(result.get("reason") or ""),
     ts_ms=int(result.get("ts") or now_ms),
+    diagnostics=diagnostics,
   )
 
 
@@ -2482,6 +2496,14 @@ async def evaluate_regime(
         strength=0.0,
         reason="no bars",
         ts_ms=now_ms,
+        diagnostics={
+          "failureCode": "no_bars",
+          "windowSec": lookback_seconds,
+          "barSeconds": bar_seconds,
+          "sampleEverySec": sample_every_sec,
+          "barsProvided": 0,
+          "sampleCount": 0,
+        },
       ),
       [],
     )
@@ -2532,6 +2554,9 @@ async def main():
   last_regime_state = "UNKNOWN"
   last_regime_direction: Optional[str] = None
   last_regime_change_ms: Optional[int] = None
+  last_regime_diagnostics: Dict[str, Any] = {
+    "failureCode": "warming_up",
+  }
 
   last_decision_at_ms: Optional[int] = None
   next_decision_ms = 0
@@ -2594,8 +2619,42 @@ async def main():
           ws_quote_task = None
         ws_quote_cache = WsQuoteCache()
         if AsyncWSClient is not None:
+          ws_quote_cache.mark_restart("initial_product_subscribe")
           ws_quote_task = asyncio.create_task(_run_ws_book_depth_loop(eth_base, product_id, ws_quote_cache))
         cached_product_id = product_id
+
+      ws_snap = ws_quote_cache.snapshot()
+      ws_last_update_ms = _f(ws_snap.get("lastUpdateMs"))
+      ws_age_ms = (
+        max(0, int(now_ms - int(ws_last_update_ms)))
+        if ws_last_update_ms is not None and ws_last_update_ms > 0
+        else None
+      )
+      ws_task_done = bool(ws_quote_task is not None and ws_quote_task.done())
+      ws_restart_reason: Optional[str] = None
+      if AsyncWSClient is not None:
+        if ws_quote_task is None:
+          ws_restart_reason = "missing_ws_task"
+        elif ws_task_done:
+          ws_restart_reason = "ws_task_stopped"
+        elif ws_age_ms is not None and ws_age_ms > max(5000, int(WS_STALE_RECONNECT_MS)):
+          ws_restart_reason = f"ws_stale_{ws_age_ms}ms"
+        elif not bool(ws_snap.get("connected")) and (ws_age_ms is None or ws_age_ms > 5000):
+          ws_restart_reason = "ws_disconnected"
+      if ws_restart_reason:
+        if ws_quote_task is not None:
+          ws_quote_task.cancel()
+          try:
+            await ws_quote_task
+          except asyncio.CancelledError:
+            pass
+          except Exception:
+            pass
+        ws_quote_cache = WsQuoteCache()
+        ws_quote_cache.set_product(product_id)
+        ws_quote_cache.mark_restart(ws_restart_reason)
+        print(f"[WS_RECONNECT] productId={product_id} reason={ws_restart_reason}")
+        ws_quote_task = asyncio.create_task(_run_ws_book_depth_loop(eth_base, product_id, ws_quote_cache))
 
       owner_addr_raw = str(cfg.get("ownerAddress") or "")
       owner_addr = owner_addr_raw.lower()
@@ -3024,6 +3083,7 @@ async def main():
         last_conf = float(regime_decision.strength)
         last_regime_state = regime_decision.state
         last_regime_direction = regime_decision.direction
+        last_regime_diagnostics = clone_jsonable(regime_decision.diagnostics or {})
         metrics_cache["regime"] = regime_decision.state
 
         DB_MANAGER.insert_decision(
@@ -3182,20 +3242,21 @@ async def main():
                 if submitted_any:
                   last_order_ts.append(time.time())
                 last_action = {
-                  "type": "SKIP_ENTRY_UNFILLED",
-                  "ok": True,
-                  "info": {
-                    "desired": desired,
-                    "qty": qty,
+                "type": "SKIP_ENTRY_UNFILLED",
+                "ok": True,
+                "info": {
+                  "desired": desired,
+                  "qty": qty,
                     "filled": filled,
                     "remain": remain,
-                    "regimeState": regime_decision.state,
-                    "regimeDirection": regime_decision.direction,
-                    "regimeStrength": regime_decision.strength,
-                    "makerError": maker_err or None,
-                    "chaseAttempts": int(exec_result.get("attemptCount") or 0),
-                  },
-                }
+                  "regimeState": regime_decision.state,
+                  "regimeDirection": regime_decision.direction,
+                  "regimeStrength": regime_decision.strength,
+                  "regimeDiagnostics": clone_jsonable(regime_decision.diagnostics or {}),
+                  "makerError": maker_err or None,
+                  "chaseAttempts": int(exec_result.get("attemptCount") or 0),
+                },
+              }
               else:
                 maker_entry_opened += 1
                 if bool(exec_result.get("acceptedPartial")):
@@ -3253,6 +3314,7 @@ async def main():
                     "regimeState": regime_decision.state,
                     "regimeDirection": regime_decision.direction,
                     "regimeStrength": regime_decision.strength,
+                    "regimeDiagnostics": clone_jsonable(regime_decision.diagnostics or {}),
                     "sizeMultiplier": size_mult,
                     "makerFilledQty": filled,
                     "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
@@ -3274,6 +3336,7 @@ async def main():
                 "qtyRaw": qty_raw,
                 "lotSize": cached_lot_size,
                 "regimeStrength": regime_decision.strength,
+                "regimeDiagnostics": clone_jsonable(regime_decision.diagnostics or {}),
                 "maxSpreadBpsForTrade": float(cfg.get("maxSpreadBpsForTrade", 12.0)),
               },
             }
@@ -3286,6 +3349,7 @@ async def main():
               "regimeState": regime_decision.state,
               "regimeDirection": regime_decision.direction,
               "regimeStrength": regime_decision.strength,
+              "regimeDiagnostics": clone_jsonable(regime_decision.diagnostics or {}),
             },
           }
 
@@ -3312,6 +3376,7 @@ async def main():
         last_conf = float(regime_decision.strength)
         last_regime_state = regime_decision.state
         last_regime_direction = regime_decision.direction
+        last_regime_diagnostics = clone_jsonable(regime_decision.diagnostics or {})
 
         DB_MANAGER.insert_decision(
           ts_ms=now_ms,
@@ -3452,13 +3517,14 @@ async def main():
           last_action = {
             "type": "HOLD_REASSESS",
             "ok": True,
-            "info": {
-              "side": position_state.side,
-              "regimeState": regime_decision.state,
-              "regimeDirection": regime_decision.direction,
-              "regimeStrength": regime_decision.strength,
-            },
-          }
+                "info": {
+                  "side": position_state.side,
+                  "regimeState": regime_decision.state,
+                  "regimeDirection": regime_decision.direction,
+                  "regimeStrength": regime_decision.strength,
+                  "regimeDiagnostics": clone_jsonable(regime_decision.diagnostics or {}),
+                },
+              }
 
       if next_decision_ms <= 0:
         next_decision_ms = now_ms
@@ -3575,6 +3641,7 @@ async def main():
           "regimeState": last_regime_state,
           "regimeDirection": last_regime_direction,
           "regimeStrength": float(last_conf),
+          "regimeDiagnostics": clone_jsonable(last_regime_diagnostics),
           "lastRegimeChangeAt": last_regime_change_ms,
           "reason": raw_reason,
           "reasonHuman": human_reason,

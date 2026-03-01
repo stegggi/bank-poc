@@ -319,17 +319,44 @@ export function evaluateUc5Regime({
   const ts = normalizedBars.length > 0 ? Number(normalizedBars[normalizedBars.length - 1]?.t || Date.now()) : Date.now();
   const direction = trendDirectionFromSamples(state.samples);
   const estimateConfidence = clamp(Number(est?.confidence || 0), 0, 1);
+  const sampleCount = Array.isArray(state.samples) ? state.samples.length : 0;
+  const logPrices = Array.isArray(state.samples)
+    ? state.samples.map((s) => Number(s?.logPrice)).filter((v) => Number.isFinite(v))
+    : [];
+  const minLogPrice = logPrices.length ? Math.min(...logPrices) : null;
+  const maxLogPrice = logPrices.length ? Math.max(...logPrices) : null;
+  const priceRangeBps =
+    minLogPrice != null && maxLogPrice != null ? Math.abs(maxLogPrice - minLogPrice) * 10000 : 0;
+  const coverageSec =
+    sampleCount >= 2
+      ? Math.max(0, Number(state.samples[sampleCount - 1]?.tsSec || 0) - Number(state.samples[0]?.tsSec || 0))
+      : 0;
+  const baseDiagnostics = {
+    windowSec,
+    sampleEverySec,
+    minSamples,
+    barsProvided: normalizedBars.length,
+    sampleCount,
+    coverageSec,
+    priceRangeBps,
+    direction,
+    estimate: est,
+  };
 
   if (!est?.ok) {
+    let failureCode = "ou_estimate_unavailable";
+    if (sampleCount < minSamples) failureCode = "insufficient_samples";
+    else if (!(priceRangeBps > 0.01)) failureCode = "flat_price_window";
+    else if (coverageSec < Math.max(sampleEverySec, 1) * Math.max(minSamples - 1, 1)) failureCode = "insufficient_window_coverage";
     return {
       state: "UNKNOWN",
       direction: null,
       strength: 0,
-      reason: `regime unavailable: ${String(est?.label || "unknown")}`,
+      reason: `regime unavailable: ${failureCode} | label=${String(est?.label || "unknown")} | samples=${sampleCount}/${minSamples} | sampleEvery=${sampleEverySec}s | coverage=${coverageSec}s | range=${priceRangeBps.toFixed(2)}bps`,
       ts,
       diagnostics: {
-        sampleCount: Array.isArray(state.samples) ? state.samples.length : 0,
-        estimate: est,
+        ...baseDiagnostics,
+        failureCode,
       },
     };
   }
@@ -342,6 +369,7 @@ export function evaluateUc5Regime({
       reason: `trending ${direction.toLowerCase()} | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${estimateConfidence.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
       ts,
       diagnostics: {
+        ...baseDiagnostics,
         sampleCount: Number(est.sampleCount || 0),
         halfLifeSec: Number(est.halfLifeSec || 0),
         slope: Number(est.slope || 0),
@@ -359,6 +387,7 @@ export function evaluateUc5Regime({
       reason: `mean reversion | halfLife=${Math.round(Number(est.halfLifeSec || 0))}s | confidence=${estimateConfidence.toFixed(2)} | samples=${Number(est.sampleCount || 0)}`,
       ts,
       diagnostics: {
+        ...baseDiagnostics,
         sampleCount: Number(est.sampleCount || 0),
         halfLifeSec: Number(est.halfLifeSec || 0),
         slope: Number(est.slope || 0),
@@ -370,18 +399,27 @@ export function evaluateUc5Regime({
 
   const halfLifeSec = Number(est.halfLifeSec || 0);
   const halfLifeText = Number.isFinite(halfLifeSec) && halfLifeSec > 0 ? `${Math.round(halfLifeSec)}s` : "n/a";
+  let failureCode = "uncertain_regime";
+  if (String(est.label || "") === "trending" && !(halfLifeSec >= Number(trendHalfLifeMinSec || 900))) {
+    failureCode = "trend_half_life_below_threshold";
+  } else if (String(est.label || "") === "trending" && !direction) {
+    failureCode = "trend_direction_unavailable";
+  }
   return {
     state: "UNKNOWN",
     direction: null,
     strength: 0,
-    reason: `uncertain regime | label=${String(est.label || "unknown")} | halfLife=${halfLifeText} | confidence=${estimateConfidence.toFixed(2)}`,
+    reason: `uncertain regime: ${failureCode} | label=${String(est.label || "unknown")} | halfLife=${halfLifeText} | trendHalfLifeMin=${Math.round(Number(trendHalfLifeMinSec || 900))}s | confidence=${estimateConfidence.toFixed(2)} | samples=${sampleCount}/${minSamples} | range=${priceRangeBps.toFixed(2)}bps`,
     ts,
     diagnostics: {
+      ...baseDiagnostics,
       sampleCount: Number(est.sampleCount || 0),
       halfLifeSec: Number.isFinite(halfLifeSec) ? halfLifeSec : null,
       slope: Number(est.slope || 0),
       r2: Number(est.r2 || 0),
       estimateConfidence,
+      failureCode,
+      trendHalfLifeMinSec,
     },
   };
 }
