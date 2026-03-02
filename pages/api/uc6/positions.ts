@@ -29,7 +29,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const rl = bestEffortRateLimit({
     namespace: "uc6:positions",
     ip,
-    limit: 120,
+    limit: 60,
     windowMs: 60_000,
   });
   if (!rl.ok) {

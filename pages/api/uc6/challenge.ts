@@ -17,6 +17,14 @@ type ChallengeRequest = {
   payload?: unknown;
 };
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "64kb",
+    },
+  },
+};
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("allow", "POST");
@@ -30,7 +38,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const rl = bestEffortRateLimit({
     namespace: "uc6:challenge",
     ip,
-    limit: 20,
+    limit: 10,
     windowMs: 60_000,
   });
   if (!rl.ok) {

@@ -23,6 +23,7 @@ import { privateKeyToAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import { verifyMessage } from "ethers";
 import { createRegimeState, estimateOU, getRegimeAdvice, ingestSample } from "./lib/regime.mjs";
+import { redactSensitiveText, safeBearerMatch, sanitizeErrorMessage } from "./lib/security.mjs";
 import {
   loadPoolComparisonCache as loadPoolComparisonCacheFile,
   runPoolComparisonJob,
@@ -44,6 +45,10 @@ const CAPITAL_SAMPLE_MAX_POINTS = 15_000;
 const ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS = 5 * 60 * 1000;
 const LAST_ERROR_AUTO_CLEAR_AFTER_MS = 5 * 60 * 1000;
 const LAST_ERROR_AUTO_CLEAR_SUCCESS_LOOPS = 5;
+const HTTP_JSON_MAX_BYTES = 64 * 1024;
+const HTTP_SERVER_REQUEST_TIMEOUT_MS = 15_000;
+const HTTP_SERVER_HEADERS_TIMEOUT_MS = 16_000;
+const HTTP_SERVER_KEEPALIVE_TIMEOUT_MS = 5_000;
 
 const ENV = {
   rpcUrl: process.env.UC6_RPC_URL || "",
@@ -1258,6 +1263,9 @@ function jsonResponse(res, code, payload) {
   res.statusCode = code;
   res.setHeader("content-type", "application/json; charset=utf-8");
   res.setHeader("cache-control", "no-store");
+  res.setHeader("x-content-type-options", "nosniff");
+  res.setHeader("x-frame-options", "DENY");
+  res.setHeader("referrer-policy", "no-referrer");
   res.end(JSON.stringify(payload));
 }
 
@@ -1270,10 +1278,21 @@ function tooMany(res, retryAfterSec) {
   return jsonResponse(res, 429, { error: "Too many requests" });
 }
 
-async function readJsonBody(req, maxBytes = 1_000_000) {
+function requestErrorStatus(message) {
+  if (String(message || "").toLowerCase().includes("too large")) return 413;
+  return 400;
+}
+
+async function readJsonBody(req, maxBytes = HTTP_JSON_MAX_BYTES) {
   return await new Promise((resolve, reject) => {
     const chunks = [];
     let size = 0;
+    const contentLength = Number(req.headers["content-length"] || 0);
+    if (Number.isFinite(contentLength) && contentLength > maxBytes) {
+      reject(new Error("Request body too large"));
+      req.destroy();
+      return;
+    }
     req.on("data", (chunk) => {
       size += chunk.length;
       if (size > maxBytes) {
@@ -1710,7 +1729,10 @@ class Uc6Bot {
     this.ledgerRepairInFlight = false;
     this.ledgerRepairDirty = true;
     this.ownerNonceUsed = new Map();
-    this.ownerRateLimiter = new SimpleRateLimiter(20, 60_000);
+    this.ownerSettingsRateLimiter = new SimpleRateLimiter(10, 60_000);
+    this.ownerActionRateLimiter = new SimpleRateLimiter(5, 60_000);
+    this.publicStatusRateLimiter = new SimpleRateLimiter(240, 60_000);
+    this.publicPositionsRateLimiter = new SimpleRateLimiter(60, 60_000);
     this.server = null;
     this.poolMetaCache = new Map();
     this.refreshClock = {
@@ -2051,7 +2073,7 @@ class Uc6Bot {
   }
 
   setLastError(err) {
-    const msg = err instanceof Error ? err.message : String(err || "unknown error");
+    const msg = sanitizeErrorMessage(err);
     this.state.lastError = `${nowIso()} ${msg}`;
     this.successfulLoopStreak = 0;
   }
@@ -2353,7 +2375,7 @@ class Uc6Bot {
   }
 
   setPoolComparisonError(err) {
-    const message = err instanceof Error ? err.message : String(err || "unknown");
+    const message = sanitizeErrorMessage(err);
     this.poolComparisonLastError = {
       atIso: nowIso(),
       message,
@@ -4589,7 +4611,7 @@ class Uc6Bot {
     if (now - this.lastRegimeWarnAtMs < REGIME_WARN_MIN_INTERVAL_MS) return;
     this.lastRegimeWarnAtMs = now;
     try {
-      console.warn(`[UC6] regime warning: ${message}`);
+      console.warn(`[UC6] regime warning: ${redactSensitiveText(message)}`);
     } catch {}
   }
 
@@ -5918,7 +5940,7 @@ class Uc6Bot {
         usedMulticall = true;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err || "unknown close multicall error");
-        console.warn(`[UC6] close multicall failed; falling back to legacy close: ${msg}`);
+        console.warn(`[UC6] close multicall failed; falling back to legacy close: ${redactSensitiveText(msg)}`);
       }
     }
 
@@ -8741,14 +8763,14 @@ class Uc6Bot {
 
   async handleOwnerSettings(req, res) {
     const ip = extractIp(req);
-    const rl = this.ownerRateLimiter.take(ip);
+    const rl = this.ownerSettingsRateLimiter.take(ip);
     if (!rl.ok) return tooMany(res, rl.retryAfterSec);
 
     const auth = String(req.headers.authorization || "");
-    if (auth !== `Bearer ${ENV.adminToken}`) return unauthorized(res);
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
 
     try {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
       const message = String(body.message || "");
       const signature = String(body.signature || "");
       const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
@@ -8768,6 +8790,8 @@ class Uc6Bot {
       if (this.ownerNonceUsed.has(parsed.nonce)) {
         return jsonResponse(res, 409, { error: "Owner nonce already used" });
       }
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
 
       const nextSettings = normalizeSettings(payload, this.settings);
       if (this.settings.killSwitch && !nextSettings.killSwitch) {
@@ -8791,29 +8815,26 @@ class Uc6Bot {
         this.settingsMtimeMs = st.mtimeMs;
       } catch {}
 
-      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
-      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
-
       this.setDecision({ action: "settings_updated", by: this.ownerAddress });
       await this.persistState();
 
       return jsonResponse(res, 200, { ok: true, settings: this.settings });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err || "Bad request");
-      return jsonResponse(res, 400, { error: msg });
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
     }
   }
 
   async handleOwnerForceRebalance(req, res) {
     const ip = extractIp(req);
-    const rl = this.ownerRateLimiter.take(ip);
+    const rl = this.ownerActionRateLimiter.take(ip);
     if (!rl.ok) return tooMany(res, rl.retryAfterSec);
 
     const auth = String(req.headers.authorization || "");
-    if (auth !== `Bearer ${ENV.adminToken}`) return unauthorized(res);
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
 
     try {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
       const message = String(body.message || "");
       const signature = String(body.signature || "");
       const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
@@ -8834,10 +8855,10 @@ class Uc6Bot {
       if (this.ownerNonceUsed.has(parsed.nonce)) {
         return jsonResponse(res, 409, { error: "Owner nonce already used" });
       }
-
-      this.state.forceRebalanceRequestedAt = nowIso();
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+
+      this.state.forceRebalanceRequestedAt = nowIso();
       this.setDecision({ action: "force_rebalance_requested", by: this.ownerAddress });
       await this.persistState();
 
@@ -8846,21 +8867,21 @@ class Uc6Bot {
         forceRebalanceRequestedAt: this.state.forceRebalanceRequestedAt,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err || "Bad request");
-      return jsonResponse(res, 400, { error: msg });
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
     }
   }
 
   async handleOwnerLiquidateAndPause(req, res) {
     const ip = extractIp(req);
-    const rl = this.ownerRateLimiter.take(ip);
+    const rl = this.ownerActionRateLimiter.take(ip);
     if (!rl.ok) return tooMany(res, rl.retryAfterSec);
 
     const auth = String(req.headers.authorization || "");
-    if (auth !== `Bearer ${ENV.adminToken}`) return unauthorized(res);
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
 
     try {
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
       const message = String(body.message || "");
       const signature = String(body.signature || "");
       const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
@@ -8881,6 +8902,8 @@ class Uc6Bot {
       if (this.ownerNonceUsed.has(parsed.nonce)) {
         return jsonResponse(res, 409, { error: "Owner nonce already used" });
       }
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
 
       await this.loadSettings(false);
       const tokenId = this.state.position?.tokenId || null;
@@ -8988,9 +9011,6 @@ class Uc6Bot {
         liquidated,
         tokenId,
       });
-
-      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
-      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
       await this.persistState();
 
       return jsonResponse(res, 200, {
@@ -9000,8 +9020,8 @@ class Uc6Bot {
         settings: this.settings,
       });
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err || "Bad request");
-      return jsonResponse(res, 400, { error: msg });
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
     }
   }
 
@@ -9020,10 +9040,14 @@ class Uc6Bot {
     }
 
     if (req.method === "GET" && u.pathname === "/status") {
+      const rl = this.publicStatusRateLimiter.take(extractIp(req));
+      if (!rl.ok) return tooMany(res, rl.retryAfterSec);
       return jsonResponse(res, 200, this.statusPayload());
     }
 
     if (req.method === "GET" && u.pathname === "/positions") {
+      const rl = this.publicPositionsRateLimiter.take(extractIp(req));
+      if (!rl.ok) return tooMany(res, rl.retryAfterSec);
       const page = Number(u.searchParams.get("page") || 1);
       const pageSize = Number(u.searchParams.get("pageSize") || POSITION_PAGE_SIZE_DEFAULT);
       return jsonResponse(res, 200, this.getPositionRecordsPage(page, pageSize));
@@ -9050,10 +9074,14 @@ class Uc6Bot {
       try {
         await this.handleHttp(req, res);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "internal error";
-        jsonResponse(res, 500, { error: msg });
+        this.setLastError(err);
+        jsonResponse(res, 500, { error: "Internal server error" });
       }
     });
+    this.server.requestTimeout = HTTP_SERVER_REQUEST_TIMEOUT_MS;
+    this.server.headersTimeout = HTTP_SERVER_HEADERS_TIMEOUT_MS;
+    this.server.keepAliveTimeout = HTTP_SERVER_KEEPALIVE_TIMEOUT_MS;
+    this.server.maxHeadersCount = 64;
 
     await new Promise((resolve, reject) => {
       this.server.once("error", reject);
@@ -9096,16 +9124,16 @@ async function main() {
   });
 
   process.on("unhandledRejection", (reason) => {
-    console.error("[UC6] unhandled rejection", reason);
+    console.error("[UC6] unhandled rejection", sanitizeErrorMessage(reason, "unhandled rejection"));
   });
   process.on("uncaughtException", (err) => {
-    console.error("[UC6] uncaught exception", err);
+    console.error("[UC6] uncaught exception", sanitizeErrorMessage(err, "uncaught exception"));
   });
 
   await bot.start();
 }
 
 main().catch((err) => {
-  console.error("[UC6] fatal", err instanceof Error ? err.message : err);
+  console.error("[UC6] fatal", sanitizeErrorMessage(err, "fatal error"));
   process.exit(1);
 });

@@ -41,7 +41,56 @@ type ReEntrySettingsPayload = {
   minHoldSec?: number;
   cooldownAfterReEntrySec?: number;
 };
-type OwnerSettingsValue = Primitive | RegimeSettingsPayload | TrendEscapeSettingsPayload | ReEntrySettingsPayload;
+type HodlGateSettingsPayload = {
+  enabled?: boolean;
+  marginUsd?: number;
+  useUncollectedFees?: boolean;
+  allowCloseIfOutOfRange?: boolean;
+  outOfRangeMaxSec?: number;
+  outOfRangeEmergencyMinSec?: number;
+  outOfRangeEmergencyEdgePct?: number;
+};
+type ExecutionCapsSettingsPayload = {
+  maxInventorySwapsPerRebalance?: number;
+  maxSwapsOnOpen?: number;
+  maxTopUpsPerCycle?: number;
+  minTopUpUsd?: number;
+  targetRatioTolerancePct?: number;
+  minSwapUsd?: number;
+  useMulticallClose?: boolean;
+};
+type GasTopUpSettingsPayload = {
+  enabled?: boolean;
+  minEthUsd?: number;
+  topUpUsdc?: number;
+  minIntervalSec?: number;
+};
+type PoolComparisonSettingsPayload = {
+  enabled?: boolean;
+  computeHourUtc?: number;
+  maxCandidatesPerDex?: number;
+  topN?: number;
+  minTvlUsd?: number;
+  maxRefCapitalPctOfTvl?: number;
+  requireFeeRateInference?: boolean;
+  allowLowTvlInTable?: boolean;
+  rebalanceSwapNotionalPct?: number;
+};
+type OwnerSettingsValue =
+  | Primitive
+  | RegimeSettingsPayload
+  | TrendEscapeSettingsPayload
+  | ReEntrySettingsPayload
+  | HodlGateSettingsPayload
+  | ExecutionCapsSettingsPayload
+  | GasTopUpSettingsPayload
+  | PoolComparisonSettingsPayload;
+type SettingRule = {
+  type: "boolean" | "number" | "string";
+  min?: number;
+  max?: number;
+  enum?: string[];
+};
 
 type RateBucket = { count: number; resetAt: number };
 type ChallengeStore = Map<string, Uc6ChallengeRecord>;
@@ -248,6 +297,7 @@ export function readChallenge(nonce: string): Uc6ChallengeRecord | null {
 export function consumeChallenge(nonce: string, usedAtMs = Date.now()): Uc6ChallengeRecord | null {
   const record = readChallenge(nonce);
   if (!record) return null;
+  if (record.usedAtMs) return null;
   challengeStore().set(nonce, { ...record, usedAtMs });
   return record;
 }
@@ -313,107 +363,163 @@ export function getClientIp(input: {
   return input.remoteAddress || "unknown";
 }
 
-const REGIME_SETTING_TYPES: Record<keyof Required<RegimeSettingsPayload>, "boolean" | "number"> = {
-  enabled: "boolean",
-  windowSec: "number",
-  sampleEverySec: "number",
-  minSamples: "number",
-  mrHalfLifeMaxSec: "number",
-  trendHalfLifeMinSec: "number",
-  maxEdgeAdj: "number",
-  maxBandAdjBps: "number",
-  maxCooldownAdjSec: "number",
+const REGIME_SETTING_RULES: Record<keyof Required<RegimeSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  windowSec: { type: "number", min: 60, max: 86_400 },
+  sampleEverySec: { type: "number", min: 1, max: 3_600 },
+  minSamples: { type: "number", min: 5, max: 20_000 },
+  mrHalfLifeMaxSec: { type: "number", min: 10, max: 86_400 },
+  trendHalfLifeMinSec: { type: "number", min: 10, max: 86_400 },
+  maxEdgeAdj: { type: "number", min: 0, max: 0.5 },
+  maxBandAdjBps: { type: "number", min: 0, max: 500 },
+  maxCooldownAdjSec: { type: "number", min: 0, max: 86_400 },
 };
 
-const TREND_ESCAPE_SETTING_TYPES: Record<
-  keyof Required<TrendEscapeSettingsPayload>,
-  "boolean" | "number" | "string"
-> = {
-  enabled: "boolean",
-  variant: "string",
-  requireRegimeLabel: "string",
-  minRegimeConfidence: "number",
-  directionLookbackSec: "number",
-  minTrendMovePct: "number",
-  minTrendConfirmSec: "number",
-  cooldownAfterEscapeSec: "number",
-  minAlphaUsdToEscape: "number",
-  emergencyOutOfRangeEdgePct: "number",
-  emergencyMinOutOfRangeSec: "number",
-  uptrendHold: "string",
-  downtrendHold: "string",
-  fallbackHold: "string",
+const TOP_LEVEL_SETTING_RULES: Record<string, SettingRule> = {
+  tradingEnabled: { type: "boolean" },
+  killSwitch: { type: "boolean" },
+  failureCooldownSec: { type: "number", min: 30, max: 86_400 },
+  venue: { type: "string", enum: ["slipstream", "uniswapv3"] },
+  bandHalfBps: { type: "number", min: 10, max: 5_000 },
+  edgeRebalancePct: { type: "number", min: 0.1, max: 0.99 },
+  minRebalanceIntervalSec: { type: "number", min: 30, max: 86_400 },
+  maxRebalancesPerDay: { type: "number", min: 1, max: 500 },
+  slippageBps: { type: "number", min: 1, max: 2_000 },
+  pollIntervalMs: { type: "number", min: 500, max: 60_000 },
+  wsEnabled: { type: "boolean" },
+  slot0RefreshEverySec: { type: "number", min: 2, max: 3_600 },
+  balancesRefreshEverySec: { type: "number", min: 2, max: 3_600 },
+  positionRefreshEverySec: { type: "number", min: 2, max: 3_600 },
+  inventoryRefreshEverySec: { type: "number", min: 5, max: 86_400 },
+  collectableRefreshEverySec: { type: "number", min: 10, max: 86_400 },
+  dashboardRecommendedPollMs: { type: "number", min: 1_000, max: 60_000 },
+  maxDeployUsdc: { type: "number", min: 0, max: 5_000_000 },
+  maxInitialMintUsdc: { type: "number", min: 0, max: 5_000_000 },
+  minTopUpUsd: { type: "number", min: 0, max: 1_000_000 },
+  reserveMinUsdc: { type: "number", min: 0, max: 5_000_000 },
+  reservePct: { type: "number", min: 0, max: 100 },
+  reserveMaxUsdc: { type: "number", min: 0, max: 5_000_000 },
+  keepUsdcReserve: { type: "number", min: 0, max: 5_000_000 },
+  compoundMode: { type: "string", enum: ["threshold_harvest", "on_rebalance"] },
+  harvestThresholdUsd: { type: "number", min: 0, max: 1_000_000 },
+  churnProtectionEnabled: { type: "boolean" },
+  churnMaxCostToFeeRatio: { type: "number", min: 0, max: 100 },
 };
 
-const REENTRY_SETTING_TYPES: Record<keyof Required<ReEntrySettingsPayload>, "boolean" | "number" | "string"> = {
-  enabled: "boolean",
-  requireRegimeLabel: "string",
-  minRegimeConfidence: "number",
-  minMeanRevertConfirmSec: "number",
-  maxDistanceFromMuPct: "number",
-  minHoldSec: "number",
-  cooldownAfterReEntrySec: "number",
+const HODL_GATE_SETTING_RULES: Record<keyof Required<HodlGateSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  marginUsd: { type: "number", min: 0, max: 1_000_000 },
+  useUncollectedFees: { type: "boolean" },
+  allowCloseIfOutOfRange: { type: "boolean" },
+  outOfRangeMaxSec: { type: "number", min: 30, max: 7 * 24 * 60 * 60 },
+  outOfRangeEmergencyMinSec: { type: "number", min: 5, max: 7 * 24 * 60 * 60 },
+  outOfRangeEmergencyEdgePct: { type: "number", min: 1, max: 5 },
+};
+
+const TREND_ESCAPE_SETTING_RULES: Record<keyof Required<TrendEscapeSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  variant: { type: "string", enum: ["hybrid"] },
+  requireRegimeLabel: { type: "string", enum: ["trending", "mean_reverting"] },
+  minRegimeConfidence: { type: "number", min: 0, max: 1 },
+  directionLookbackSec: { type: "number", min: 30, max: 86_400 },
+  minTrendMovePct: { type: "number", min: 0, max: 1 },
+  minTrendConfirmSec: { type: "number", min: 5, max: 86_400 },
+  cooldownAfterEscapeSec: { type: "number", min: 0, max: 7 * 24 * 60 * 60 },
+  minAlphaUsdToEscape: { type: "number", min: -1_000_000, max: 1_000_000 },
+  emergencyOutOfRangeEdgePct: { type: "number", min: 1, max: 5 },
+  emergencyMinOutOfRangeSec: { type: "number", min: 5, max: 7 * 24 * 60 * 60 },
+  uptrendHold: { type: "string", enum: ["WETH", "USDC", "50_50"] },
+  downtrendHold: { type: "string", enum: ["WETH", "USDC", "50_50"] },
+  fallbackHold: { type: "string", enum: ["WETH", "USDC", "50_50"] },
+};
+
+const REENTRY_SETTING_RULES: Record<keyof Required<ReEntrySettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  requireRegimeLabel: { type: "string", enum: ["trending", "mean_reverting"] },
+  minRegimeConfidence: { type: "number", min: 0, max: 1 },
+  minMeanRevertConfirmSec: { type: "number", min: 5, max: 86_400 },
+  maxDistanceFromMuPct: { type: "number", min: 0, max: 1 },
+  minHoldSec: { type: "number", min: 0, max: 7 * 24 * 60 * 60 },
+  cooldownAfterReEntrySec: { type: "number", min: 0, max: 7 * 24 * 60 * 60 },
+};
+
+const EXECUTION_CAPS_SETTING_RULES: Record<keyof Required<ExecutionCapsSettingsPayload>, SettingRule> = {
+  maxInventorySwapsPerRebalance: { type: "number", min: 0, max: 10 },
+  maxSwapsOnOpen: { type: "number", min: 0, max: 10 },
+  maxTopUpsPerCycle: { type: "number", min: 0, max: 20 },
+  minTopUpUsd: { type: "number", min: 0, max: 1_000_000 },
+  targetRatioTolerancePct: { type: "number", min: 0.001, max: 0.5 },
+  minSwapUsd: { type: "number", min: 0, max: 1_000_000 },
+  useMulticallClose: { type: "boolean" },
+};
+
+const GAS_TOP_UP_SETTING_RULES: Record<keyof Required<GasTopUpSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  minEthUsd: { type: "number", min: 0, max: 1_000_000 },
+  topUpUsdc: { type: "number", min: 0.01, max: 1_000_000 },
+  minIntervalSec: { type: "number", min: 30, max: 86_400 },
+};
+
+const POOL_COMPARISON_SETTING_RULES: Record<keyof Required<PoolComparisonSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  computeHourUtc: { type: "number", min: 0, max: 23 },
+  maxCandidatesPerDex: { type: "number", min: 5, max: 100 },
+  topN: { type: "number", min: 1, max: 20 },
+  minTvlUsd: { type: "number", min: 0, max: 1_000_000_000 },
+  maxRefCapitalPctOfTvl: { type: "number", min: 0, max: 1 },
+  requireFeeRateInference: { type: "boolean" },
+  allowLowTvlInTable: { type: "boolean" },
+  rebalanceSwapNotionalPct: { type: "number", min: 0, max: 1 },
 };
 
 function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
-  if (!asObject(input)) {
-    throw new Error('Invalid settings value for "regime"');
-  }
-  const out: RegimeSettingsPayload = {};
-  const outMutable = out as Record<string, unknown>;
-  for (const [rawKey, value] of Object.entries(input)) {
-    const key = rawKey as keyof Required<RegimeSettingsPayload>;
-    const expectedType = REGIME_SETTING_TYPES[key];
-    if (!expectedType) {
-      throw new Error(`Invalid settings value for "regime.${rawKey}"`);
-    }
-    if (expectedType === "boolean") {
-      if (typeof value !== "boolean") {
-        throw new Error(`Invalid settings value for "regime.${rawKey}"`);
-      }
-      outMutable[rawKey] = value;
-      continue;
-    }
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`Invalid settings value for "regime.${rawKey}"`);
-    }
-    outMutable[rawKey] = value;
-  }
-  return out;
+  return normalizeSettingsObjectByRules<RegimeSettingsPayload>("regime", input, REGIME_SETTING_RULES);
 }
 
-function normalizeTypedSettingsObject<T extends Record<string, unknown>>(
+function validateSettingRule(scope: string, key: string, value: unknown, rule: SettingRule): unknown {
+  const label = scope ? `${scope}.${key}` : key;
+  if (rule.type === "boolean") {
+    if (typeof value !== "boolean") {
+      throw new Error(`Invalid settings value for "${label}"`);
+    }
+    return value;
+  }
+  if (rule.type === "string") {
+    if (typeof value !== "string") {
+      throw new Error(`Invalid settings value for "${label}"`);
+    }
+    if (rule.enum && !rule.enum.includes(value)) {
+      throw new Error(`Invalid settings value for "${label}"`);
+    }
+    return value;
+  }
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`Invalid settings value for "${label}"`);
+  }
+  if (rule.min != null && value < rule.min) {
+    throw new Error(`Invalid settings value for "${label}"`);
+  }
+  if (rule.max != null && value > rule.max) {
+    throw new Error(`Invalid settings value for "${label}"`);
+  }
+  return value;
+}
+
+function normalizeSettingsObjectByRules<T extends Record<string, unknown>>(
   scope: string,
   input: unknown,
-  expectedTypes: Record<string, "boolean" | "number" | "string">
+  rules: Record<string, SettingRule>
 ): T {
   if (!asObject(input)) {
     throw new Error(`Invalid settings value for "${scope}"`);
   }
   const out: Record<string, unknown> = {};
   for (const [rawKey, value] of Object.entries(input)) {
-    const expectedType = expectedTypes[rawKey];
-    if (!expectedType) {
+    const rule = rules[rawKey];
+    if (!rule) {
       throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
     }
-    if (expectedType === "boolean") {
-      if (typeof value !== "boolean") {
-        throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
-      }
-      out[rawKey] = value;
-      continue;
-    }
-    if (expectedType === "string") {
-      if (typeof value !== "string") {
-        throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
-      }
-      out[rawKey] = value;
-      continue;
-    }
-    if (typeof value !== "number" || !Number.isFinite(value)) {
-      throw new Error(`Invalid settings value for "${scope}.${rawKey}"`);
-    }
-    out[rawKey] = value;
+    out[rawKey] = validateSettingRule(scope, rawKey, value, rule);
   }
   return out as T;
 }
@@ -426,25 +532,32 @@ export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSett
   for (const [key, value] of Object.entries(input)) {
     if (key === "regime") {
       out[key] = normalizeRegimeSettings(value);
+    } else if (key === "hodlGate") {
+      out[key] = normalizeSettingsObjectByRules<HodlGateSettingsPayload>("hodlGate", value, HODL_GATE_SETTING_RULES);
     } else if (key === "trendEscape") {
-      out[key] = normalizeTypedSettingsObject<TrendEscapeSettingsPayload>(
+      out[key] = normalizeSettingsObjectByRules<TrendEscapeSettingsPayload>(
         "trendEscape",
         value,
-        TREND_ESCAPE_SETTING_TYPES
+        TREND_ESCAPE_SETTING_RULES
       );
     } else if (key === "reEntry") {
-      out[key] = normalizeTypedSettingsObject<ReEntrySettingsPayload>(
-        "reEntry",
+      out[key] = normalizeSettingsObjectByRules<ReEntrySettingsPayload>("reEntry", value, REENTRY_SETTING_RULES);
+    } else if (key === "executionCaps") {
+      out[key] = normalizeSettingsObjectByRules<ExecutionCapsSettingsPayload>(
+        "executionCaps",
         value,
-        REENTRY_SETTING_TYPES
+        EXECUTION_CAPS_SETTING_RULES
       );
-    } else if (
-      value === null ||
-      typeof value === "string" ||
-      typeof value === "boolean" ||
-      (typeof value === "number" && Number.isFinite(value))
-    ) {
-      out[key] = value;
+    } else if (key === "gasTopUp") {
+      out[key] = normalizeSettingsObjectByRules<GasTopUpSettingsPayload>("gasTopUp", value, GAS_TOP_UP_SETTING_RULES);
+    } else if (key === "poolComparison") {
+      out[key] = normalizeSettingsObjectByRules<PoolComparisonSettingsPayload>(
+        "poolComparison",
+        value,
+        POOL_COMPARISON_SETTING_RULES
+      );
+    } else if (TOP_LEVEL_SETTING_RULES[key]) {
+      out[key] = validateSettingRule("", key, value, TOP_LEVEL_SETTING_RULES[key]) as Primitive;
     } else {
       throw new Error(`Invalid settings value for "${key}"`);
     }

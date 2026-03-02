@@ -12,10 +12,19 @@ Environment=NODE_ENV=production
 ExecStart=/usr/bin/node --env-file=/opt/uc6-bot/.env /opt/uc6-bot/app/uc6-bot.mjs
 Restart=always
 RestartSec=3
+UMask=0077
 NoNewPrivileges=true
 PrivateTmp=true
+PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=true
+RestrictRealtime=true
 ReadWritePaths=/opt/uc6-bot
 MemoryMax=350M
 CPUQuota=25%

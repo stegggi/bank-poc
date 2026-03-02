@@ -15,6 +15,14 @@ type ForceRebalanceRequest = {
   payload?: unknown;
 };
 
+export const config = {
+  api: {
+    bodyParser: {
+      sizeLimit: "64kb",
+    },
+  },
+};
+
 async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -38,7 +46,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   const rl = bestEffortRateLimit({
     namespace: "uc6:owner:force-rebalance",
     ip,
-    limit: 20,
+    limit: 5,
     windowMs: 60_000,
   });
   if (!rl.ok) {
