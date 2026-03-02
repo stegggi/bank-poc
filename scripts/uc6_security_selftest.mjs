@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { stripTypeScriptTypes } from "node:module";
 import path from "node:path";
-import ts from "typescript";
 import { Wallet } from "ethers";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -12,14 +12,7 @@ const repoRoot = path.resolve(__dirname, "..");
 async function importTranspiledTsModule(relativePath) {
   const absPath = path.join(repoRoot, relativePath);
   const source = await readFile(absPath, "utf8");
-  const transpiled = ts.transpileModule(source, {
-    compilerOptions: {
-      module: ts.ModuleKind.ES2022,
-      target: ts.ScriptTarget.ES2022,
-      esModuleInterop: true,
-    },
-    fileName: absPath,
-  }).outputText;
+  const transpiled = stripTypeScriptTypes(source, { mode: "transform", sourceUrl: absPath });
   const tempDir = await mkdtemp(path.join(repoRoot, ".uc6-selftest-"));
   const tempFile = path.join(tempDir, path.basename(relativePath, ".ts") + ".mjs");
   await writeFile(tempFile, transpiled, "utf8");
