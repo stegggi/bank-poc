@@ -1457,11 +1457,12 @@ export default function Uc6Page() {
   const regimeStatus = status?.regime || null;
   const regimeDecisionView = status?.decision || null;
   const events = (status?.events?.lastN || []).slice(-5).reverse();
-  const inRange = Boolean(status?.position?.inRange);
+  const hasActiveLpPosition = Boolean(status?.position?.tokenId);
+  const inRange = hasActiveLpPosition && Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
   const configuredBandHalfPct = n(status?.settings?.bandHalfBps, 0) / 100;
   const actualBandHalfPct = actualBandHalfPctFromTicks(status?.position?.tickLower, status?.position?.tickUpper);
-  const edgeDistPct = n(status?.position?.distanceToEdge?.pct, 0) * 100;
+  const edgeDistPct = hasActiveLpPosition ? n(status?.position?.distanceToEdge?.pct, 0) * 100 : null;
   const churnRatio = status?.ops?.churnRatioToday;
   const activeLpCount = Number(status?.ops?.positionInventory?.activeCount || 0);
   const hasMultipleActive = activeLpCount > 1;
@@ -1527,6 +1528,8 @@ export default function Uc6Page() {
   const trendEscapeView = status?.trendEscape || null;
   const reEntryView = status?.reEntry || null;
   const trendMovePct = trendView?.movePct == null ? null : n(trendView.movePct, 0) * 100;
+  const collectableNowUsd = n(status?.fees?.collectableNow?.usd, 0);
+  const collectableNowEstimated = Boolean(status?.fees?.collectableNow?.isEstimated);
   const activeMintTargetBandBpsRaw = activeLifecycleRecord?.band?.bandHalfBps;
   const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
     ? Math.round(Number(activeMintTargetBandBpsRaw))
@@ -1535,6 +1538,19 @@ export default function Uc6Page() {
   const regimeEffectiveBandAtMintBps = Number.isFinite(Number(regimeEffectiveBandAtMintBpsRaw))
     ? Math.round(Number(regimeEffectiveBandAtMintBpsRaw))
     : activeMintTargetBandBps;
+  const lpValueUsd = n(status?.position?.amountsInLP?.usdValue, 0);
+  const lpUsdcSideUsd = n(status?.position?.amountsInLP?.sideUsd?.usdc, 0);
+  const lpWethSideUsd = n(status?.position?.amountsInLP?.sideUsd?.weth, 0);
+  const lpSplitUsdcPct = lpValueUsd > 0 ? (lpUsdcSideUsd / lpValueUsd) * 100 : 0;
+  const lpSplitWethPct = lpValueUsd > 0 ? (lpWethSideUsd / lpValueUsd) * 100 : 0;
+  const activePairLabel = `${activeLifecycleRecord?.pair?.base || status?.market?.pair?.base || "WETH"}/${activeLifecycleRecord?.pair?.quote || status?.market?.pair?.quote || "USDC"}`;
+  const activeBandTicksLabel = `${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`;
+  const activeCloseGateLabel = (
+    <span title={hodlGateReason}>
+      <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />{" "}
+      {hodlGateReason}
+    </span>
+  );
   const poolComparisonCurrentRow = poolComparisonCurrent
     ? ([
         poolComparisonCurrent.dex?.name || "—",
@@ -1916,75 +1932,187 @@ export default function Uc6Page() {
                 </button>
               </div>
             )}
-            <div style={styles.metaGrid}>
-              <Metric label="Token ID (LP NFT)" value={String(status?.position?.tokenId ?? "—")} mono />
-              <Metric label="In Range" value={<Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />} />
-              <Metric label="Pool Tier / Selector" value={selectorLabel} />
-              <Metric
-                label="Pair"
-                value={`${activeLifecycleRecord?.pair?.base || status?.market?.pair?.base || "WETH"}/${activeLifecycleRecord?.pair?.quote || status?.market?.pair?.quote || "USDC"}`}
+            <div style={styles.lpHero}>
+              <div>
+                <div style={styles.overviewEyebrow}>Active LP snapshot</div>
+                <div style={styles.lpHeadline}>
+                  {hasActiveLpPosition
+                    ? `${activePairLabel} · ${String(status?.position?.tokenId)}`
+                    : "No active LP position"}
+                </div>
+                <div style={styles.lpSubhead}>
+                  {hasActiveLpPosition
+                    ? "Live LP structure, inventory mix, collectable fees, and close-gate economics from the current cached bot state."
+                    : `The strategy is currently not providing liquidity. Mode: ${String(strategyMode)}.`}
+                </div>
+              </div>
+              <CompactMetricList
+                items={[
+                  {
+                    label: "Status",
+                    value: hasActiveLpPosition
+                      ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />
+                      : "—",
+                  },
+                  { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
+                  {
+                    label: "Collectable Now",
+                    value: hasActiveLpPosition
+                      ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (est.)" : ""}`
+                      : "—",
+                  },
+                  {
+                    label: "Alpha Live",
+                    value: hasActiveLpPosition
+                      ? (
+                        <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                          {fmtSignedUsd(alphaLiveUsd)}
+                        </span>
+                      )
+                      : "—",
+                  },
+                  {
+                    label: "Close Gate",
+                    value: hasActiveLpPosition
+                      ? (
+                        <span title={hodlGateReason}>
+                          <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
+                        </span>
+                      )
+                      : "—",
+                  },
+                  { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
+                ]}
+                dense
               />
-              <Metric label="Current Pool Tick (internal)" value={String(status?.market?.tick?.current ?? "—")} />
-              <Metric label="Pool Tick Spacing (grid)" value={String(status?.market?.tick?.spacing ?? "—")} />
-              <Metric label="Base Band Setting" value={`±${fmtPct(configuredBandHalfPct)}`} />
-              <Metric
-                label="Regime Effective Band (at mint)"
-                value={regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`}
-              />
-              <Metric
-                label="Mint Target Used (current LP)"
-                value={activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`}
-              />
-              <Metric
-                label="Actual Band Width"
-                value={
-                  actualBandHalfPct == null
-                    ? "—"
-                    : `±${fmtPct(actualBandHalfPct)}`
-                }
-              />
-              <Metric label="Band Ticks" value={`${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`} mono />
-              <Metric label="USDC in LP" value={`${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`} />
-              <Metric label="WETH in LP" value={`${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`} />
-              <Metric label="LP Value" value={fmtUsd(status?.position?.amountsInLP?.usdValue)} />
-              <Metric
-                label="LP Split"
-                value={`${fmtPct((n(status?.position?.amountsInLP?.sideUsd?.usdc, 0) / Math.max(1, n(status?.position?.amountsInLP?.usdValue, 0))) * 100)} / ${fmtPct((n(status?.position?.amountsInLP?.sideUsd?.weth, 0) / Math.max(1, n(status?.position?.amountsInLP?.usdValue, 0))) * 100)}`}
-              />
-              <Metric label="Distance To Edge" value={`${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`} />
-              <Metric label="Liquidity" value={status?.position?.liquidity || "—"} mono />
-              <Metric label="Opened" value={fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso)} />
-              <Metric label="Entry Snapshot" value={fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso)} />
-              <Metric label="Entry Value" value={fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd)} />
-              <Metric label="Fees Collected" value={fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd)} />
-              <Metric label="Total Costs" value={fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd)} />
-              <Metric label="Fees Net" value={fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd)} />
-              <Metric label="Capital Gain/Loss" value={fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd)} />
-              <Metric label="Divergence vs HODL" value={fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd)} />
-              <Metric
-                label="Alpha vs HODL (Live)"
-                value={
-                  <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                    {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
-                  </span>
-                }
-              />
-              <Metric
-                label="Required Fees to Beat HODL (Live)"
-                value={fmtUsd(requiredFeesToBeatHodlLiveUsd)}
-              />
-              <Metric label="LP P/L (absolute)" value={fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd)} />
-              <Metric
-                label="Close Gate Status"
-                value={
-                  <span title={hodlGateReason}>
-                    <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />{" "}
-                    {hodlGateReason}
-                  </span>
-                }
-              />
-              <Metric label="Tx Count" value={String(activeLifecycleRecord?.activity?.txCount ?? 0)} />
-              <Metric label="Record Status" value={activeLifecycleRecord?.status || "—"} />
+            </div>
+
+            <div style={styles.lpSectionGrid}>
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Position</div>
+                  <div style={styles.overviewBlockSubtle}>Identity, opening timestamps, and top-level lifecycle state.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    { label: "Token ID (LP NFT)", value: String(status?.position?.tokenId ?? "—"), mono: true },
+                    { label: "Pair", value: activePairLabel },
+                    { label: "Pool Tier / Selector", value: selectorLabel },
+                    { label: "Opened", value: fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso) },
+                    { label: "Entry Snapshot", value: fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso) },
+                    { label: "Entry Value", value: fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd) },
+                    { label: "Tx Count", value: String(activeLifecycleRecord?.activity?.txCount ?? 0) },
+                    { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
+                  ]}
+                  dense
+                />
+              </div>
+
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Band & Risk</div>
+                  <div style={styles.overviewBlockSubtle}>Placed band, current pool location, and rebalance risk context.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    { label: "Current Pool Tick", value: String(status?.market?.tick?.current ?? "—") },
+                    { label: "Pool Tick Spacing", value: String(status?.market?.tick?.spacing ?? "—") },
+                    { label: "Base Band Setting", value: `±${fmtPct(configuredBandHalfPct)}` },
+                    {
+                      label: "Regime Effective Band (at mint)",
+                      value: regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`,
+                    },
+                    {
+                      label: "Mint Target Used",
+                      value: activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`,
+                    },
+                    {
+                      label: "Actual Band Width",
+                      value: !hasActiveLpPosition || actualBandHalfPct == null ? "—" : `±${fmtPct(actualBandHalfPct)}`,
+                    },
+                    { label: "Band Ticks", value: activeBandTicksLabel, mono: true },
+                    {
+                      label: "Distance To Edge",
+                      value:
+                        !hasActiveLpPosition || edgeDistPct == null
+                          ? "—"
+                          : `${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`,
+                    },
+                    { label: "In Range", value: hasActiveLpPosition ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} /> : "—" },
+                    { label: "Liquidity", value: status?.position?.liquidity || "—", mono: true },
+                  ]}
+                  dense
+                />
+              </div>
+
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Inventory Mix</div>
+                  <div style={styles.overviewBlockSubtle}>Current deployed capital split across both LP sides and collectable fees.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
+                    {
+                      label: "USDC in LP",
+                      value: hasActiveLpPosition
+                        ? `${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`
+                        : "—",
+                    },
+                    {
+                      label: "WETH in LP",
+                      value: hasActiveLpPosition
+                        ? `${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`
+                        : "—",
+                    },
+                    {
+                      label: "LP Split",
+                      value: hasActiveLpPosition ? `${fmtPct(lpSplitUsdcPct)} / ${fmtPct(lpSplitWethPct)}` : "—",
+                    },
+                    {
+                      label: "Collectable Now",
+                      value: hasActiveLpPosition
+                        ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (simulation fallback)" : ""}`
+                        : "—",
+                    },
+                    { label: "Pending Compound", value: hasActiveLpPosition ? fmtUsd(status?.fees?.pendingCompoundUsd) : "—" },
+                  ]}
+                  dense
+                />
+              </div>
+
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Live Economics</div>
+                  <div style={styles.overviewBlockSubtle}>Collected fees, realized costs so far, live alpha, and close-gate constraint.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    { label: "Fees Collected", value: fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd) },
+                    { label: "Total Costs", value: fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd) },
+                    { label: "Fees Net", value: fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd) },
+                    { label: "Capital Gain/Loss", value: fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd) },
+                    { label: "Divergence vs HODL", value: fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd) },
+                    {
+                      label: "Alpha vs HODL (Live)",
+                      value: hasActiveLpPosition
+                        ? (
+                          <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                            {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
+                          </span>
+                        )
+                        : "—",
+                    },
+                    {
+                      label: "Required Fees to Beat HODL (Live)",
+                      value: hasActiveLpPosition ? fmtUsd(requiredFeesToBeatHodlLiveUsd) : "—",
+                    },
+                    { label: "LP P/L (absolute)", value: fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd) },
+                    { label: "Close Gate Status", value: hasActiveLpPosition ? activeCloseGateLabel : "—" },
+                  ]}
+                  dense
+                />
+              </div>
             </div>
           </Card>
 
@@ -3013,6 +3141,35 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#60748f",
     lineHeight: 1.45,
+  },
+  lpHero: {
+    display: "grid",
+    gridTemplateColumns: "minmax(320px, 1.15fr) minmax(340px, 0.95fr)",
+    gap: 16,
+    alignItems: "start",
+    padding: 16,
+    border: "1px solid #dde6f2",
+    borderRadius: 12,
+    background: "linear-gradient(180deg, #fcfeff 0%, #f1f7fb 100%)",
+  },
+  lpHeadline: {
+    fontSize: 24,
+    lineHeight: 1.2,
+    fontWeight: 800,
+    color: "#10253f",
+  },
+  lpSubhead: {
+    marginTop: 10,
+    fontSize: 14,
+    lineHeight: 1.5,
+    color: "#435973",
+    maxWidth: 760,
+  },
+  lpSectionGrid: {
+    marginTop: 16,
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 12,
   },
   compactList: {
     display: "grid",

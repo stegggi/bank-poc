@@ -3385,6 +3385,7 @@ class Uc6Bot {
     const walletValueUsd = Number(latest?.wallet?.valuesUsd?.total || 0);
     const lpValueUsd = Number(this.estimateAggregatedLpUsdValueFromLatest() || 0);
     const totalAssetValueTodayUsd = walletValueUsd + lpValueUsd;
+    let latestYearSeen = null;
 
     for (const rec of closed) {
       const closedAtIso = rec?.exit?.closedAtIso || null;
@@ -3398,9 +3399,29 @@ class Uc6Bot {
       const totalCosts = Number(perf.totalCostsUsd || 0);
       const feesNet = Number(perf.feesNetUsd || 0);
       const capitalGainLoss = Number(perf.capitalGainLossUsd || 0);
-      const alphaVsHodl = Number(perf.alphaVsHodlUsd || 0);
-      const entryValueUsd = Number(rec?.entry?.entryValueUsd || 0);
-      const openedAtIso = rec?.entry?.openedAtIso || rec?.entry?.entrySnapshotAtIso || null;
+      const divergenceVsHodl = Number(
+        perf.divergenceVsHodlUsd != null
+          ? perf.divergenceVsHodlUsd
+          : (perf.impermanentLossUsd || 0)
+      );
+      const alphaVsHodlRaw = Number(perf.alphaVsHodlUsd);
+      const alphaVsHodl = Number.isFinite(alphaVsHodlRaw)
+        ? alphaVsHodlRaw
+        : (
+            (Number.isFinite(feesNet) ? feesNet : 0) +
+            (Number.isFinite(divergenceVsHodl) ? divergenceVsHodl : 0)
+          );
+      const entryValueUsd = [
+        Number(rec?.entry?.entryValueUsd || 0),
+        Number(perf.avgDeployedUsd || 0),
+        Number(rec?.exit?.exitValueUsd || 0),
+      ].find((v) => Number.isFinite(v) && v > 0) || 0;
+      const openedAtIso =
+        rec?.entry?.openedAtIso ||
+        rec?.entry?.entrySnapshotAtIso ||
+        rec?.createdAtIso ||
+        rec?.exit?.closedAtIso ||
+        null;
       const openedAtMs = openedAtIso ? Date.parse(openedAtIso) : NaN;
       totalClosedPositions += 1;
       totalRealizedNetProfitUsd += Number.isFinite(net) ? net : 0;
@@ -3409,6 +3430,7 @@ class Uc6Bot {
       totalFeesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
       totalCapitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
       totalAlphaVsHodlUsd += Number.isFinite(alphaVsHodl) ? alphaVsHodl : 0;
+      latestYearSeen = latestYearSeen == null ? year : Math.max(latestYearSeen, year);
       let row = byYear.get(year);
       if (!row) {
         row = {
@@ -3424,6 +3446,7 @@ class Uc6Bot {
           assetValueTodayUsd: null,
           ytdPct: null,
           firstOpenedAtIso: null,
+          firstOpenedAtMs: null,
           firstClosedAtIso: null,
           lastClosedAtIso: null,
         };
@@ -3438,9 +3461,13 @@ class Uc6Bot {
       row.alphaVsHodlUsd += Number.isFinite(alphaVsHodl) ? alphaVsHodl : 0;
       if (
         Number.isFinite(openedAtMs) &&
-        (!row.firstOpenedAtIso || openedAtIso < row.firstOpenedAtIso)
+        (!Number.isFinite(row.firstOpenedAtMs) || openedAtMs < row.firstOpenedAtMs)
       ) {
         row.firstOpenedAtIso = openedAtIso;
+        row.firstOpenedAtMs = openedAtMs;
+        row.assetValueStartUsd = Number.isFinite(entryValueUsd) && entryValueUsd > 0 ? entryValueUsd : row.assetValueStartUsd;
+      }
+      if (!Number.isFinite(row.assetValueStartUsd) || !(Number(row.assetValueStartUsd) > 0)) {
         row.assetValueStartUsd = Number.isFinite(entryValueUsd) && entryValueUsd > 0 ? entryValueUsd : row.assetValueStartUsd;
       }
       if (!row.firstClosedAtIso || closedAtIso < row.firstClosedAtIso) row.firstClosedAtIso = closedAtIso;
@@ -3450,7 +3477,7 @@ class Uc6Bot {
     const years = Array.from(byYear.values())
       .map((row) => {
         const startUsd = Number(row.assetValueStartUsd || 0);
-        if (Number(row.year) === currentYear) {
+        if (Number(row.year) === currentYear || (latestYearSeen != null && Number(row.year) === Number(latestYearSeen) && !byYear.has(currentYear))) {
           row.assetValueTodayUsd = totalAssetValueTodayUsd;
           row.ytdPct =
             Number.isFinite(startUsd) && startUsd > 0
@@ -3460,6 +3487,7 @@ class Uc6Bot {
           row.assetValueTodayUsd = null;
           row.ytdPct = null;
         }
+        delete row.firstOpenedAtMs;
         return row;
       })
       .sort((a, b) => b.year - a.year);
@@ -8375,12 +8403,13 @@ class Uc6Bot {
       Number(walletState.valuesUsd?.total || 0) || walletUsdc + walletWeth * spotUsdcPerWeth + walletEth * spotUsdcPerWeth;
 
     const pos = this.state.position || {};
+    const hasActivePosition = Boolean(pos.tokenId);
     const token0 = activePool?.token0 || this.weth;
     const token1 = activePool?.token1 || this.usdc;
-    const tickLower = Number(pos.tickLower);
-    const tickUpper = Number(pos.tickUpper);
+    const tickLower = hasActivePosition ? Number(pos.tickLower) : NaN;
+    const tickUpper = hasActivePosition ? Number(pos.tickUpper) : NaN;
     const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
-    const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
+    const liquidityRaw = hasActivePosition && pos.liquidity ? BigInt(pos.liquidity) : 0n;
     const lpAmountsRaw =
       hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96
         ? this.lpAmountsFromLiquidity(liquidityRaw, tickLower, tickUpper, BigInt(activePool.sqrtPriceX96), token0, token1)
@@ -8394,7 +8423,7 @@ class Uc6Bot {
       weth: lpWeth * spotUsdcPerWeth,
     };
 
-    const distance = this.distanceToEdge(pos, Number(activePool?.tick ?? 0));
+    const distance = hasActivePosition ? this.distanceToEdge(pos, Number(activePool?.tick ?? 0)) : null;
     const positionInventory = latest.positionInventory || null;
     const aggregatedLpUsdValue = this.estimateAggregatedLpUsdValueFromLatest() || lpUsdValue;
     const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(walletValueUsd + aggregatedLpUsdValue);
@@ -8509,17 +8538,17 @@ class Uc6Bot {
       },
       position: {
         tokenId: pos.tokenId || null,
-        tickLower: pos.tickLower ?? null,
-        tickUpper: pos.tickUpper ?? null,
-        centerTick: pos.centerTick ?? null,
-        inRange: Boolean(pos.inRange),
+        tickLower: hasActivePosition ? (pos.tickLower ?? null) : null,
+        tickUpper: hasActivePosition ? (pos.tickUpper ?? null) : null,
+        centerTick: hasActivePosition ? (pos.centerTick ?? null) : null,
+        inRange: hasActivePosition && typeof pos.inRange === "boolean" ? pos.inRange : null,
         distanceToEdge: distance,
-        liquidity: pos.liquidity || null,
+        liquidity: hasActivePosition ? (pos.liquidity || null) : null,
         amountsInLP: {
-          usdc: lpUsdc,
-          weth: lpWeth,
-          usdValue: lpUsdValue,
-          sideUsd,
+          usdc: hasActivePosition ? lpUsdc : 0,
+          weth: hasActivePosition ? lpWeth : 0,
+          usdValue: hasActivePosition ? lpUsdValue : 0,
+          sideUsd: hasActivePosition ? sideUsd : { usdc: 0, weth: 0 },
         },
       },
       wallet: {
