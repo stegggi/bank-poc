@@ -764,6 +764,89 @@ export default function Uc5Page() {
           </div>
         ) : null}
 
+        <section style={{ marginTop: 16 }}>
+          <h2 style={sectionTitle}>Market</h2>
+          <div style={card}>
+            <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
+              24h chart ({chart.candles.length} points). Markers: green=entry, amber=regime end, brown=regime flip, red=risk exit, gray=other/manual close.
+            </div>
+            {chart.partial24h ? (
+              <div style={{ fontSize: 12, color: "#b54708", marginBottom: 8 }}>
+                Partial 24h data (missing DB day: {(chart.missingDays || []).join(", ") || "unknown"}).
+              </div>
+            ) : null}
+            {chartRows.length === 0 ? (
+              <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
+            ) : (
+              <div style={{ width: "100%", minWidth: 0, height: MARKET_CHART_HEIGHT, minHeight: MARKET_CHART_HEIGHT }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={MARKET_CHART_HEIGHT}>
+                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
+                    <XAxis
+                      dataKey="t"
+                      type="number"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                    />
+                    <YAxis
+                      type="number"
+                      domain={yDomain ?? ["auto", "auto"]}
+                      tickFormatter={(v) => Number(v).toFixed(0)}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                      width={58}
+                    />
+                    <Tooltip content={renderChartTooltip} />
+                    <Line dataKey="close" type="monotone" stroke="#111827" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    {markerRows.slice(-500).map((m, i) => (
+                      <ReferenceDot
+                        key={`${m.t}-${i}`}
+                        x={m.t}
+                        y={Number(m.price)}
+                        r={4}
+                        fill={markerColor(m)}
+                        stroke="none"
+                        ifOverflow="visible"
+                      />
+                    ))}
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+            <div style={{ fontSize: 13, color: "#666", margin: "12px 0 8px" }}>
+              Regime strength history (0-100%), with TREND entry threshold.
+            </div>
+            {regimeRows.length === 0 ? (
+              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No regime data yet.</div>
+            ) : (
+              <div style={{ width: "100%", minWidth: 0, height: CONFIDENCE_CHART_HEIGHT, minHeight: CONFIDENCE_CHART_HEIGHT }}>
+                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={CONFIDENCE_CHART_HEIGHT}>
+                  <ComposedChart data={regimeRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
+                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
+                    <XAxis
+                      dataKey="t"
+                      type="number"
+                      domain={["dataMin", "dataMax"]}
+                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                    />
+                    <YAxis
+                      type="number"
+                      domain={[0, 100]}
+                      tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
+                      tick={{ fontSize: 12, fill: "#667085" }}
+                      width={58}
+                    />
+                    <Tooltip content={renderConfidenceTooltip} />
+                    <ReferenceLine y={trendEntryStrengthPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
+                    <Line dataKey="strengthPct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                  </ComposedChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+          </div>
+        </section>
+
         <section style={{ marginTop: 14 }}>
           <h2 style={sectionTitle}>Bot Status</h2>
           <div style={grid3}>
@@ -894,6 +977,82 @@ export default function Uc5Page() {
                 </button>
               </div>
             </div>
+          </div>
+        </section>
+
+        <section style={{ marginTop: 16 }}>
+          <h2 style={sectionTitle}>Position & Portfolio Performance</h2>
+          <div style={grid2}>
+            <div style={card}>
+              <div style={cardTitle}>Portfolio</div>
+              <KV k="Portfolio value" v={fmtUsd(portfolio?.portfolioValueUsd)} />
+              <KV k="Available margin" v={fmtUsd(portfolio?.availableMarginUsd)} />
+              <KV k="Used margin" v={`${fmtUsd(portfolio?.usedMarginUsd)} (${fmtPct(portfolio?.usedMarginPct)})`} />
+              <KV k="Unrealized PnL" v={fmtUsd(portfolio?.unrealizedPnl)} />
+              <KV k="Realized PnL (today)" v={fmtUsd(portfolio?.realizedPnlToday)} />
+              <KV k="Realized PnL (total)" v={fmtUsd(portfolio?.realizedPnlTotal)} />
+            </div>
+            <div style={card}>
+              <div style={cardTitle}>Trade Stats</div>
+              <KV k="Total trades" v={String(tradeSummary?.totalTrades ?? 0)} />
+              <KV k="Closed by regime end" v={String(tradeSummary?.closedByRegimeEnd ?? 0)} />
+              <KV k="Closed by regime flip" v={String(tradeSummary?.closedByRegimeFlip ?? 0)} />
+              <KV k="Closed by risk loop" v={String(tradeSummary?.closedByRiskLoop ?? 0)} />
+              <KV k="Closed by other/manual" v={String(tradeSummary?.closedByOther ?? 0)} />
+              <KV k="Win rate" v={fmtPct((tradeSummary?.winRate ?? 0) * 100)} />
+              <KV k="Avg win" v={fmtUsd(tradeSummary?.avgWin)} />
+              <KV k="Avg loss" v={fmtUsd(tradeSummary?.avgLoss)} />
+              <KV k="Open position" v={status?.position?.open ? `${status.position.side || "OPEN"} (${status.position.size?.toFixed(6) || "0"})` : "No"} />
+              <KV
+                k="Entry"
+                v={
+                  status?.position?.entryAt
+                    ? `${fmtUsd(
+                        status.position.entryPrice ??
+                          (status.position.open ? status?.market?.price : null)
+                      )} @ ${new Date(status.position.entryAt).toLocaleTimeString()}`
+                    : "—"
+                }
+              />
+            </div>
+          </div>
+        </section>
+
+        <section style={{ marginTop: 16 }}>
+          <h2 style={sectionTitle}>Agent</h2>
+          <div style={card}>
+            <KV k="Desired" v={status?.agent?.desired || "—"} />
+            <KV k="Regime state" v={status?.agent?.regimeState || status?.agent?.regime || "—"} />
+            <KV k="Regime direction" v={status?.agent?.regimeDirection || "—"} />
+            <KV
+              k="Trend strength"
+              v={
+                status?.agent?.regimeStrength != null
+                  ? `${(status.agent.regimeStrength * 100).toFixed(1)}% (${status.agent.confidenceBand || "—"})`
+                  : "—"
+              }
+            />
+            <KV
+              k="Last regime change"
+              v={status?.agent?.lastRegimeChangeAt ? new Date(status.agent.lastRegimeChangeAt).toLocaleString() : "—"}
+            />
+            <KV
+              k="Regime failure code"
+              v={
+                status?.agent?.regimeDiagnostics &&
+                typeof status.agent.regimeDiagnostics === "object" &&
+                "failureCode" in (status.agent.regimeDiagnostics as Record<string, unknown>)
+                  ? String((status.agent.regimeDiagnostics as Record<string, unknown>).failureCode || "—")
+                  : "—"
+              }
+            />
+            <KV k="Reason" v={status?.agent?.reasonHuman || status?.agent?.reason || "—"} />
+            <details style={{ marginTop: 10 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Advanced details</summary>
+              <div style={{ marginTop: 8, color: "#555", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
+                {status?.agent?.reasonRaw || "No raw metrics."}
+              </div>
+            </details>
           </div>
         </section>
 
@@ -1284,165 +1443,6 @@ export default function Uc5Page() {
             <button style={btnPrimary} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>
               {busy === "save" ? "Saving..." : "Save settings"}
             </button>
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Market</h2>
-          <div style={card}>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
-              24h chart ({chart.candles.length} points). Markers: green=entry, amber=regime end, brown=regime flip, red=risk exit, gray=other/manual close.
-            </div>
-            {chart.partial24h ? (
-              <div style={{ fontSize: 12, color: "#b54708", marginBottom: 8 }}>
-                Partial 24h data (missing DB day: {(chart.missingDays || []).join(", ") || "unknown"}).
-              </div>
-            ) : null}
-            {chartRows.length === 0 ? (
-              <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
-            ) : (
-              <div style={{ width: "100%", minWidth: 0, height: MARKET_CHART_HEIGHT, minHeight: MARKET_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={MARKET_CHART_HEIGHT}>
-                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
-                    <XAxis
-                      dataKey="t"
-                      type="number"
-                      domain={["dataMin", "dataMax"]}
-                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={yDomain ?? ["auto", "auto"]}
-                      tickFormatter={(v) => Number(v).toFixed(0)}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                      width={58}
-                    />
-                    <Tooltip content={renderChartTooltip} />
-                    <Line dataKey="close" type="monotone" stroke="#111827" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    {markerRows.slice(-500).map((m, i) => (
-                      <ReferenceDot
-                        key={`${m.t}-${i}`}
-                        x={m.t}
-                        y={Number(m.price)}
-                        r={4}
-                        fill={markerColor(m)}
-                        stroke="none"
-                        ifOverflow="visible"
-                      />
-                    ))}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            <div style={{ fontSize: 13, color: "#666", margin: "12px 0 8px" }}>
-              Regime strength history (0-100%), with TREND entry threshold.
-            </div>
-            {regimeRows.length === 0 ? (
-              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No regime data yet.</div>
-            ) : (
-              <div style={{ width: "100%", minWidth: 0, height: CONFIDENCE_CHART_HEIGHT, minHeight: CONFIDENCE_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={CONFIDENCE_CHART_HEIGHT}>
-                  <ComposedChart data={regimeRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
-                    <XAxis
-                      dataKey="t"
-                      type="number"
-                      domain={["dataMin", "dataMax"]}
-                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={[0, 100]}
-                      tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                      width={58}
-                    />
-                    <Tooltip content={renderConfidenceTooltip} />
-                    <ReferenceLine y={trendEntryStrengthPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
-                    <Line dataKey="strengthPct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Position & Portfolio Performance</h2>
-          <div style={grid2}>
-            <div style={card}>
-              <div style={cardTitle}>Portfolio</div>
-              <KV k="Portfolio value" v={fmtUsd(portfolio?.portfolioValueUsd)} />
-              <KV k="Available margin" v={fmtUsd(portfolio?.availableMarginUsd)} />
-              <KV k="Used margin" v={`${fmtUsd(portfolio?.usedMarginUsd)} (${fmtPct(portfolio?.usedMarginPct)})`} />
-              <KV k="Unrealized PnL" v={fmtUsd(portfolio?.unrealizedPnl)} />
-              <KV k="Realized PnL (today)" v={fmtUsd(portfolio?.realizedPnlToday)} />
-              <KV k="Realized PnL (total)" v={fmtUsd(portfolio?.realizedPnlTotal)} />
-            </div>
-            <div style={card}>
-              <div style={cardTitle}>Trade Stats</div>
-              <KV k="Total trades" v={String(tradeSummary?.totalTrades ?? 0)} />
-              <KV k="Closed by regime end" v={String(tradeSummary?.closedByRegimeEnd ?? 0)} />
-              <KV k="Closed by regime flip" v={String(tradeSummary?.closedByRegimeFlip ?? 0)} />
-              <KV k="Closed by risk loop" v={String(tradeSummary?.closedByRiskLoop ?? 0)} />
-              <KV k="Closed by other/manual" v={String(tradeSummary?.closedByOther ?? 0)} />
-              <KV k="Win rate" v={fmtPct((tradeSummary?.winRate ?? 0) * 100)} />
-              <KV k="Avg win" v={fmtUsd(tradeSummary?.avgWin)} />
-              <KV k="Avg loss" v={fmtUsd(tradeSummary?.avgLoss)} />
-              <KV k="Open position" v={status?.position?.open ? `${status.position.side || "OPEN"} (${status.position.size?.toFixed(6) || "0"})` : "No"} />
-              <KV
-                k="Entry"
-                v={
-                  status?.position?.entryAt
-                    ? `${fmtUsd(
-                        status.position.entryPrice ??
-                          (status.position.open ? status?.market?.price : null)
-                      )} @ ${new Date(status.position.entryAt).toLocaleTimeString()}`
-                    : "—"
-                }
-              />
-            </div>
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Agent</h2>
-          <div style={card}>
-            <KV k="Desired" v={status?.agent?.desired || "—"} />
-            <KV k="Regime state" v={status?.agent?.regimeState || status?.agent?.regime || "—"} />
-            <KV k="Regime direction" v={status?.agent?.regimeDirection || "—"} />
-            <KV
-              k="Trend strength"
-              v={
-                status?.agent?.regimeStrength != null
-                  ? `${(status.agent.regimeStrength * 100).toFixed(1)}% (${status.agent.confidenceBand || "—"})`
-                  : "—"
-              }
-            />
-            <KV
-              k="Last regime change"
-              v={status?.agent?.lastRegimeChangeAt ? new Date(status.agent.lastRegimeChangeAt).toLocaleString() : "—"}
-            />
-            <KV
-              k="Regime failure code"
-              v={
-                status?.agent?.regimeDiagnostics &&
-                typeof status.agent.regimeDiagnostics === "object" &&
-                "failureCode" in (status.agent.regimeDiagnostics as Record<string, unknown>)
-                  ? String((status.agent.regimeDiagnostics as Record<string, unknown>).failureCode || "—")
-                  : "—"
-              }
-            />
-            <KV k="Reason" v={status?.agent?.reasonHuman || status?.agent?.reason || "—"} />
-            <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Advanced details</summary>
-              <div style={{ marginTop: 8, color: "#555", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
-                {status?.agent?.reasonRaw || "No raw metrics."}
-              </div>
-            </details>
           </div>
         </section>
 
