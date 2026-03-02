@@ -1524,6 +1524,7 @@ export default function Uc6Page() {
   const alphaLiveUsd = n(hodlGateView?.alphaLiveUsd, 0);
   const requiredFeesToBeatHodlLiveUsd = n(hodlGateView?.requiredFeesToBeatHodlLiveUsd, 0);
   const strategyMode = status?.strategyMode || "LP_ACTIVE";
+  const isHoldMode = strategyMode !== "LP_ACTIVE";
   const trendView = status?.trend || null;
   const trendEscapeView = status?.trendEscape || null;
   const reEntryView = status?.reEntry || null;
@@ -1545,6 +1546,29 @@ export default function Uc6Page() {
   const lpSplitWethPct = lpValueUsd > 0 ? (lpWethSideUsd / lpValueUsd) * 100 : 0;
   const activePairLabel = `${activeLifecycleRecord?.pair?.base || status?.market?.pair?.base || "WETH"}/${activeLifecycleRecord?.pair?.quote || status?.market?.pair?.quote || "USDC"}`;
   const activeBandTicksLabel = `${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`;
+  const holdTargetLabel =
+    strategyMode === "HOLD_WETH"
+      ? "WETH"
+      : strategyMode === "HOLD_USDC"
+        ? "USDC"
+        : strategyMode === "HOLD_50_50"
+          ? "50/50"
+          : "—";
+  const holdInventoryValueUsd =
+    strategyMode === "HOLD_WETH"
+      ? n(status?.wallet?.valuesUsd?.weth, 0)
+      : strategyMode === "HOLD_USDC"
+        ? n(status?.wallet?.valuesUsd?.usdc, 0)
+        : strategyMode === "HOLD_50_50"
+          ? n(status?.wallet?.valuesUsd?.usdc, 0) + n(status?.wallet?.valuesUsd?.weth, 0)
+          : 0;
+  const distanceFromMuPctDisplay = (
+    reEntryView?.distanceFromMuPct != null
+      ? n(reEntryView.distanceFromMuPct, 0) * 100
+      : trendView?.distanceFromMuPct != null
+        ? n(trendView.distanceFromMuPct, 0) * 100
+        : null
+  );
   const activeCloseGateLabel = (
     <span title={hodlGateReason}>
       <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />{" "}
@@ -1919,8 +1943,8 @@ export default function Uc6Page() {
             </div>
           </Card>
 
-          <Card title="LP Position Composition" fullWidth wideViewport>
-            {isOwner && (
+          <Card title={isHoldMode ? "Hold State & Re-entry" : "LP Position Composition"} fullWidth wideViewport>
+            {isOwner && hasActiveLpPosition && (
               <div style={{ ...styles.row, marginBottom: 12 }}>
                 <button
                   style={styles.buttonDanger}
@@ -1932,188 +1956,312 @@ export default function Uc6Page() {
                 </button>
               </div>
             )}
-            <div style={styles.lpHero}>
-              <div>
-                <div style={styles.overviewEyebrow}>Active LP snapshot</div>
-                <div style={styles.lpHeadline}>
-                  {hasActiveLpPosition
-                    ? `${activePairLabel} · ${String(status?.position?.tokenId)}`
-                    : "No active LP position"}
+            {isHoldMode ? (
+              <>
+                <div style={styles.lpHero}>
+                  <div>
+                    <div style={styles.overviewEyebrow}>Hold-state snapshot</div>
+                    <div style={styles.lpHeadline}>
+                      {`${String(strategyMode)} · ${holdTargetLabel}`}
+                    </div>
+                    <div style={styles.lpSubhead}>
+                      Liquidity is currently withdrawn. This view focuses on hold inventory, regime state, and the re-entry gates that must clear before the bot mints again.
+                    </div>
+                  </div>
+                  <CompactMetricList
+                    items={[
+                      { label: "Strategy Mode", value: <Pill label={String(strategyMode)} tone="warn" /> },
+                      { label: "Hold Target", value: holdTargetLabel },
+                      { label: "Hold Inventory Value", value: fmtUsd(holdInventoryValueUsd) },
+                      {
+                        label: "Re-entry Eligible",
+                        value: <Pill label={reEntryView?.eligible ? "Yes" : "No"} tone={reEntryView?.eligible ? "good" : "muted"} />,
+                      },
+                      { label: "Re-entry Block", value: String(reEntryView?.reasonIfBlocked || "—") },
+                      { label: "Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
+                    ]}
+                    dense
+                  />
                 </div>
-                <div style={styles.lpSubhead}>
-                  {hasActiveLpPosition
-                    ? "Live LP structure, inventory mix, collectable fees, and close-gate economics from the current cached bot state."
-                    : `The strategy is currently not providing liquidity. Mode: ${String(strategyMode)}.`}
-                </div>
-              </div>
-              <CompactMetricList
-                items={[
-                  {
-                    label: "Status",
-                    value: hasActiveLpPosition
-                      ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />
-                      : "—",
-                  },
-                  { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
-                  {
-                    label: "Collectable Now",
-                    value: hasActiveLpPosition
-                      ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (est.)" : ""}`
-                      : "—",
-                  },
-                  {
-                    label: "Alpha Live",
-                    value: hasActiveLpPosition
-                      ? (
-                        <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                          {fmtSignedUsd(alphaLiveUsd)}
-                        </span>
-                      )
-                      : "—",
-                  },
-                  {
-                    label: "Close Gate",
-                    value: hasActiveLpPosition
-                      ? (
-                        <span title={hodlGateReason}>
-                          <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
-                        </span>
-                      )
-                      : "—",
-                  },
-                  { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
-                ]}
-                dense
-              />
-            </div>
 
-            <div style={styles.lpSectionGrid}>
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Position</div>
-                  <div style={styles.overviewBlockSubtle}>Identity, opening timestamps, and top-level lifecycle state.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    { label: "Token ID (LP NFT)", value: String(status?.position?.tokenId ?? "—"), mono: true },
-                    { label: "Pair", value: activePairLabel },
-                    { label: "Pool Tier / Selector", value: selectorLabel },
-                    { label: "Opened", value: fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso) },
-                    { label: "Entry Snapshot", value: fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso) },
-                    { label: "Entry Value", value: fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd) },
-                    { label: "Tx Count", value: String(activeLifecycleRecord?.activity?.txCount ?? 0) },
-                    { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
-                  ]}
-                  dense
-                />
-              </div>
+                <div style={styles.lpSectionGrid}>
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Hold Inventory</div>
+                      <div style={styles.overviewBlockSubtle}>Wallet composition that will fund the next re-entry.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Wallet Total", value: fmtUsd(status?.wallet?.valuesUsd?.total) },
+                        { label: "USDC", value: `${fmtNum(status?.wallet?.balances?.usdc, 4)} (${fmtUsd(status?.wallet?.valuesUsd?.usdc)})` },
+                        { label: "WETH", value: `${fmtNum(status?.wallet?.balances?.weth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.weth)})` },
+                        { label: "ETH (Gas)", value: `${fmtNum(status?.wallet?.balances?.eth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.eth)})` },
+                        { label: "Reserve Target", value: fmtUsd(status?.settings?.reservePolicy?.effectiveTargetUsdc) },
+                        { label: "Collectable Now", value: "—" },
+                      ]}
+                      dense
+                    />
+                  </div>
 
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Band & Risk</div>
-                  <div style={styles.overviewBlockSubtle}>Placed band, current pool location, and rebalance risk context.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    { label: "Current Pool Tick", value: String(status?.market?.tick?.current ?? "—") },
-                    { label: "Pool Tick Spacing", value: String(status?.market?.tick?.spacing ?? "—") },
-                    { label: "Base Band Setting", value: `±${fmtPct(configuredBandHalfPct)}` },
-                    {
-                      label: "Regime Effective Band (at mint)",
-                      value: regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`,
-                    },
-                    {
-                      label: "Mint Target Used",
-                      value: activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`,
-                    },
-                    {
-                      label: "Actual Band Width",
-                      value: !hasActiveLpPosition || actualBandHalfPct == null ? "—" : `±${fmtPct(actualBandHalfPct)}`,
-                    },
-                    { label: "Band Ticks", value: activeBandTicksLabel, mono: true },
-                    {
-                      label: "Distance To Edge",
-                      value:
-                        !hasActiveLpPosition || edgeDistPct == null
-                          ? "—"
-                          : `${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`,
-                    },
-                    { label: "In Range", value: hasActiveLpPosition ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} /> : "—" },
-                    { label: "Liquidity", value: status?.position?.liquidity || "—", mono: true },
-                  ]}
-                  dense
-                />
-              </div>
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Re-entry Gate</div>
+                      <div style={styles.overviewBlockSubtle}>The exact conditions that control when LP can be re-opened.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Re-entry Eligible", value: <Pill label={reEntryView?.eligible ? "Yes" : "No"} tone={reEntryView?.eligible ? "good" : "muted"} /> },
+                        { label: "Block Reason", value: String(reEntryView?.reasonIfBlocked || "—") },
+                        { label: "Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
+                        { label: "Escape Cooldown Until", value: fmtIsoLocal(trendEscapeView?.cooldownUntilIso) },
+                        { label: "Mean-Revert Confirm", value: `${String(trendView?.meanRevertConfirmSec ?? 0)}s` },
+                        { label: "Distance From Mu", value: distanceFromMuPctDisplay == null ? "—" : fmtPct(distanceFromMuPctDisplay) },
+                        { label: "Max Distance To Re-enter", value: fmtPct(n(status?.settings?.reEntry?.maxDistanceFromMuPct, 0) * 100) },
+                        { label: "Min Hold", value: `${String(status?.settings?.reEntry?.minHoldSec ?? "—")}s` },
+                      ]}
+                      dense
+                    />
+                  </div>
 
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Inventory Mix</div>
-                  <div style={styles.overviewBlockSubtle}>Current deployed capital split across both LP sides and collectable fees.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
-                    {
-                      label: "USDC in LP",
-                      value: hasActiveLpPosition
-                        ? `${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`
-                        : "—",
-                    },
-                    {
-                      label: "WETH in LP",
-                      value: hasActiveLpPosition
-                        ? `${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`
-                        : "—",
-                    },
-                    {
-                      label: "LP Split",
-                      value: hasActiveLpPosition ? `${fmtPct(lpSplitUsdcPct)} / ${fmtPct(lpSplitWethPct)}` : "—",
-                    },
-                    {
-                      label: "Collectable Now",
-                      value: hasActiveLpPosition
-                        ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (simulation fallback)" : ""}`
-                        : "—",
-                    },
-                    { label: "Pending Compound", value: hasActiveLpPosition ? fmtUsd(status?.fees?.pendingCompoundUsd) : "—" },
-                  ]}
-                  dense
-                />
-              </div>
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Market & Regime</div>
+                      <div style={styles.overviewBlockSubtle}>Current price action and the regime state used to unlock re-entry.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
+                        {
+                          label: "Regime Label",
+                          value: (
+                            <Pill
+                              label={String(regimeStatus?.label || "unknown")}
+                              tone={
+                                regimeStatus?.label === "mean_reverting"
+                                  ? "good"
+                                  : regimeStatus?.label === "trending"
+                                    ? "warn"
+                                    : "muted"
+                              }
+                            />
+                          ),
+                        },
+                        { label: "Confidence", value: regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct) },
+                        { label: "Half-life", value: regimeHalfLifeLabel },
+                        { label: "Trend Direction", value: String(trendView?.direction || "flat") },
+                        { label: "Move Over Lookback", value: trendMovePct == null ? "—" : fmtSignedPct(trendMovePct) },
+                        { label: "Lookback", value: `${String(trendView?.lookbackSec ?? "—")}s` },
+                        { label: "Trend Confirm", value: `${String(trendView?.confirmSec ?? 0)}s` },
+                      ]}
+                      dense
+                    />
+                  </div>
 
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Live Economics</div>
-                  <div style={styles.overviewBlockSubtle}>Collected fees, realized costs so far, live alpha, and close-gate constraint.</div>
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Economics & Protection</div>
+                      <div style={styles.overviewBlockSubtle}>Live alpha protection, HODL benchmark context, and the most recent LP record.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Alpha Live", value: fmtSignedUsd(alphaLiveUsd) },
+                        { label: "Required Fees To Beat HODL", value: fmtUsd(requiredFeesToBeatHodlLiveUsd) },
+                        { label: "Last Closed Reason", value: closedPositionRecords[0]?.closeReason || activeLifecycleRecord?.closeReason || "—" },
+                        { label: "Last Hold Target", value: closedPositionRecords[0]?.closeHoldTarget || "—" },
+                        { label: "Close Gate", value: activeCloseGateLabel },
+                        { label: "Latest LP P/L", value: fmtSignedUsd(closedPositionRecords[0]?.performance?.netProfitUsd) },
+                      ]}
+                      dense
+                    />
+                  </div>
                 </div>
-                <CompactMetricList
-                  items={[
-                    { label: "Fees Collected", value: fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd) },
-                    { label: "Total Costs", value: fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd) },
-                    { label: "Fees Net", value: fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd) },
-                    { label: "Capital Gain/Loss", value: fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd) },
-                    { label: "Divergence vs HODL", value: fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd) },
-                    {
-                      label: "Alpha vs HODL (Live)",
-                      value: hasActiveLpPosition
-                        ? (
-                          <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                            {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
-                          </span>
-                        )
-                        : "—",
-                    },
-                    {
-                      label: "Required Fees to Beat HODL (Live)",
-                      value: hasActiveLpPosition ? fmtUsd(requiredFeesToBeatHodlLiveUsd) : "—",
-                    },
-                    { label: "LP P/L (absolute)", value: fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd) },
-                    { label: "Close Gate Status", value: hasActiveLpPosition ? activeCloseGateLabel : "—" },
-                  ]}
-                  dense
-                />
-              </div>
-            </div>
+              </>
+            ) : (
+              <>
+                <div style={styles.lpHero}>
+                  <div>
+                    <div style={styles.overviewEyebrow}>Active LP snapshot</div>
+                    <div style={styles.lpHeadline}>
+                      {hasActiveLpPosition
+                        ? `${activePairLabel} · ${String(status?.position?.tokenId)}`
+                        : "No active LP position"}
+                    </div>
+                    <div style={styles.lpSubhead}>
+                      {hasActiveLpPosition
+                        ? "Live LP structure, inventory mix, collectable fees, and close-gate economics from the current cached bot state."
+                        : `The strategy is currently not providing liquidity. Mode: ${String(strategyMode)}.`}
+                    </div>
+                  </div>
+                  <CompactMetricList
+                    items={[
+                      {
+                        label: "Status",
+                        value: hasActiveLpPosition
+                          ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />
+                          : "—",
+                      },
+                      { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
+                      {
+                        label: "Collectable Now",
+                        value: hasActiveLpPosition
+                          ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (est.)" : ""}`
+                          : "—",
+                      },
+                      {
+                        label: "Alpha Live",
+                        value: hasActiveLpPosition
+                          ? (
+                            <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                              {fmtSignedUsd(alphaLiveUsd)}
+                            </span>
+                          )
+                          : "—",
+                      },
+                      {
+                        label: "Close Gate",
+                        value: hasActiveLpPosition
+                          ? (
+                            <span title={hodlGateReason}>
+                              <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
+                            </span>
+                          )
+                          : "—",
+                      },
+                      { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
+                    ]}
+                    dense
+                  />
+                </div>
+
+                <div style={styles.lpSectionGrid}>
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Position</div>
+                      <div style={styles.overviewBlockSubtle}>Identity, opening timestamps, and top-level lifecycle state.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Token ID (LP NFT)", value: String(status?.position?.tokenId ?? "—"), mono: true },
+                        { label: "Pair", value: activePairLabel },
+                        { label: "Pool Tier / Selector", value: selectorLabel },
+                        { label: "Opened", value: fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso) },
+                        { label: "Entry Snapshot", value: fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso) },
+                        { label: "Entry Value", value: fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd) },
+                        { label: "Tx Count", value: String(activeLifecycleRecord?.activity?.txCount ?? 0) },
+                        { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
+                      ]}
+                      dense
+                    />
+                  </div>
+
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Band & Risk</div>
+                      <div style={styles.overviewBlockSubtle}>Placed band, current pool location, and rebalance risk context.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Current Pool Tick", value: String(status?.market?.tick?.current ?? "—") },
+                        { label: "Pool Tick Spacing", value: String(status?.market?.tick?.spacing ?? "—") },
+                        { label: "Base Band Setting", value: `±${fmtPct(configuredBandHalfPct)}` },
+                        {
+                          label: "Regime Effective Band (at mint)",
+                          value: regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`,
+                        },
+                        {
+                          label: "Mint Target Used",
+                          value: activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`,
+                        },
+                        {
+                          label: "Actual Band Width",
+                          value: !hasActiveLpPosition || actualBandHalfPct == null ? "—" : `±${fmtPct(actualBandHalfPct)}`,
+                        },
+                        { label: "Band Ticks", value: activeBandTicksLabel, mono: true },
+                        {
+                          label: "Distance To Edge",
+                          value:
+                            !hasActiveLpPosition || edgeDistPct == null
+                              ? "—"
+                              : `${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`,
+                        },
+                        { label: "In Range", value: hasActiveLpPosition ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} /> : "—" },
+                        { label: "Liquidity", value: status?.position?.liquidity || "—", mono: true },
+                      ]}
+                      dense
+                    />
+                  </div>
+
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Inventory Mix</div>
+                      <div style={styles.overviewBlockSubtle}>Current deployed capital split across both LP sides and collectable fees.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
+                        {
+                          label: "USDC in LP",
+                          value: hasActiveLpPosition
+                            ? `${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`
+                            : "—",
+                        },
+                        {
+                          label: "WETH in LP",
+                          value: hasActiveLpPosition
+                            ? `${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`
+                            : "—",
+                        },
+                        {
+                          label: "LP Split",
+                          value: hasActiveLpPosition ? `${fmtPct(lpSplitUsdcPct)} / ${fmtPct(lpSplitWethPct)}` : "—",
+                        },
+                        {
+                          label: "Collectable Now",
+                          value: hasActiveLpPosition
+                            ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (simulation fallback)" : ""}`
+                            : "—",
+                        },
+                        { label: "Pending Compound", value: hasActiveLpPosition ? fmtUsd(status?.fees?.pendingCompoundUsd) : "—" },
+                      ]}
+                      dense
+                    />
+                  </div>
+
+                  <div style={styles.overviewBlock}>
+                    <div style={styles.overviewBlockHeader}>
+                      <div style={styles.overviewBlockTitle}>Live Economics</div>
+                      <div style={styles.overviewBlockSubtle}>Collected fees, realized costs so far, live alpha, and close-gate constraint.</div>
+                    </div>
+                    <CompactMetricList
+                      items={[
+                        { label: "Fees Collected", value: fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd) },
+                        { label: "Total Costs", value: fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd) },
+                        { label: "Fees Net", value: fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd) },
+                        { label: "Capital Gain/Loss", value: fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd) },
+                        { label: "Divergence vs HODL", value: fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd) },
+                        {
+                          label: "Alpha vs HODL (Live)",
+                          value: hasActiveLpPosition
+                            ? (
+                              <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                                {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
+                              </span>
+                            )
+                            : "—",
+                        },
+                        {
+                          label: "Required Fees to Beat HODL (Live)",
+                          value: hasActiveLpPosition ? fmtUsd(requiredFeesToBeatHodlLiveUsd) : "—",
+                        },
+                        { label: "LP P/L (absolute)", value: fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd) },
+                        { label: "Close Gate Status", value: hasActiveLpPosition ? activeCloseGateLabel : "—" },
+                      ]}
+                      dense
+                    />
+                  </div>
+                </div>
+              </>
+            )}
           </Card>
 
           <Card title="LP Position Record" fullWidth wideViewport>
