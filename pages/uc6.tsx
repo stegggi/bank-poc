@@ -615,7 +615,9 @@ type Uc6Status = {
       totalCostsUsd?: number;
       feesNetUsd?: number;
       capitalGainLossUsd?: number;
+      alphaVsHodlUsd?: number;
       realizedNetProfitUsd?: number;
+      totalAssetValueTodayUsd?: number;
     };
     years?: Array<{
       year?: number;
@@ -624,7 +626,12 @@ type Uc6Status = {
       totalCostsUsd?: number;
       feesNetUsd?: number;
       capitalGainLossUsd?: number;
+      alphaVsHodlUsd?: number;
       realizedNetProfitUsd?: number;
+      assetValueStartUsd?: number | null;
+      assetValueTodayUsd?: number | null;
+      ytdPct?: number | null;
+      firstOpenedAtIso?: string | null;
       firstClosedAtIso?: string | null;
       lastClosedAtIso?: string | null;
     }>;
@@ -1911,10 +1918,10 @@ export default function Uc6Page() {
             <div style={styles.recordActiveWrap}>
               <div style={styles.recordActiveTitle}>Realized (Closed) Summary for Tax Tracking</div>
               <div style={{ ...styles.note, marginBottom: 10 }}>
-                Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}).
+                Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}). Asset value start uses the oldest closed-record entry value available in that year as a proxy.
               </div>
               <SimpleTable
-                headers={["Tax Year", "Closed Positions", "Net Fees", "Capital Gain/Loss"]}
+                headers={["Tax Year", "Closed Positions", "Net Fees", "Capital Gain/Loss", "Alpha vs HODL", "Asset Value Start", "Asset Value Today", "YTD %"]}
                 rows={
                   Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
                     ? positionsTaxSummary!.years!.map((row) => [
@@ -1922,8 +1929,12 @@ export default function Uc6Page() {
                         String(Math.round(n(row?.closedPositions, 0))),
                         fmtSignedUsd(row?.feesNetUsd),
                         fmtSignedUsd(row?.capitalGainLossUsd),
+                        fmtSignedUsd(row?.alphaVsHodlUsd),
+                        fmtUsd(row?.assetValueStartUsd),
+                        row?.assetValueTodayUsd == null ? "—" : fmtUsd(row?.assetValueTodayUsd),
+                        row?.ytdPct == null ? "—" : fmtSignedPct(row?.ytdPct),
                       ])
-                    : [["—", "0", "—", "—"]]
+                    : [["—", "0", "—", "—", "—", "—", "—", "—"]]
                 }
               />
             </div>

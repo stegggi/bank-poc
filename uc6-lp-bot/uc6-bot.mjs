@@ -3379,6 +3379,12 @@ class Uc6Bot {
     let totalTotalCostsUsd = 0;
     let totalFeesNetUsd = 0;
     let totalCapitalGainLossUsd = 0;
+    let totalAlphaVsHodlUsd = 0;
+    const currentYear = new Date().getUTCFullYear();
+    const latest = this.state.latest || {};
+    const walletValueUsd = Number(latest?.wallet?.valuesUsd?.total || 0);
+    const lpValueUsd = Number(this.estimateAggregatedLpUsdValueFromLatest() || 0);
+    const totalAssetValueTodayUsd = walletValueUsd + lpValueUsd;
 
     for (const rec of closed) {
       const closedAtIso = rec?.exit?.closedAtIso || null;
@@ -3392,12 +3398,17 @@ class Uc6Bot {
       const totalCosts = Number(perf.totalCostsUsd || 0);
       const feesNet = Number(perf.feesNetUsd || 0);
       const capitalGainLoss = Number(perf.capitalGainLossUsd || 0);
+      const alphaVsHodl = Number(perf.alphaVsHodlUsd || 0);
+      const entryValueUsd = Number(rec?.entry?.entryValueUsd || 0);
+      const openedAtIso = rec?.entry?.openedAtIso || rec?.entry?.entrySnapshotAtIso || null;
+      const openedAtMs = openedAtIso ? Date.parse(openedAtIso) : NaN;
       totalClosedPositions += 1;
       totalRealizedNetProfitUsd += Number.isFinite(net) ? net : 0;
       totalFeesCollectedUsd += Number.isFinite(feesCollected) ? feesCollected : 0;
       totalTotalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
       totalFeesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
       totalCapitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
+      totalAlphaVsHodlUsd += Number.isFinite(alphaVsHodl) ? alphaVsHodl : 0;
       let row = byYear.get(year);
       if (!row) {
         row = {
@@ -3408,6 +3419,11 @@ class Uc6Bot {
           totalCostsUsd: 0,
           feesNetUsd: 0,
           capitalGainLossUsd: 0,
+          alphaVsHodlUsd: 0,
+          assetValueStartUsd: null,
+          assetValueTodayUsd: null,
+          ytdPct: null,
+          firstOpenedAtIso: null,
           firstClosedAtIso: null,
           lastClosedAtIso: null,
         };
@@ -3419,11 +3435,34 @@ class Uc6Bot {
       row.totalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
       row.feesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
       row.capitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
+      row.alphaVsHodlUsd += Number.isFinite(alphaVsHodl) ? alphaVsHodl : 0;
+      if (
+        Number.isFinite(openedAtMs) &&
+        (!row.firstOpenedAtIso || openedAtIso < row.firstOpenedAtIso)
+      ) {
+        row.firstOpenedAtIso = openedAtIso;
+        row.assetValueStartUsd = Number.isFinite(entryValueUsd) && entryValueUsd > 0 ? entryValueUsd : row.assetValueStartUsd;
+      }
       if (!row.firstClosedAtIso || closedAtIso < row.firstClosedAtIso) row.firstClosedAtIso = closedAtIso;
       if (!row.lastClosedAtIso || closedAtIso > row.lastClosedAtIso) row.lastClosedAtIso = closedAtIso;
     }
 
-    const years = Array.from(byYear.values()).sort((a, b) => b.year - a.year);
+    const years = Array.from(byYear.values())
+      .map((row) => {
+        const startUsd = Number(row.assetValueStartUsd || 0);
+        if (Number(row.year) === currentYear) {
+          row.assetValueTodayUsd = totalAssetValueTodayUsd;
+          row.ytdPct =
+            Number.isFinite(startUsd) && startUsd > 0
+              ? ((totalAssetValueTodayUsd / startUsd) - 1) * 100
+              : null;
+        } else {
+          row.assetValueTodayUsd = null;
+          row.ytdPct = null;
+        }
+        return row;
+      })
+      .sort((a, b) => b.year - a.year);
     return {
       timezone: "UTC",
       dateRangeRule: "01-01..12-31",
@@ -3433,7 +3472,9 @@ class Uc6Bot {
         totalCostsUsd: totalTotalCostsUsd,
         feesNetUsd: totalFeesNetUsd,
         capitalGainLossUsd: totalCapitalGainLossUsd,
+        alphaVsHodlUsd: totalAlphaVsHodlUsd,
         realizedNetProfitUsd: totalRealizedNetProfitUsd,
+        totalAssetValueTodayUsd,
       },
       years,
     };

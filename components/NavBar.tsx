@@ -79,10 +79,10 @@ export default function NavBar({ active }: NavBarProps) {
       },
       {
         uc: "UC5",
-        title: "Shared state",
+        title: "Perp Trading",
         items: {
           kind: "pills",
-          pills: [{ href: "/uc5", label: "State demo", on: isUc5 }],
+          pills: [{ href: "/uc5", label: "AI Bot", on: isUc5 }],
         },
       },
       {
@@ -90,7 +90,7 @@ export default function NavBar({ active }: NavBarProps) {
         title: "LP automation",
         items: {
           kind: "pills",
-          pills: [{ href: "/uc6", label: "UC6: LP Bot", on: isUc6 }],
+          pills: [{ href: "/uc6", label: "LP Bot", on: isUc6 }],
         },
       },
 
