@@ -1698,122 +1698,16 @@ export default function Uc6Page() {
                   Market, capital allocation, regime state, and trend-escape gating in one place. All values are current cached bot state.
                 </div>
               </div>
-              <div style={styles.overviewSummaryGrid}>
-                <Metric label="Spot Price" value={fmtUsd(status?.market?.spotPrice?.usdcPerWeth)} />
-                <Metric
-                  label="Strategy Mode"
-                  value={<Pill label={String(strategyMode)} tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"} />}
-                />
-                <Metric
-                  label="Regime Label"
-                  value={
-                    <Pill
-                      label={String(regimeStatus?.label || "unknown")}
-                      tone={
-                        regimeStatus?.label === "trending"
-                          ? "warn"
-                          : regimeStatus?.label === "mean_reverting"
-                            ? "good"
-                            : "muted"
-                      }
-                    />
-                  }
-                />
-                <Metric
-                  label="Alpha Live"
-                  value={
-                    <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                      {fmtSignedUsd(alphaLiveUsd)}
-                    </span>
-                  }
-                />
-                <Metric
-                  label="Close Gate"
-                  value={
-                    <span title={hodlGateReason}>
-                      <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
-                    </span>
-                  }
-                />
-                <Metric
-                  label="Next Action"
-                  value={`${String(decision.action || "monitor")} (${String(decision.reason || "n/a")})`}
-                />
-              </div>
-            </div>
-
-            <div style={styles.overviewSectionGrid}>
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Liquidity Pool Overview</div>
-                  <div style={styles.overviewBlockSubtle}>Market, venue, connectivity, and trading cadence.</div>
-                </div>
-                <div style={styles.metaGrid}>
-                  <Metric label="Chain" value={`${status?.market?.chain?.name || "Base"} (${status?.market?.chain?.chainId || BASE_CHAIN_ID_DEC})`} />
-                  <Metric label="Venue Active" value={status?.market?.venueActive || "—"} />
-                  <Metric label="Pair" value={`${status?.market?.pair?.base || "WETH"}/${status?.market?.pair?.quote || "USDC"}`} />
-                  <Metric label="Spot Price" value={fmtUsd(status?.market?.spotPrice?.usdcPerWeth)} />
-                  <Metric label="Price Updated" value={status?.market?.spotPrice?.updatedAtIso || "—"} />
-                  <Metric label="Active LP NFTs" value={String(activeLpCount || 0)} />
-                  <Metric label="Total LP (All NFTs)" value={fmtUsd(aggregateLpUsd)} />
-                  <Metric label="HTTP Provider" value={status?.providers?.http?.active || "—"} />
-                  <Metric
-                    label="WS Provider"
-                    value={
-                      status?.providers?.ws?.enabled
-                        ? `${status?.providers?.ws?.active || "—"} (${status?.providers?.ws?.connected ? "connected" : "disconnected"})`
-                        : "disabled"
-                    }
-                  />
-                  <Metric label="Last Head" value={status?.providers?.ws?.lastHeadBlock != null ? String(status.providers?.ws?.lastHeadBlock) : "—"} />
-                  <Metric label="Head Seen" value={status?.providers?.ws?.lastHeadAtIso || "—"} />
-                  <Metric label="Time In Range (Trading On)" value={status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100)} />
-                  <Metric label="Time In Range Since" value={status?.ops?.timeInRange?.sinceIso || "—"} />
-                  <Metric label="Min Rebalance Interval" value={`${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s`} />
-                  <Metric label="Dashboard Poll" value={`${statusPollMs}ms`} />
-                  <Metric
-                    label="Cooldown Remaining"
-                    value={<Pill label={cooldownRemaining > 0 ? `${cooldownRemaining}s` : "ready"} tone={cooldownRemaining > 0 ? "warn" : "good"} />}
-                  />
-                </div>
-              </div>
-
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Wallet & Allocation</div>
-                  <div style={styles.overviewBlockSubtle}>Idle capital, deployed value, and gas wallet capacity.</div>
-                </div>
-                <div style={styles.metaGrid}>
-                  <Metric label="Wallet Total" value={fmtUsd(status?.wallet?.valuesUsd?.total)} />
-                  <Metric label="USDC" value={`${fmtNum(status?.wallet?.balances?.usdc, 4)} (${fmtUsd(status?.wallet?.valuesUsd?.usdc)})`} />
-                  <Metric label="WETH" value={`${fmtNum(status?.wallet?.balances?.weth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.weth)})`} />
-                  <Metric label="ETH (Gas)" value={`${fmtNum(status?.wallet?.balances?.eth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.eth)})`} />
-                  <Metric label="Idle Value" value={fmtUsd(status?.wallet?.allocationUsd?.idle)} />
-                  <Metric label="LP Deployed" value={fmtUsd(status?.wallet?.allocationUsd?.lpDeployed)} />
-                  <Metric label="Reserve Target" value={fmtUsd(status?.wallet?.allocationUsd?.reserveTarget)} />
-                  <Metric label="% Deployed" value={fmtPct(status?.wallet?.deployedPct)} />
-                  <Metric label="% Idle" value={fmtPct(100 - n(status?.wallet?.deployedPct, 0))} />
-                </div>
-              </div>
-
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Regime</div>
-                  <div style={styles.overviewBlockSubtle}>OU half-life classification and effective LP thresholds.</div>
-                </div>
-                <div style={styles.metaGrid}>
-                  <Metric
-                    label="Regime Engine"
-                    value={
-                      <Pill
-                        label={status?.settings?.regime?.enabled ? "ON" : "OFF"}
-                        tone={status?.settings?.regime?.enabled ? "good" : "muted"}
-                      />
-                    }
-                  />
-                  <Metric
-                    label="Label"
-                    value={
+              <CompactMetricList
+                items={[
+                  { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
+                  {
+                    label: "Strategy Mode",
+                    value: <Pill label={String(strategyMode)} tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"} />,
+                  },
+                  {
+                    label: "Regime Label",
+                    value: (
                       <Pill
                         label={String(regimeStatus?.label || "unknown")}
                         tone={
@@ -1824,21 +1718,141 @@ export default function Uc6Page() {
                               : "muted"
                         }
                       />
-                    }
-                  />
-                  <Metric label="Half-life" value={regimeHalfLifeLabel} />
-                  <Metric label="Confidence" value={regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct)} />
-                  <Metric label="Samples" value={`${String(regimeStatus?.sampleCount ?? 0)} / ${String(regimeStatus?.windowSec ?? status?.settings?.regime?.windowSec ?? "—")}s`} />
-                  <Metric label="Updated" value={regimeStatus?.updatedAtIso || "—"} />
-                  <Metric label="Advice" value={String(regimeDecisionView?.adviceReason || "—")} />
-                  <Metric
-                    label="Wait Recommended"
-                    value={<Pill label={regimeDecisionView?.waitRecommended ? "yes" : "no"} tone={regimeDecisionView?.waitRecommended ? "warn" : "muted"} />}
-                  />
-                  <Metric label="Edge Threshold (base → effective)" value={`${fmtPct(regimeBaseEdgePct)} → ${fmtPct(regimeEffectiveEdgePct)}`} />
-                  <Metric label="Cooldown (base → effective)" value={`${Math.round(regimeBaseCooldown)}s → ${Math.round(regimeEffectiveCooldown)}s`} />
-                  <Metric label="Band Target (base → effective)" value={`±${fmtPct(regimeBaseBandBps / 100)} → ±${fmtPct(regimeEffectiveBandBps / 100)}`} />
+                    ),
+                  },
+                  {
+                    label: "Alpha Live",
+                    value: (
+                      <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
+                        {fmtSignedUsd(alphaLiveUsd)}
+                      </span>
+                    ),
+                  },
+                  {
+                    label: "Close Gate",
+                    value: (
+                      <span title={hodlGateReason}>
+                        <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
+                      </span>
+                    ),
+                  },
+                  {
+                    label: "Next Action",
+                    value: `${String(decision.action || "monitor")} (${String(decision.reason || "n/a")})`,
+                  },
+                ]}
+                dense
+              />
+            </div>
+
+            <div style={styles.overviewSectionGrid}>
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Liquidity Pool Overview</div>
+                  <div style={styles.overviewBlockSubtle}>Market, venue, connectivity, and trading cadence.</div>
                 </div>
+                <CompactMetricList
+                  items={[
+                    { label: "Pair", value: `${status?.market?.pair?.base || "WETH"}/${status?.market?.pair?.quote || "USDC"}` },
+                    { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
+                    { label: "Price Updated", value: status?.market?.spotPrice?.updatedAtIso || "—" },
+                    { label: "Venue Active", value: status?.market?.venueActive || "—" },
+                    { label: "Chain", value: `${status?.market?.chain?.name || "Base"} (${status?.market?.chain?.chainId || BASE_CHAIN_ID_DEC})` },
+                    { label: "Total LP (All NFTs)", value: fmtUsd(aggregateLpUsd) },
+                    { label: "Active LP NFTs", value: String(activeLpCount || 0) },
+                    {
+                      label: "Time In Range",
+                      value: status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100),
+                    },
+                    { label: "Time In Range Since", value: status?.ops?.timeInRange?.sinceIso || "—" },
+                    {
+                      label: "Cooldown Remaining",
+                      value: <Pill label={cooldownRemaining > 0 ? `${cooldownRemaining}s` : "ready"} tone={cooldownRemaining > 0 ? "warn" : "good"} />,
+                    },
+                    { label: "Min Rebalance Interval", value: `${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s` },
+                    { label: "HTTP Provider", value: status?.providers?.http?.active || "—" },
+                    {
+                      label: "WS Provider",
+                      value: status?.providers?.ws?.enabled
+                        ? `${status?.providers?.ws?.active || "—"} (${status?.providers?.ws?.connected ? "connected" : "disconnected"})`
+                        : "disabled",
+                    },
+                    {
+                      label: "Last Head",
+                      value: status?.providers?.ws?.lastHeadBlock != null ? String(status.providers?.ws?.lastHeadBlock) : "—",
+                    },
+                    { label: "Head Seen", value: status?.providers?.ws?.lastHeadAtIso || "—" },
+                    { label: "Dashboard Poll", value: `${statusPollMs}ms` },
+                  ]}
+                  dense
+                />
+              </div>
+
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Wallet & Allocation</div>
+                  <div style={styles.overviewBlockSubtle}>Idle capital, deployed value, and gas wallet capacity.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    { label: "Wallet Total", value: fmtUsd(status?.wallet?.valuesUsd?.total) },
+                    { label: "LP Deployed", value: fmtUsd(status?.wallet?.allocationUsd?.lpDeployed) },
+                    { label: "Idle Value", value: fmtUsd(status?.wallet?.allocationUsd?.idle) },
+                    { label: "Reserve Target", value: fmtUsd(status?.wallet?.allocationUsd?.reserveTarget) },
+                    { label: "% Deployed", value: fmtPct(status?.wallet?.deployedPct) },
+                    { label: "% Idle", value: fmtPct(100 - n(status?.wallet?.deployedPct, 0)) },
+                    { label: "USDC", value: `${fmtNum(status?.wallet?.balances?.usdc, 4)} (${fmtUsd(status?.wallet?.valuesUsd?.usdc)})` },
+                    { label: "WETH", value: `${fmtNum(status?.wallet?.balances?.weth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.weth)})` },
+                    { label: "ETH (Gas)", value: `${fmtNum(status?.wallet?.balances?.eth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.eth)})` },
+                  ]}
+                  dense
+                />
+              </div>
+
+              <div style={styles.overviewBlock}>
+                <div style={styles.overviewBlockHeader}>
+                  <div style={styles.overviewBlockTitle}>Regime</div>
+                  <div style={styles.overviewBlockSubtle}>OU half-life classification and effective LP thresholds.</div>
+                </div>
+                <CompactMetricList
+                  items={[
+                    {
+                      label: "Regime Engine",
+                      value: <Pill label={status?.settings?.regime?.enabled ? "ON" : "OFF"} tone={status?.settings?.regime?.enabled ? "good" : "muted"} />,
+                    },
+                    {
+                      label: "Label",
+                      value: (
+                        <Pill
+                          label={String(regimeStatus?.label || "unknown")}
+                          tone={
+                            regimeStatus?.label === "trending"
+                              ? "warn"
+                              : regimeStatus?.label === "mean_reverting"
+                                ? "good"
+                                : "muted"
+                          }
+                        />
+                      ),
+                    },
+                    { label: "Confidence", value: regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct) },
+                    { label: "Half-life", value: regimeHalfLifeLabel },
+                    { label: "Advice", value: String(regimeDecisionView?.adviceReason || "—") },
+                    {
+                      label: "Wait Recommended",
+                      value: <Pill label={regimeDecisionView?.waitRecommended ? "yes" : "no"} tone={regimeDecisionView?.waitRecommended ? "warn" : "muted"} />,
+                    },
+                    { label: "Edge Threshold", value: `${fmtPct(regimeBaseEdgePct)} → ${fmtPct(regimeEffectiveEdgePct)}` },
+                    { label: "Cooldown", value: `${Math.round(regimeBaseCooldown)}s → ${Math.round(regimeEffectiveCooldown)}s` },
+                    { label: "Band Target", value: `±${fmtPct(regimeBaseBandBps / 100)} → ±${fmtPct(regimeEffectiveBandBps / 100)}` },
+                    {
+                      label: "Samples",
+                      value: `${String(regimeStatus?.sampleCount ?? 0)} / ${String(regimeStatus?.windowSec ?? status?.settings?.regime?.windowSec ?? "—")}s`,
+                    },
+                    { label: "Updated", value: regimeStatus?.updatedAtIso || "—" },
+                  ]}
+                  dense
+                />
                 <div style={styles.note}>
                   Regime uses OU half-life heuristics on cached tick samples only (no extra RPC reads). Effective thresholds apply per decision and do not overwrite stored settings.
                 </div>
@@ -1849,48 +1863,39 @@ export default function Uc6Page() {
                   <div style={styles.overviewBlockTitle}>Trend Escape</div>
                   <div style={styles.overviewBlockSubtle}>Hybrid hold-state gating for trend exits and mean-reversion re-entry.</div>
                 </div>
-                <div style={styles.metaGrid}>
-                  <Metric
-                    label="Mode"
-                    value={
-                      <Pill
-                        label={String(strategyMode)}
-                        tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"}
-                      />
-                    }
-                  />
-                  <Metric label="Trend Direction" value={String(trendView?.direction || "flat")} />
-                  <Metric label="Move Over Lookback" value={trendMovePct == null ? "—" : fmtSignedPct(trendMovePct)} />
-                  <Metric label="Lookback" value={`${String(trendView?.lookbackSec ?? "—")}s`} />
-                  <Metric label="Trend Confirm" value={`${String(trendView?.confirmSec ?? 0)}s`} />
-                  <Metric label="Mean-Revert Confirm" value={`${String(trendView?.meanRevertConfirmSec ?? 0)}s`} />
-                  <Metric label="Distance From Mu" value={trendView?.distanceFromMuPct == null ? "—" : fmtPct(n(trendView.distanceFromMuPct, 0) * 100)} />
-                  <Metric label="Alpha Live" value={fmtSignedUsd(alphaLiveUsd)} />
-                  <Metric label="Escape Alpha Min" value={fmtSignedUsd(status?.settings?.trendEscape?.minAlphaUsdToEscape)} />
-                  <Metric
-                    label="Escape Eligible"
-                    value={
-                      <Pill
-                        label={trendEscapeView?.eligible ? "yes" : "no"}
-                        tone={trendEscapeView?.eligible ? "warn" : "muted"}
-                      />
-                    }
-                  />
-                  <Metric label="Escape Hold Target" value={String(trendEscapeView?.holdTargetIfEscape || "—")} />
-                  <Metric label="Escape Block Reason" value={String(trendEscapeView?.reasonIfBlocked || "—")} />
-                  <Metric
-                    label="Re-entry Eligible"
-                    value={
-                      <Pill
-                        label={reEntryView?.eligible ? "yes" : "no"}
-                        tone={reEntryView?.eligible ? "good" : "muted"}
-                      />
-                    }
-                  />
-                  <Metric label="Re-entry Block Reason" value={String(reEntryView?.reasonIfBlocked || "—")} />
-                  <Metric label="Re-entry Eligible At" value={fmtIsoLocal(reEntryView?.eligibleAtIso)} />
-                  <Metric label="Escape Cooldown Until" value={fmtIsoLocal(trendEscapeView?.cooldownUntilIso)} />
-                </div>
+                <CompactMetricList
+                  items={[
+                    {
+                      label: "Mode",
+                      value: <Pill label={String(strategyMode)} tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"} />,
+                    },
+                    {
+                      label: "Escape Eligible",
+                      value: <Pill label={trendEscapeView?.eligible ? "yes" : "no"} tone={trendEscapeView?.eligible ? "warn" : "muted"} />,
+                    },
+                    { label: "Escape Block Reason", value: String(trendEscapeView?.reasonIfBlocked || "—") },
+                    { label: "Escape Hold Target", value: String(trendEscapeView?.holdTargetIfEscape || "—") },
+                    {
+                      label: "Re-entry Eligible",
+                      value: <Pill label={reEntryView?.eligible ? "yes" : "no"} tone={reEntryView?.eligible ? "good" : "muted"} />,
+                    },
+                    { label: "Re-entry Block Reason", value: String(reEntryView?.reasonIfBlocked || "—") },
+                    { label: "Re-entry Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
+                    { label: "Escape Cooldown Until", value: fmtIsoLocal(trendEscapeView?.cooldownUntilIso) },
+                    { label: "Trend Direction", value: String(trendView?.direction || "flat") },
+                    { label: "Move Over Lookback", value: trendMovePct == null ? "—" : fmtSignedPct(trendMovePct) },
+                    { label: "Lookback", value: `${String(trendView?.lookbackSec ?? "—")}s` },
+                    { label: "Trend Confirm", value: `${String(trendView?.confirmSec ?? 0)}s` },
+                    { label: "Mean-Revert Confirm", value: `${String(trendView?.meanRevertConfirmSec ?? 0)}s` },
+                    {
+                      label: "Distance From Mu",
+                      value: trendView?.distanceFromMuPct == null ? "—" : fmtPct(n(trendView.distanceFromMuPct, 0) * 100),
+                    },
+                    { label: "Alpha Live", value: fmtSignedUsd(alphaLiveUsd) },
+                    { label: "Escape Alpha Min", value: fmtSignedUsd(status?.settings?.trendEscape?.minAlphaUsdToEscape) },
+                  ]}
+                  dense
+                />
                 <div style={styles.note}>
                   In trending regimes the bot can close LP and hold inventory directionally. Re-entry requires sustained mean reversion and price proximity to regime mu.
                 </div>
@@ -2699,6 +2704,25 @@ function Metric({ label, value, mono }: { label: string; value: ReactNode; mono?
   );
 }
 
+function CompactMetricList({
+  items,
+  dense,
+}: {
+  items: Array<{ label: string; value: ReactNode; mono?: boolean }>;
+  dense?: boolean;
+}) {
+  return (
+    <div style={{ ...styles.compactList, ...(dense ? styles.compactListDense : undefined) }}>
+      {items.map((item) => (
+        <div key={item.label} style={styles.compactRow}>
+          <div style={styles.compactLabel}>{item.label}</div>
+          <div style={{ ...styles.compactValue, fontFamily: item.mono ? "monospace" : "inherit" }}>{item.value}</div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function Pill({ label, tone }: { label: string; tone: "good" | "warn" | "bad" | "muted" }) {
   const toneStyle =
     tone === "good"
@@ -2964,25 +2988,20 @@ const styles: Record<string, CSSProperties> = {
     color: "#435973",
     maxWidth: 720,
   },
-  overviewSummaryGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-    gap: 10,
-  },
   overviewSectionGrid: {
     marginTop: 16,
     display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-    gap: 16,
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: 12,
   },
   overviewBlock: {
     border: "1px solid #e1e8f2",
     borderRadius: 12,
     background: "#fbfdff",
-    padding: 14,
+    padding: 12,
   },
   overviewBlockHeader: {
-    marginBottom: 6,
+    marginBottom: 8,
   },
   overviewBlockTitle: {
     fontSize: 15,
@@ -2994,6 +3013,36 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     color: "#60748f",
     lineHeight: 1.45,
+  },
+  compactList: {
+    display: "grid",
+    gap: 0,
+    marginTop: 2,
+  },
+  compactListDense: {
+    marginTop: 0,
+  },
+  compactRow: {
+    display: "grid",
+    gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.05fr)",
+    gap: 12,
+    alignItems: "start",
+    padding: "7px 0",
+    borderBottom: "1px solid #ebf0f6",
+  },
+  compactLabel: {
+    fontSize: 11,
+    fontWeight: 700,
+    letterSpacing: "0.02em",
+    textTransform: "uppercase",
+    color: "#61748d",
+  },
+  compactValue: {
+    fontSize: 13,
+    fontWeight: 600,
+    color: "#10253f",
+    textAlign: "right",
+    wordBreak: "break-word",
   },
   recordActiveWrap: {
     border: "1px solid #e5ebf4",
