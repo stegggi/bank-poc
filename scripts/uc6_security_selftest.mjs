@@ -1,19 +1,40 @@
 #!/usr/bin/env node
 import assert from "node:assert/strict";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { stripTypeScriptTypes } from "node:module";
+import { access, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire, stripTypeScriptTypes } from "node:module";
 import path from "node:path";
-import { Wallet } from "ethers";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, "..");
+const moduleRoots = [repoRoot, "/opt/uc6-bot/app"];
+
+async function findModuleRoot() {
+  for (const root of moduleRoots) {
+    try {
+      await access(path.join(root, "node_modules"));
+      return root;
+    } catch {}
+  }
+  throw new Error("No node_modules directory found. Expected either repo dependencies or /opt/uc6-bot/app.");
+}
+
+function resolvePackageFrom(root, specifier) {
+  return createRequire(path.join(root, "package.json")).resolve(specifier);
+}
+
+async function importPackage(specifier) {
+  const moduleRoot = await findModuleRoot();
+  return import(pathToFileURL(resolvePackageFrom(moduleRoot, specifier)).href);
+}
 
 async function importTranspiledTsModule(relativePath) {
   const absPath = path.join(repoRoot, relativePath);
   const source = await readFile(absPath, "utf8");
   const transpiled = stripTypeScriptTypes(source, { mode: "transform", sourceUrl: absPath });
   const tempDir = await mkdtemp(path.join(repoRoot, ".uc6-selftest-"));
+  const moduleRoot = await findModuleRoot();
+  await symlink(path.join(moduleRoot, "node_modules"), path.join(tempDir, "node_modules"), "dir");
   const tempFile = path.join(tempDir, path.basename(relativePath, ".ts") + ".mjs");
   await writeFile(tempFile, transpiled, "utf8");
   try {
@@ -40,6 +61,7 @@ async function run(label, fn) {
   }
 }
 
+const { Wallet } = await importPackage("ethers");
 const ownerAuth = await importTranspiledTsModule("lib/uc6OwnerAuth.ts");
 const security = await import(pathToFileURL(path.join(repoRoot, "uc6-lp-bot/lib/security.mjs")).href);
 
