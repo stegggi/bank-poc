@@ -2985,6 +2985,23 @@ class Uc6Bot {
     return beforeKey !== afterKey;
   }
 
+  shouldReplaceEntryBaseline(rec, baseline) {
+    if (!rec || !baseline) return false;
+    if (this.isEntrySnapshotMissing(rec)) return true;
+
+    const currentValueUsd = Number(rec?.entry?.entryValueUsd || 0);
+    const nextValueUsd = Number(baseline?.entryValueUsd || 0);
+    const currentWeth = Number(rec?.entry?.entryTokens?.weth || 0);
+    const currentUsdc = Number(rec?.entry?.entryTokens?.usdc || 0);
+    const nextWeth = Number(baseline?.entryTokens?.weth || 0);
+    const nextUsdc = Number(baseline?.entryTokens?.usdc || 0);
+
+    if (nextValueUsd > currentValueUsd + 1) return true;
+    if (nextWeth > currentWeth + 1e-9) return true;
+    if (nextUsdc > currentUsdc + 1e-6) return true;
+    return false;
+  }
+
   ensureEntryBaselineBeforeClose(rec, { closeAtIso = null } = {}) {
     if (!rec || !this.isEntrySnapshotMissing(rec)) return false;
     let baseline = this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso });
@@ -2998,16 +3015,21 @@ class Uc6Bot {
   repairLifecycleRecordsMissingEntrySnapshots() {
     let repaired = 0;
     for (const rec of Array.isArray(this.positionRecords) ? this.positionRecords : []) {
-      if (!rec || rec.status !== "CLOSED") continue;
-      if (!this.isEntrySnapshotMissing(rec)) continue;
-      let changed = this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
-      if (!changed) {
-        const valueOnly = this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso: rec?.exit?.closedAtIso || null });
-        if (valueOnly) changed = this.applyEntryBaselineFallbackToRecord(rec, valueOnly);
+      if (!rec) continue;
+      const closeAtIso = rec?.exit?.closedAtIso || null;
+      let changed = false;
+      const fallback = this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso });
+      if (fallback && this.shouldReplaceEntryBaseline(rec, fallback)) {
+        changed = this.applyEntryBaselineFallbackToRecord(rec, fallback);
       }
-      if (!changed) {
+      if (!changed && this.isEntrySnapshotMissing(rec)) {
+        const valueOnly = this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso });
+        if (valueOnly && this.shouldReplaceEntryBaseline(rec, valueOnly)) {
+          changed = this.applyEntryBaselineFallbackToRecord(rec, valueOnly);
+        }
+      }
+      if (!changed && this.isEntrySnapshotMissing(rec)) {
         const rawMintValueUsd = Number(rec?.entry?.rawMintValueUsd || 0);
-        const closeAtIso = rec?.exit?.closedAtIso || null;
         const exitSpot = Number(rec?.exit?.spotPriceUsdcPerWeth || 0);
         if (rawMintValueUsd > 0) {
           changed = this.applyEntryBaselineFallbackToRecord(rec, {
@@ -3214,7 +3236,28 @@ class Uc6Bot {
         touchRecordCommon(rec);
         rec.activity.swaps += Number(ev.details?.swapsInAction || 0);
         this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
-        this.updateBaselineFromPrincipalAdd(rec, ev.details?.principalAdded || {});
+        const principalAdded = ev.details?.principalAdded || {};
+        const topUpSpot = Number(
+          ev?.details?.spotPriceUsdcPerWeth ||
+          ev?.spotPriceUsdcPerWeth ||
+          rec?.entry?.spotPriceUsdcPerWeth ||
+          this.getSpotUsdcPerWeth() ||
+          0
+        );
+        if (rec.entry?.entrySnapshotAtIso) {
+          rec.entry.entryTokens = {
+            weth: Number(rec.entry?.entryTokens?.weth || 0) + Number(principalAdded.weth || 0),
+            usdc: Number(rec.entry?.entryTokens?.usdc || 0) + Number(principalAdded.usdc || 0),
+          };
+          rec.entry.entryValueUsd =
+            Number(rec.entry?.entryValueUsd || 0) +
+            Number(principalAdded.usdc || 0) +
+            (topUpSpot > 0 ? Number(principalAdded.weth || 0) * topUpSpot : 0);
+          if (!(Number(rec.entry?.spotPriceUsdcPerWeth || 0) > 0) && topUpSpot > 0) {
+            rec.entry.spotPriceUsdcPerWeth = topUpSpot;
+          }
+        }
+        this.updateBaselineFromPrincipalAdd(rec, principalAdded);
         this.recomputeLifecycleRecordDerived(rec);
       }
     } else if (type === "ENTRY_SNAPSHOT") {
@@ -6424,6 +6467,18 @@ class Uc6Bot {
       this.state.pendingCompoundUsd = 0;
       this.state.position = {
         ...this.state.position,
+        liquidity:
+          this.state.position?.liquidity && increaseResult?.liquidityAdded != null
+            ? (() => {
+                try {
+                  return (
+                    BigInt(this.state.position.liquidity) + BigInt(increaseResult.liquidityAdded || 0n)
+                  ).toString();
+                } catch {
+                  return this.state.position?.liquidity || null;
+                }
+              })()
+            : this.state.position?.liquidity || null,
         topUpsThisCycle: Number(this.state.position?.topUpsThisCycle || 0) + 1,
       };
       this.setDecision({
