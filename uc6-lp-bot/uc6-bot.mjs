@@ -2759,6 +2759,8 @@ class Uc6Bot {
         entryValueUsd: rawMintValueUsd,
         spotPriceUsdcPerWeth: Math.max(0, pExit),
         rawMintValueUsd,
+        topUpCount: 0,
+        lastContributionAtIso: rec.entry?.openedAtIso || closeAtIso || null,
         approx: true,
         note: "entry snapshot fallback (value-only from raw mint value)",
       };
@@ -2779,6 +2781,8 @@ class Uc6Bot {
         entryValueUsd: rawMintValueUsd,
         spotPriceUsdcPerWeth: Math.max(0, spot),
         rawMintValueUsd,
+        topUpCount: 0,
+        lastContributionAtIso: firstAt,
         approx: true,
         note: "entry snapshot fallback (value-only; mint event missing in journal)",
       };
@@ -2794,6 +2798,7 @@ class Uc6Bot {
     let rawMintValueUsd = Number(rec.entry?.rawMintValueUsd || mintEv?.details?.rawMintValueUsd || 0);
     let topupWeth = 0;
     let topupUsdc = 0;
+    let topUpCount = 0;
 
     let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
     const closeMs = Date.parse(closeAtIso || rec?.exit?.closedAtIso || "");
@@ -2805,6 +2810,7 @@ class Uc6Bot {
       if (!Number.isFinite(evMs) || evMs < mintMs || evMs > cutoffMs) continue;
       if (ev === mintEv) continue;
       if (ev?.type === "TOP_UP") {
+        topUpCount += 1;
         const p = ev?.details?.principalAdded || {};
         const addWeth = Number(p.weth || 0);
         const addUsdc = Number(p.usdc || 0);
@@ -2855,6 +2861,8 @@ class Uc6Bot {
       entryValueUsd: Math.max(0, entryValueUsd),
       spotPriceUsdcPerWeth: Math.max(0, Number(spot || 0)),
       rawMintValueUsd: rawMintValueUsd > 0 ? rawMintValueUsd : null,
+      topUpCount,
+      lastContributionAtIso: lastIncludedEv?.atIso || mintEv?.atIso || closeAtIso || null,
       approx: true,
       note,
     };
@@ -2898,6 +2906,8 @@ class Uc6Bot {
         entryValueUsd: recRawMintValue,
         spotPriceUsdcPerWeth: Math.max(0, exitSpot),
         rawMintValueUsd: recRawMintValue,
+        topUpCount: 0,
+        lastContributionAtIso: rec?.entry?.openedAtIso || closeAtIso || nowIso(),
         approx: true,
         note: "entry snapshot fallback (value-only from stored raw mint value)",
       };
@@ -2916,12 +2926,14 @@ class Uc6Bot {
     const baseSpot = spotCandidates.find((v) => Number.isFinite(v) && v > 0) || 0;
     let valueUsd = Number(mintEv?.details?.rawMintValueUsd || recRawMintValue || 0);
     let lastIncludedEv = mintEv;
+    let topUpCount = 0;
 
     for (const ev of events) {
       const evMs = Date.parse(ev?.atIso || "");
       if (!Number.isFinite(evMs) || evMs < mintMs || evMs > cutoffMs) continue;
       if (ev === mintEv) continue;
       if (ev?.type !== "TOP_UP") continue;
+      topUpCount += 1;
       const p = ev?.details?.principalAdded || {};
       const addUsdc = Number(p.usdc || 0);
       const addWeth = Number(p.weth || 0);
@@ -2942,6 +2954,8 @@ class Uc6Bot {
       entryValueUsd: valueUsd,
       spotPriceUsdcPerWeth: Math.max(0, baseSpot),
       rawMintValueUsd: Number(mintEv?.details?.rawMintValueUsd || recRawMintValue || 0) || null,
+      topUpCount,
+      lastContributionAtIso: lastIncludedEv?.atIso || mintEv?.atIso || rec?.entry?.openedAtIso || closeAtIso || nowIso(),
       approx: true,
       note: "entry snapshot fallback (value-only reconstruction from mint/top-up events)",
     };
@@ -2995,10 +3009,38 @@ class Uc6Bot {
     const currentUsdc = Number(rec?.entry?.entryTokens?.usdc || 0);
     const nextWeth = Number(baseline?.entryTokens?.weth || 0);
     const nextUsdc = Number(baseline?.entryTokens?.usdc || 0);
+    const spot = Number(
+      baseline?.spotPriceUsdcPerWeth ||
+      rec?.entry?.spotPriceUsdcPerWeth ||
+      rec?.exit?.spotPriceUsdcPerWeth ||
+      0
+    );
+    const tokenDeltaUsd =
+      Math.abs(nextUsdc - currentUsdc) +
+      (spot > 0 ? Math.abs(nextWeth - currentWeth) * spot : 0);
+    const currentApprox = Boolean(rec?.entry?.entrySnapshotApprox);
+    const nextApprox = Boolean(baseline?.approx);
+    const topUpCount = Math.max(0, Number(baseline?.topUpCount || 0));
+    const currentSnapshotMs = Date.parse(rec?.entry?.entrySnapshotAtIso || "");
+    const lastContributionMs = Date.parse(
+      baseline?.lastContributionAtIso || baseline?.entrySnapshotAtIso || ""
+    );
+
+    if (
+      topUpCount > 0 &&
+      Number.isFinite(currentSnapshotMs) &&
+      Number.isFinite(lastContributionMs) &&
+      currentSnapshotMs < lastContributionMs + 45_000
+    ) {
+      return true;
+    }
 
     if (nextValueUsd > currentValueUsd + 1) return true;
     if (nextWeth > currentWeth + 1e-9) return true;
     if (nextUsdc > currentUsdc + 1e-6) return true;
+    if ((currentApprox || nextApprox) && (Math.abs(nextValueUsd - currentValueUsd) > 1 || tokenDeltaUsd > 1)) {
+      return true;
+    }
     return false;
   }
 
@@ -3038,6 +3080,8 @@ class Uc6Bot {
             entryValueUsd: rawMintValueUsd,
             spotPriceUsdcPerWeth: Math.max(0, exitSpot),
             rawMintValueUsd,
+            topUpCount: 0,
+            lastContributionAtIso: rec?.entry?.openedAtIso || closeAtIso || nowIso(),
             approx: true,
             note: "entry snapshot fallback (raw mint value only, startup repair)",
           });
