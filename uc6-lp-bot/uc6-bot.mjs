@@ -3148,7 +3148,23 @@ class Uc6Bot {
       Number(perf.feesCollectedUsd || 0) +
       Number(perf.rewardsUsd || 0) -
       Number(perf.totalCostsUsd || 0);
-    perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
+    const entryWeth = Number(rec.entry?.entryTokens?.weth || 0);
+    const entryUsdc = Number(rec.entry?.entryTokens?.usdc || 0);
+    const exitWeth = Number(rec.exit?.exitTokens?.weth || 0);
+    const exitUsdc = Number(rec.exit?.exitTokens?.usdc || 0);
+    const exitSpot = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
+    if (
+      rec.status === "CLOSED" &&
+      exitSpot > 0 &&
+      (Math.abs(entryWeth) > 0 || Math.abs(entryUsdc) > 0) &&
+      (Math.abs(exitWeth) > 0 || Math.abs(exitUsdc) > 0)
+    ) {
+      const hodlExitUsd = entryUsdc + entryWeth * exitSpot;
+      const lpExitPrincipalUsd = exitUsdc + exitWeth * exitSpot;
+      perf.impermanentLossUsd = lpExitPrincipalUsd - hodlExitUsd;
+    } else {
+      perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
+    }
     // Signed benchmark delta: LP principal value minus HODL principal value at exit.
     perf.divergenceVsHodlUsd = Number(perf.impermanentLossUsd || 0);
     perf.costToFeeRatio =
