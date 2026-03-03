@@ -2789,6 +2789,11 @@ class Uc6Bot {
     }
     const mintMs = Date.parse(mintEv.atIso || "");
     if (!Number.isFinite(mintMs)) return null;
+    const latestEntrySnapshotMs = events.reduce((latest, ev) => {
+      if (ev?.type !== "ENTRY_SNAPSHOT") return latest;
+      const evMs = Date.parse(ev?.atIso || "");
+      return Number.isFinite(evMs) ? Math.max(latest, evMs) : latest;
+    }, Number.NEGATIVE_INFINITY);
 
     const mintPrincipal = this.mintPrincipalForLifecycleEvent(mintEv);
     const hasMintTokenBaseline = Boolean(mintPrincipal) &&
@@ -2801,6 +2806,9 @@ class Uc6Bot {
     let topUpCount = 0;
 
     let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
+    if (Number.isFinite(latestEntrySnapshotMs)) {
+      cutoffMs = Math.max(cutoffMs, latestEntrySnapshotMs);
+    }
     const closeMs = Date.parse(closeAtIso || rec?.exit?.closedAtIso || "");
     if (Number.isFinite(closeMs)) cutoffMs = Math.min(cutoffMs, closeMs);
 
@@ -2915,7 +2923,15 @@ class Uc6Bot {
 
     const mintMs = Date.parse(mintEv?.atIso || "");
     if (!Number.isFinite(mintMs)) return null;
+    const latestEntrySnapshotMs = events.reduce((latest, ev) => {
+      if (ev?.type !== "ENTRY_SNAPSHOT") return latest;
+      const evMs = Date.parse(ev?.atIso || "");
+      return Number.isFinite(evMs) ? Math.max(latest, evMs) : latest;
+    }, Number.NEGATIVE_INFINITY);
     let cutoffMs = mintMs + ENTRY_SNAPSHOT_FALLBACK_WINDOW_MS;
+    if (Number.isFinite(latestEntrySnapshotMs)) {
+      cutoffMs = Math.max(cutoffMs, latestEntrySnapshotMs);
+    }
     if (Number.isFinite(closeMs)) cutoffMs = Math.min(cutoffMs, closeMs);
 
     const spotCandidates = [
