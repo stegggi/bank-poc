@@ -1799,6 +1799,7 @@ class Uc6Bot {
       if (this.settings.wsEnabled) await this.wsHeadWatcher.start();
       await this.refreshSnapshots({ forceSlot0: true, forceBalances: true, headSeen: true });
       await this.reconcilePositionFromChain();
+      await this.syncStrategyModeInvariant();
     } catch (err) {
       this.setLastError(err);
     }
@@ -2127,6 +2128,27 @@ class Uc6Bot {
     let target = Math.max(0, minUsdc, totalValueUsd * pct);
     if (maxUsdc > 0) target = Math.min(target, maxUsdc);
     return target;
+  }
+
+  getMinimumMintNotionalUsd() {
+    const caps = this.getExecutionCapsConfig();
+    return Math.max(5, Number(caps.minSwapUsd || 0), 0);
+  }
+
+  async syncStrategyModeInvariant({ persist = false } = {}) {
+    const hasActiveLp = Boolean(this.state.position?.tokenId);
+    const mode = this.getStrategyMode();
+    if (!hasActiveLp || mode === "LP_ACTIVE") {
+      return { changed: false, mode };
+    }
+    this.setStrategyModeState("LP_ACTIVE", {
+      holdStartedAtIso: null,
+      escapeCooldownUntilIso: null,
+    });
+    if (persist) {
+      await this.persistState().catch((err) => this.setLastError(err));
+    }
+    return { changed: true, mode: "LP_ACTIVE" };
   }
 
   toUsdForTokenAmountRaw(tokenAddress, amountRaw, spotUsdcPerWeth) {
@@ -3213,13 +3235,31 @@ class Uc6Bot {
   applyLifecycleCloseContext(rec, { closeReason = null, closeHoldTarget = null } = {}) {
     if (!rec) return;
     if (closeReason != null) {
-      const nextReason = String(closeReason || "").trim();
+      const nextReason = this.normalizeLifecycleCloseReason(closeReason, rec.closeReason || "close_position");
       if (nextReason) rec.closeReason = nextReason;
     }
     if (closeHoldTarget != null) {
       const nextTarget = String(closeHoldTarget || "").trim();
       rec.closeHoldTarget = nextTarget || null;
     }
+  }
+
+  normalizeLifecycleCloseReason(reason, fallback = "close_position") {
+    const raw = String(reason || "").trim();
+    if (!raw) return fallback;
+    const normalized = raw.toLowerCase();
+    const invalidCloseReasons = new Set([
+      "auto",
+      "open_position",
+      "open_swap",
+      "idle_deploy",
+      "mean_reversion_reentry",
+      "reentry",
+      "reentry_failed",
+      "trend_escape_hold",
+    ]);
+    if (invalidCloseReasons.has(normalized)) return fallback;
+    return raw;
   }
 
   applyLifecycleEventToRecords(ev) {
@@ -3384,7 +3424,7 @@ class Uc6Bot {
         touchRecordCommon(rec);
         rec.activity.rebalances += 1;
         this.applyLifecycleCloseContext(rec, {
-          closeReason: ev.details?.reason || "rebalance",
+          closeReason: this.normalizeLifecycleCloseReason(ev.details?.reason, "rebalance"),
           closeHoldTarget: null,
         });
         this.recomputeLifecycleRecordDerived(rec);
@@ -3711,15 +3751,20 @@ class Uc6Bot {
 
   scheduleEntrySnapshot({ positionRunId, rawMintValueUsd = 0 }) {
     if (!positionRunId) return;
-    const existing = this.positionRecordsById.get(String(positionRunId));
-    if (existing?._internal?.entryCaptured || existing?.entry?.entrySnapshotAtIso) {
-      this.state.pendingEntrySnapshot = null;
+    const nextRunId = String(positionRunId);
+    const pending = this.state.pendingEntrySnapshot;
+    const nextDueAtIso = new Date(Date.now() + 60_000).toISOString();
+    if (pending?.positionRunId === nextRunId) {
+      pending.dueAtIso = nextDueAtIso;
+      pending.rawMintValueUsd = Math.max(
+        Number(pending.rawMintValueUsd || 0),
+        Number(rawMintValueUsd || 0)
+      );
       return;
     }
-    const dueAt = new Date(Date.now() + 60_000).toISOString();
     this.state.pendingEntrySnapshot = {
-      positionRunId: String(positionRunId),
-      dueAtIso: dueAt,
+      positionRunId: nextRunId,
+      dueAtIso: nextDueAtIso,
       rawMintValueUsd: Number(rawMintValueUsd || 0),
     };
   }
@@ -5778,6 +5823,34 @@ class Uc6Bot {
           account: this.account.address,
         });
 
+        let amount0Used = 0n;
+        let amount1Used = 0n;
+        if (Array.isArray(sim.result)) {
+          if (typeof sim.result[2] === "bigint") amount0Used = sim.result[2];
+          if (typeof sim.result[3] === "bigint") amount1Used = sim.result[3];
+        }
+        const simulatedUsdc = sameAddress(token0, this.usdc)
+          ? Number(formatUnits(amount0Used, USDC_DECIMALS))
+          : sameAddress(token1, this.usdc)
+            ? Number(formatUnits(amount1Used, USDC_DECIMALS))
+            : 0;
+        const simulatedWeth = sameAddress(token0, this.weth)
+          ? Number(formatUnits(amount0Used, WETH_DECIMALS))
+          : sameAddress(token1, this.weth)
+            ? Number(formatUnits(amount1Used, WETH_DECIMALS))
+            : 0;
+        const rawMintValueUsd = simulatedUsdc + simulatedWeth * this.getSpotUsdcPerWeth();
+        const minMintUsd = this.getMinimumMintNotionalUsd();
+        if (rawMintValueUsd > 0 && rawMintValueUsd < minMintUsd) {
+          const err = new Error(
+            `Mint notional ${rawMintValueUsd.toFixed(4)} USD below minimum ${minMintUsd.toFixed(2)} USD`
+          );
+          err.uc6MintSkippedDust = true;
+          err.uc6MintValueUsd = rawMintValueUsd;
+          err.uc6MintMinUsd = minMintUsd;
+          throw err;
+        }
+
         await this.assertTxAllowed("mint_write");
         const hash = await this.walletClient.writeContract({
           ...sim.request,
@@ -5816,12 +5889,6 @@ class Uc6Bot {
           }
         }
 
-        let amount0Used = 0n;
-        let amount1Used = 0n;
-        if (Array.isArray(sim.result)) {
-          if (typeof sim.result[2] === "bigint") amount0Used = sim.result[2];
-          if (typeof sim.result[3] === "bigint") amount1Used = sim.result[3];
-        }
         const phaseCtx = this.lifecyclePhaseContext;
         if (phaseCtx?.positionRunId && (phaseCtx.phase === "open_mint" || phaseCtx.phase === "rebalance_mint")) {
           const gasUsdThisTx = (() => {
@@ -7182,6 +7249,9 @@ class Uc6Bot {
     } else if (!mode.startsWith("HOLD_")) {
       eligible = false;
       reasonIfBlocked = "not_in_hold_mode";
+    } else if (this.state.position?.tokenId) {
+      eligible = false;
+      reasonIfBlocked = "active_lp_conflict";
     } else if (!tradingAllowed) {
       eligible = false;
       reasonIfBlocked = "trading_blocked";
@@ -7473,6 +7543,16 @@ class Uc6Bot {
   }
 
   async executeReEntry(primary, effectiveBandHalfBps, trendCtx) {
+    if (this.state.position?.tokenId) {
+      await this.syncStrategyModeInvariant({ persist: true });
+      this.setDecision({
+        action: "monitor",
+        reason: "active_lp_conflict",
+        mode: this.getStrategyMode(),
+        tokenId: String(this.state.position.tokenId),
+      });
+      return false;
+    }
     const runId = this.ensureActivePositionRun({
       reason: "reentry",
       snapshot: primary,
@@ -7534,6 +7614,9 @@ class Uc6Bot {
       });
       return true;
     } catch (err) {
+      this.state.reEntryCooldownUntilIso = new Date(
+        Date.now() + this.getReEntrySettings().cooldownAfterReEntrySec * 1000
+      ).toISOString();
       this.finalizeActiveAction("error", "reentry_failed", {
         message: err instanceof Error ? err.message : String(err || "unknown"),
       });
@@ -8205,6 +8288,9 @@ class Uc6Bot {
         preflightErrors.push(
           `attempt${attempt}: ${err instanceof Error ? err.message : String(err || "unknown")}`
         );
+        if (err && typeof err === "object" && err.uc6MintSkippedDust) {
+          break;
+        }
         // If a mint tx was broadcast, do not try more on-chain mints in this rebalance attempt.
         if (err && typeof err === "object" && err.uc6MintTxBroadcasted) {
           break;
@@ -8255,10 +8341,6 @@ class Uc6Bot {
     const trigger = this.getPositionTrigger(primary.tick, {
       edgeRebalancePct: effectiveThresholds.edgeRebalancePct,
     });
-    const strategyMode = this.getStrategyMode();
-    const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
-    const trendEscapeEval = this.buildTrendEscapeEvaluation(primary, trendCtx, { tradingAllowed });
-    const reEntryEval = this.buildReEntryEvaluation(primary, trendCtx, { tradingAllowed });
     const recoveryRetry = Boolean(this.state.forceRebalanceRecoveryPending) && trigger.reason === "no_position";
     let effectiveTrigger = forceRebalance
       ? { ...trigger, trigger: true, reason: "manual_force" }
@@ -8282,6 +8364,11 @@ class Uc6Bot {
       await this.maybeRefreshPositionInventory({ force: true });
       this.enforceSinglePositionInvariant();
     }
+    await this.syncStrategyModeInvariant();
+    const strategyMode = this.getStrategyMode();
+    const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
+    const trendEscapeEval = this.buildTrendEscapeEvaluation(primary, trendCtx, { tradingAllowed });
+    const reEntryEval = this.buildReEntryEvaluation(primary, trendCtx, { tradingAllowed });
     const activeSlipstreamPositions = Number(this.state.latest?.positionInventory?.activeCount || 0);
     if (activeSlipstreamPositions > 1) {
       const reason = `multiple_active_positions ${activeSlipstreamPositions}`;
