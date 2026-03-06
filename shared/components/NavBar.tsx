@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
 
 type NavActive =
@@ -11,7 +11,6 @@ type NavActive =
   | "bankB"
   | "kyc-badge"
   | "context-vault"
-  // placeholders (safe even if you never pass these)
   | "uc4"
   | "uc5"
   | "uc6"
@@ -19,728 +18,608 @@ type NavActive =
 
 type NavBarProps = { active?: NavActive };
 
+/* Accent colours match the homepage use-case cards */
+const ACCENT = {
+  uc1: "#3b82f6",
+  uc2: "#10b981",
+  uc3: "#8b5cf6",
+  uc4: "#f59e0b",
+  uc5: "#ef4444",
+  uc6: "#06b6d4",
+} as const;
+
 export default function NavBar({ active }: NavBarProps) {
-  const isBankA = active === "bank-a" || active === "bankA";
-  const isBankB = active === "bank-b" || active === "bankB";
-  const isKyc = active === "kyc-badge";
-  const isUc4 = active === "uc4" || active === "context-vault";
-  const isUc5 = active === "uc5";
-  const isUc6 = active === "uc6";
-
-  const groups = useMemo<
-    Array<{
-      uc: string;
-      title: string;
-      items:
-        | {
-            kind: "pills";
-            pills: Array<{ href: string; label: string; on: boolean; disabled?: boolean }>;
-          }
-        | {
-            kind: "segmented";
-            left: { href: string; label: string; on: boolean };
-            right: { href: string; label: string; on: boolean };
-          };
-    }>
-  >(
-    () => [
-      {
-        uc: "UC1",
-        title: "eBanking",
-        items: {
-          kind: "pills",
-          pills: [{ href: "/ebanking", label: "Open crypto wallet", on: active === "ebanking" }],
-        },
-      },
-      {
-        uc: "UC2",
-        title: "Interbank Payment",
-        items: {
-          kind: "segmented",
-          left: { href: "/bank-a", label: "Bank A", on: isBankA },
-          right: { href: "/bank-b", label: "Bank B", on: isBankB },
-        },
-      },
-      {
-        uc: "UC3",
-        title: "Trust credential",
-        items: {
-          kind: "pills",
-          pills: [{ href: "/kyc-badge", label: "KYC badge", on: isKyc }],
-        },
-      },
-      {
-        uc: "UC4",
-        title: "Context Passport",
-        items: {
-          kind: "pills",
-          pills: [{ href: "/context-vault", label: "Context vault", on: isUc4 }],
-        },
-      },
-      {
-        uc: "UC5",
-        title: "Perp Trading",
-        items: {
-          kind: "pills",
-          pills: [{ href: "/uc5", label: "AI Bot", on: isUc5 }],
-        },
-      },
-      {
-        uc: "UC6",
-        title: "LP automation",
-        items: {
-          kind: "pills",
-          pills: [{ href: "/uc6", label: "LP Bot", on: isUc6 }],
-        },
-      },
-
-      // Placeholders (disabled so they don’t navigate)
-    ],
-    [active, isBankA, isBankB, isKyc, isUc4, isUc5, isUc6]
-  );
+  const isHome     = active === "home";
+  const isBankA    = active === "bank-a" || active === "bankA";
+  const isBankB    = active === "bank-b" || active === "bankB";
+  const isEbanking = active === "ebanking";
+  const isKyc      = active === "kyc-badge";
+  const isUc4      = active === "uc4" || active === "context-vault";
+  const isUc5      = active === "uc5";
+  const isUc6      = active === "uc6";
+  const isUc2      = isBankA || isBankB;
 
   return (
-    <nav style={styles.wrap} aria-label="Primary">
+    <nav style={navWrap} aria-label="Primary navigation">
       <style jsx>{`
-        /* Hide scrollbar everywhere (visual) while keeping scroll functionality */
-        .ucScroller {
-          scrollbar-width: none; /* Firefox */
-          -ms-overflow-style: none; /* IE/old Edge */
-        }
-        .ucScroller::-webkit-scrollbar {
-          display: none; /* Chrome/Safari */
-          width: 0;
-          height: 0;
-        }
+        /* Scrollbar hidden */
+        .ucScroller { scrollbar-width: none; -ms-overflow-style: none; }
+        .ucScroller::-webkit-scrollbar { display: none; }
 
-        .cluster {
-          transition: transform 150ms ease, box-shadow 150ms ease, border-color 150ms ease;
+        /* Nav items */
+        .navPill {
+          transition: background 130ms ease, border-color 130ms ease,
+            transform 120ms ease;
         }
-        .cluster:hover {
+        .navPill:hover {
           transform: translateY(-1px);
-          box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
-          border-color: rgba(0, 0, 0, 0.16);
+          border-color: rgba(255,255,255,0.18) !important;
+          background: rgba(255,255,255,0.08) !important;
         }
-
-        .pill,
-        .segment,
-        .iconPill,
+        .navSeg {
+          transition: background 130ms ease, color 130ms ease;
+        }
+        .navSeg:hover {
+          background: rgba(255,255,255,0.09) !important;
+        }
         .chevBtn {
-          transition: transform 140ms ease, background 140ms ease, color 140ms ease,
-            border-color 140ms ease, opacity 140ms ease;
-          outline: none;
+          transition: background 130ms ease, opacity 160ms ease;
         }
-        .pill:hover:not([data-disabled="true"]),
-        .segment:hover,
-        .iconPill:hover {
-          transform: translateY(-1px);
+        .chevBtn:hover:not(:disabled) {
+          background: rgba(255,255,255,0.12) !important;
         }
-        .pill:focus-visible,
-        .segment:focus-visible,
-        .iconPill:focus-visible,
-        .chevBtn:focus-visible {
-          box-shadow: 0 0 0 4px rgba(0, 0, 0, 0.12);
-        }
-
-        /* Arrows fade in on hover (desktop), but stay usable always */
-        .stripOuter:hover .chevBtn {
+        /* Reveal chevrons on strip hover on non-touch */
+        .stripRoot:hover .chevBtn {
           opacity: 1 !important;
+        }
+        :focus-visible {
+          outline: 2px solid rgba(255,255,255,0.45);
+          outline-offset: 2px;
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .navPill, .navSeg, .chevBtn { transition: none !important; }
         }
       `}</style>
 
-      <div style={styles.inner}>
-        {/* Left: Brand + Home icon */}
-        <div style={styles.left}>
-          <div style={styles.brand}>
-            <span style={{ fontWeight: 950, letterSpacing: -0.2 }}>blockchain</span>
-            <span style={{ opacity: 0.6, marginLeft: 6 }}>concept bank</span>
+      <div style={navInner}>
+        {/* ── Brand + home ── */}
+        <div style={navLeft}>
+          <div style={brandStyle}>
+            <span style={{ fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>
+              blockchain
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 6, fontWeight: 400 }}>
+              concept bank
+            </span>
           </div>
 
-          <IconPill href="/" active={active === "home"} ariaLabel="Home">
-            <HomeIcon active={active === "home"} />
-          </IconPill>
+          <Link
+            href="/"
+            aria-label="Home"
+            data-nav-item
+            className="navPill"
+            style={{
+              ...pillBase,
+              width: 36,
+              height: 36,
+              padding: 0,
+              justifyContent: "center",
+              borderRadius: 10,
+              ...(isHome ? pillActiveBase : {}),
+            }}
+          >
+            <HomeIcon />
+          </Link>
         </div>
 
-        {/* Right: scalable strip */}
-        <UseCaseStrip activeKey={active || ""}>
-          {groups.map((g) => {
-            const clusterActive =
-              g.items.kind === "pills"
-                ? g.items.pills.some((p) => p.on)
-                : g.items.left.on || g.items.right.on;
+        {/* ── Scrollable strip ── */}
+        <NavStrip activeKey={active ?? ""}>
+          {/* UC1 */}
+          <NavPill
+            n="01"
+            label="eBanking"
+            href="/ebanking"
+            accent={ACCENT.uc1}
+            active={isEbanking}
+          />
 
-            return (
-              <UseCaseCluster key={g.uc} uc={g.uc} title={g.title} active={clusterActive}>
-                {g.items.kind === "pills" ? (
-                  <div style={styles.pillRow}>
-                    {g.items.pills.map((p) => (
-                      <PillLink key={p.label} href={p.href} active={p.on} disabled={!!p.disabled}>
-                        {p.label}
-                      </PillLink>
-                    ))}
-                  </div>
-                ) : (
-                  <div style={styles.segmented}>
-                    <Segment href={g.items.left.href} active={g.items.left.on} side="left">
-                      {g.items.left.label}
-                    </Segment>
-                    <div style={styles.segmentDivider} />
-                    <Segment href={g.items.right.href} active={g.items.right.on} side="right">
-                      {g.items.right.label}
-                    </Segment>
-                  </div>
-                )}
-              </UseCaseCluster>
-            );
-          })}
-        </UseCaseStrip>
+          {/* UC2 – segmented Bank A / Bank B */}
+          <NavSegmented
+            n="02"
+            label="Interbank"
+            accent={ACCENT.uc2}
+            groupActive={isUc2}
+            left={{ label: "Bank A", href: "/bank-a", active: isBankA }}
+            right={{ label: "Bank B", href: "/bank-b", active: isBankB }}
+          />
+
+          {/* UC3 */}
+          <NavPill
+            n="03"
+            label="KYC Badge"
+            href="/kyc-badge"
+            accent={ACCENT.uc3}
+            active={isKyc}
+          />
+
+          {/* UC4 */}
+          <NavPill
+            n="04"
+            label="Context Passport"
+            href="/context-vault"
+            accent={ACCENT.uc4}
+            active={isUc4}
+          />
+
+          {/* UC5 */}
+          <NavPill
+            n="05"
+            label="Trading Bot"
+            href="/uc5"
+            accent={ACCENT.uc5}
+            active={isUc5}
+          />
+
+          {/* UC6 */}
+          <NavPill
+            n="06"
+            label="LP Bot"
+            href="/uc6"
+            accent={ACCENT.uc6}
+            active={isUc6}
+          />
+        </NavStrip>
       </div>
     </nav>
   );
 }
 
-/** ---- Strip / scrolling logic (auto-disabling arrows + fades + auto-scroll active) ---- */
+/* ── NavPill ── */
+function NavPill({
+  n,
+  label,
+  href,
+  accent,
+  active,
+}: {
+  n: string;
+  label: string;
+  href: string;
+  accent: string;
+  active: boolean;
+}) {
+  return (
+    <Link
+      href={href}
+      data-nav-item
+      data-nav-active={active}
+      className="navPill"
+      style={{
+        ...pillBase,
+        ...(active
+          ? {
+              background: `${accent}1a`,
+              borderColor: `${accent}55`,
+            }
+          : {}),
+      }}
+    >
+      <span
+        style={{
+          ...numStyle,
+          color: active ? accent : "rgba(255,255,255,0.25)",
+        }}
+      >
+        {n}
+      </span>
+      <span
+        style={{
+          color: active ? "#fff" : "rgba(255,255,255,0.58)",
+          fontWeight: active ? 700 : 500,
+        }}
+      >
+        {label}
+      </span>
+    </Link>
+  );
+}
 
-function UseCaseStrip({ children, activeKey }: { children: ReactNode; activeKey: string }) {
-  const scrollerRef = useRef<HTMLDivElement | null>(null);
+/* ── NavSegmented (UC2: Bank A / Bank B) ── */
+function NavSegmented({
+  n,
+  label,
+  accent,
+  groupActive,
+  left,
+  right,
+}: {
+  n: string;
+  label: string;
+  accent: string;
+  groupActive: boolean;
+  left: { label: string; href: string; active: boolean };
+  right: { label: string; href: string; active: boolean };
+}) {
+  return (
+    <div
+      data-nav-item
+      data-nav-active={groupActive}
+      aria-label={label}
+      style={{
+        display: "inline-flex",
+        alignItems: "stretch",
+        borderRadius: 10,
+        border: `1px solid ${groupActive ? `${accent}55` : "rgba(255,255,255,0.08)"}`,
+        background: groupActive ? `${accent}1a` : "rgba(255,255,255,0.04)",
+        overflow: "hidden",
+        flex: "0 0 auto",
+        whiteSpace: "nowrap",
+      }}
+    >
+      {/* UC number */}
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          padding: "0 6px 0 10px",
+          fontSize: 11,
+          fontWeight: 800,
+          letterSpacing: "0.04em",
+          color: groupActive ? accent : "rgba(255,255,255,0.25)",
+          borderRight: "1px solid rgba(255,255,255,0.08)",
+          flexShrink: 0,
+        }}
+      >
+        {n}
+      </span>
 
+      {/* Bank A */}
+      <Link
+        href={left.href}
+        className="navSeg"
+        style={{
+          ...segBase,
+          color: left.active ? "#fff" : "rgba(255,255,255,0.52)",
+          fontWeight: left.active ? 700 : 500,
+          background: left.active ? `${accent}28` : "transparent",
+        }}
+      >
+        {left.label}
+      </Link>
+
+      {/* Divider */}
+      <span
+        style={{
+          width: 1,
+          alignSelf: "stretch",
+          background: "rgba(255,255,255,0.09)",
+          flexShrink: 0,
+        }}
+      />
+
+      {/* Bank B */}
+      <Link
+        href={right.href}
+        className="navSeg"
+        style={{
+          ...segBase,
+          color: right.active ? "#fff" : "rgba(255,255,255,0.52)",
+          fontWeight: right.active ? 700 : 500,
+          background: right.active ? `${accent}28` : "transparent",
+        }}
+      >
+        {right.label}
+      </Link>
+    </div>
+  );
+}
+
+/* ── NavStrip: scroll container with edge fades + chevrons ── */
+function NavStrip({
+  children,
+  activeKey,
+}: {
+  children: ReactNode;
+  activeKey: string;
+}) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const rafRef      = useRef(0);
+  const mountedRef  = useRef(true);
+
+  const [canLeft,     setCanLeft]     = useState(false);
+  const [canRight,    setCanRight]    = useState(false);
   const [overflowing, setOverflowing] = useState(false);
-  const [canLeft, setCanLeft] = useState(false);
-  const [canRight, setCanRight] = useState(false);
-  const [coarsePointer, setCoarsePointer] = useState(false);
+  const [coarse,      setCoarse]      = useState(false);
 
+  /* Detect coarse pointer once */
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const mq = window.matchMedia?.("(pointer: coarse)");
-    if (!mq) return;
-    const update = () => setCoarsePointer(!!mq.matches);
-    update();
-    mq.addEventListener?.("change", update);
-    return () => mq.removeEventListener?.("change", update);
+    const mq = window.matchMedia("(pointer: coarse)");
+    const sync = () => setCoarse(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
   }, []);
 
+  /* Overflow + scroll-arrow state */
   useEffect(() => {
+    mountedRef.current = true;
     const el = scrollerRef.current;
     if (!el) return;
 
-    let raf = 0;
-
     const update = () => {
-      const max = el.scrollWidth - el.clientWidth;
-      const hasOverflow = max > 1;
+      if (!mountedRef.current) return;            // guard after unmount
+      const maxScroll = el.scrollWidth - el.clientWidth;
+      const hasOverflow = maxScroll > 4;           // 4px threshold beats sub-pixel rounding
       setOverflowing(hasOverflow);
-
-      if (!hasOverflow) {
-        setCanLeft(false);
-        setCanRight(false);
-        return;
-      }
-
-      setCanLeft(el.scrollLeft > 1);
-      setCanRight(el.scrollLeft < max - 1);
+      setCanLeft(hasOverflow && el.scrollLeft > 4);
+      setCanRight(hasOverflow && el.scrollLeft < maxScroll - 4);
     };
 
     const onScroll = () => {
-      cancelAnimationFrame(raf);
-      raf = window.requestAnimationFrame(update);
+      cancelAnimationFrame(rafRef.current);
+      rafRef.current = requestAnimationFrame(update);
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
 
-    let ro: ResizeObserver | null = null;
-    if (typeof ResizeObserver !== "undefined") {
-      ro = new ResizeObserver(onScroll);
-      ro.observe(el);
-    }
-    window.addEventListener("resize", onScroll);
+    const ro = new ResizeObserver(onScroll);
+    ro.observe(el);                               // container size changes
+    /* Also observe each nav item so pill text/count changes trigger a recheck */
+    el.querySelectorAll<HTMLElement>("[data-nav-item]").forEach((c) => ro.observe(c));
 
-    update();
+    window.addEventListener("resize", onScroll);
+    update();                                     // initial sync
 
     return () => {
+      mountedRef.current = false;
+      cancelAnimationFrame(rafRef.current);
       el.removeEventListener("scroll", onScroll);
+      ro.disconnect();
       window.removeEventListener("resize", onScroll);
-      if (ro) ro.disconnect();
-      cancelAnimationFrame(raf);
     };
   }, []);
 
-  // Keep active cluster visible
+  /* Scroll active item into view when activeKey changes */
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el) return;
-    const active = el.querySelector<HTMLElement>('[data-active-cluster="true"]');
-    if (!active) return;
 
-    const a = active.getBoundingClientRect();
-    const s = el.getBoundingClientRect();
-    const mostlyVisible = a.left >= s.left + 10 && a.right <= s.right - 10;
-    if (mostlyVisible) return;
+    const item = el.querySelector<HTMLElement>("[data-nav-active='true']");
+    if (!item) return;
 
-    active.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    /* Use getBoundingClientRect so offsetLeft parent-chain doesn't matter */
+    const stripRect = el.getBoundingClientRect();
+    const itemRect  = item.getBoundingClientRect();
+
+    const fullyVisible =
+      itemRect.left >= stripRect.left + 6 &&
+      itemRect.right <= stripRect.right - 6;
+    if (fullyVisible) return;
+
+    /* Centre the item in the strip */
+    const itemCentre = el.scrollLeft + (itemRect.left - stripRect.left) + itemRect.width / 2;
+    el.scrollTo({ left: Math.max(0, itemCentre - el.clientWidth / 2), behavior: "smooth" });
   }, [activeKey]);
 
-  const scrollByStep = (dir: -1 | 1) => {
+  const scrollBy = (dir: -1 | 1) => {
     const el = scrollerRef.current;
     if (!el) return;
-    const step = Math.max(240, Math.floor(el.clientWidth * 0.6));
-    el.scrollBy({ left: dir * step, behavior: "smooth" });
+    el.scrollBy({ left: dir * Math.floor(el.clientWidth * 0.65), behavior: "smooth" });
   };
 
-  const baseOpacity = coarsePointer ? 0.95 : 0.22;
+  /* On non-touch, chevrons fade in only on hover (via CSS .stripRoot:hover .chevBtn).
+     On touch, always visible so they remain tappable. */
+  const chevronBaseOpacity = coarse ? 1 : 0;
 
   return (
-    <div style={styles.stripOuter} className="stripOuter">
-      {overflowing && (
-        <>
-          <div
-            aria-hidden="true"
-            style={{
-              ...styles.edgeFade,
-              left: 0,
-              opacity: canLeft ? 1 : 0,
-              background:
-                "linear-gradient(90deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.0) 100%)",
-            }}
-          />
-          <div
-            aria-hidden="true"
-            style={{
-              ...styles.edgeFade,
-              right: 0,
-              opacity: canRight ? 1 : 0,
-              background:
-                "linear-gradient(270deg, rgba(255,255,255,0.96) 0%, rgba(255,255,255,0.0) 100%)",
-            }}
-          />
-        </>
-      )}
+    <div style={stripRoot} className="stripRoot">
+      {/* Edge fade — left */}
+      <div
+        aria-hidden="true"
+        style={{
+          ...edgeFade,
+          left: 0,
+          opacity: canLeft ? 1 : 0,
+          background: "linear-gradient(to right, #07080f 20%, transparent 100%)",
+        }}
+      />
+      {/* Edge fade — right */}
+      <div
+        aria-hidden="true"
+        style={{
+          ...edgeFade,
+          right: 0,
+          opacity: canRight ? 1 : 0,
+          background: "linear-gradient(to left, #07080f 20%, transparent 100%)",
+        }}
+      />
 
+      {/* Chevron — left */}
       {overflowing && (
         <button
           type="button"
           aria-label="Scroll left"
-          onClick={() => scrollByStep(-1)}
-          disabled={!canLeft}
           className="chevBtn"
+          onClick={() => scrollBy(-1)}
+          disabled={!canLeft}
           style={{
-            ...styles.chevronBtn,
-            ...styles.chevLeft,
-            opacity: baseOpacity,
-            ...(canLeft ? null : styles.chevDisabled),
+            ...chevBtn,
+            left: 4,
+            opacity: chevronBaseOpacity,
+            ...(canLeft ? {} : { opacity: 0, pointerEvents: "none" }),
           }}
         >
-          <ChevronLeft />
+          <ChevLeft />
         </button>
       )}
 
-      <div ref={scrollerRef} style={styles.stripScroller} className="ucScroller">
+      {/* Scroller */}
+      <div ref={scrollerRef} style={stripScroller} className="ucScroller">
         {children}
       </div>
 
+      {/* Chevron — right */}
       {overflowing && (
         <button
           type="button"
           aria-label="Scroll right"
-          onClick={() => scrollByStep(1)}
-          disabled={!canRight}
           className="chevBtn"
+          onClick={() => scrollBy(1)}
+          disabled={!canRight}
           style={{
-            ...styles.chevronBtn,
-            ...styles.chevRight,
-            opacity: baseOpacity,
-            ...(canRight ? null : styles.chevDisabled),
+            ...chevBtn,
+            right: 4,
+            opacity: chevronBaseOpacity,
+            ...(canRight ? {} : { opacity: 0, pointerEvents: "none" }),
           }}
         >
-          <ChevronRight />
+          <ChevRight />
         </button>
       )}
     </div>
   );
 }
 
-function UseCaseCluster({
-  uc,
-  title,
-  children,
-  active,
-}: {
-  uc: string;
-  title: string;
-  children: ReactNode;
-  active?: boolean;
-}) {
+/* ── Icons ── */
+function HomeIcon() {
   return (
-    <div
-      className="cluster"
-      data-active-cluster={active ? "true" : "false"}
-      style={{
-        ...styles.cluster,
-        ...(active ? styles.clusterActive : null),
-      }}
-      title={`${uc}: ${title}`}
-      aria-label={`${uc}: ${title}`}
-    >
-      <div style={styles.clusterMeta}>
-        <span style={styles.ucTitle}>{`${uc}: ${title}`}</span>
-      </div>
-      {children}
-    </div>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M3 10.5L12 3l9 7.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M5 9.5V21h14V9.5" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M10 21v-6h4v6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
-
-/** ---- Link pills ---- */
-
-function PillLink({
-  href,
-  active,
-  disabled,
-  children,
-}: {
-  href: string;
-  active?: boolean;
-  disabled?: boolean;
-  children: ReactNode;
-}) {
-  if (disabled) {
-    return (
-      <span
-        className="pill"
-        data-disabled="true"
-        style={{
-          ...styles.pill,
-          ...styles.pillDisabled,
-          ...(active ? styles.pillActive : null),
-        }}
-        title="Coming soon"
-      >
-        {children}
-      </span>
-    );
-  }
-
+function ChevLeft() {
   return (
-    <Link
-      href={href}
-      className="pill"
-      style={{
-        ...styles.pill,
-        ...(active ? styles.pillActive : null),
-      }}
-    >
-      {children}
-    </Link>
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M15 18l-6-6 6-6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
   );
 }
-
-function Segment({
-  href,
-  active,
-  side,
-  children,
-}: {
-  href: string;
-  active?: boolean;
-  side: "left" | "right";
-  children: ReactNode;
-}) {
-  const radius = side === "left" ? "999px 0 0 999px" : "0 999px 999px 0";
+function ChevRight() {
   return (
-    <Link
-      href={href}
-      className="segment"
-      style={{
-        ...styles.segment,
-        borderRadius: radius,
-        ...(active ? styles.segmentActive : null),
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-function IconPill({
-  href,
-  active,
-  ariaLabel,
-  children,
-}: {
-  href: string;
-  active?: boolean;
-  ariaLabel: string;
-  children: ReactNode;
-}) {
-  return (
-    <Link
-      href={href}
-      aria-label={ariaLabel}
-      title={ariaLabel}
-      className="iconPill"
-      style={{
-        width: 40,
-        height: 40,
-        borderRadius: 14,
-        display: "grid",
-        placeItems: "center",
-        textDecoration: "none",
-        border: "1px solid rgba(0,0,0,0.10)",
-        background: active ? "#0b0b0c" : "rgba(255,255,255,0.9)",
-        color: active ? "#fff" : "#111",
-        boxShadow: active ? "0 10px 28px rgba(0,0,0,0.18)" : "0 10px 28px rgba(0,0,0,0.06)",
-        flex: "0 0 auto",
-      }}
-    >
-      {children}
-    </Link>
-  );
-}
-
-/** ---- Icons ---- */
-
-function HomeIcon({ active }: { active?: boolean }) {
-  const stroke = active ? "#fff" : "#111";
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M3 10.5L12 3l9 7.5"
-        stroke={stroke}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M5 9.5V21h14V9.5"
-        stroke={stroke}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-      <path
-        d="M10 21v-6h4v6"
-        stroke={stroke}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M9 6l6 6-6 6" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }
 
-function ChevronLeft() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M15 18l-6-6 6-6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+/* ── Styles ── */
+const navWrap: CSSProperties = {
+  position: "sticky",
+  top: 0,
+  zIndex: 100,
+  background: "rgba(7,8,15,0.85)",
+  backdropFilter: "blur(16px)",
+  WebkitBackdropFilter: "blur(16px)",
+  borderBottom: "1px solid rgba(255,255,255,0.07)",
+};
 
-function ChevronRight() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path
-        d="M9 6l6 6-6 6"
-        stroke="currentColor"
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+const navInner: CSSProperties = {
+  maxWidth: 1240,
+  margin: "0 auto",
+  padding: "9px 16px",
+  display: "flex",
+  alignItems: "center",
+  gap: 14,
+};
 
-/** ---- Styles ---- */
+const navLeft: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flex: "0 0 auto",
+};
 
-const styles: Record<string, CSSProperties> = {
-  wrap: {
-    position: "sticky",
-    top: 0,
-    zIndex: 100,
-    background: "rgba(255,255,255,0.82)",
-    backdropFilter: "blur(10px)",
-    borderBottom: "1px solid rgba(0,0,0,0.06)",
-  },
-  inner: {
-    maxWidth: 1240,
-    margin: "0 auto",
-    padding: "10px 16px",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 18,
-    flexWrap: "nowrap",
-  },
-  left: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    flexWrap: "nowrap",
-    flex: "0 0 auto",
-  },
-  brand: {
-    fontSize: 18,
-    display: "flex",
-    alignItems: "baseline",
-    whiteSpace: "nowrap",
-  },
+const brandStyle: CSSProperties = {
+  fontSize: 15,
+  display: "flex",
+  alignItems: "baseline",
+  whiteSpace: "nowrap",
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+};
 
-  stripOuter: {
-    position: "relative",
-    flex: "1 1 auto",
-    minWidth: 0,
-  },
-  stripScroller: {
-    display: "flex",
-    alignItems: "center",
-    gap: 10,
-    overflowX: "auto",
-    overflowY: "hidden",
-    whiteSpace: "nowrap",
-    padding: "2px 46px",
-    scrollBehavior: "smooth",
-    WebkitOverflowScrolling: "touch",
-    scrollSnapType: "x proximity",
+const stripRoot: CSSProperties = {
+  position: "relative",
+  flex: "1 1 auto",
+  minWidth: 0,
+};
 
-    // extra inline hardening for scrollbar hiding
-    scrollbarWidth: "none",
-    msOverflowStyle: "none",
-  },
+const stripScroller: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 6,
+  overflowX: "auto",
+  overflowY: "hidden",
+  padding: "3px 36px",
+  scrollbarWidth: "none",
+  msOverflowStyle: "none",
+  WebkitOverflowScrolling: "touch",
+};
 
-  edgeFade: {
-    position: "absolute",
-    top: 0,
-    bottom: 0,
-    width: 46,
-    pointerEvents: "none",
-    transition: "opacity 160ms ease",
-    zIndex: 2,
-  },
+const edgeFade: CSSProperties = {
+  position: "absolute",
+  top: 0,
+  bottom: 0,
+  width: 40,
+  pointerEvents: "none",
+  transition: "opacity 160ms ease",
+  zIndex: 2,
+};
 
-  chevronBtn: {
-    position: "absolute",
-    top: "50%",
-    transform: "translateY(-50%)",
-    width: 30,
-    height: 30,
-    borderRadius: 999,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "rgba(255,255,255,0.92)",
-    backdropFilter: "blur(10px)",
-    display: "grid",
-    placeItems: "center",
-    cursor: "pointer",
-    color: "#111",
-    boxShadow: "0 10px 28px rgba(0,0,0,0.08)",
-    zIndex: 3,
-  },
-  chevLeft: { left: 8 },
-  chevRight: { right: 8 },
-  chevDisabled: {
-    opacity: 0.2,
-    cursor: "not-allowed",
-  },
+const chevBtn: CSSProperties = {
+  position: "absolute",
+  top: "50%",
+  transform: "translateY(-50%)",
+  width: 26,
+  height: 26,
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.06)",
+  display: "grid",
+  placeItems: "center",
+  cursor: "pointer",
+  color: "rgba(255,255,255,0.75)",
+  zIndex: 3,
+  transition: "opacity 160ms ease, background 130ms ease",
+};
 
-  cluster: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 10,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "rgba(250,250,250,0.92)",
-    borderRadius: 999,
-    padding: "6px 10px",
-    flex: "0 0 auto",
-    scrollSnapAlign: "start",
-  },
-  clusterActive: {
-    borderColor: "rgba(0,0,0,0.22)",
-    boxShadow: "0 10px 28px rgba(0,0,0,0.08)",
-    background: "rgba(255,255,255,0.96)",
-  },
-  clusterMeta: {
-    display: "inline-flex",
-    alignItems: "center",
-    flex: "0 0 auto",
-  },
+const pillBase: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: 6,
+  padding: "7px 12px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(255,255,255,0.04)",
+  textDecoration: "none",
+  fontSize: 13,
+  whiteSpace: "nowrap",
+  flex: "0 0 auto",
+  color: "inherit",
+};
 
-  // Plain title text (no extra pill)
-  ucTitle: {
-    fontSize: 12,
-    fontWeight: 900,
-    color: "rgba(0,0,0,0.62)",
-    maxWidth: 240,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-    lineHeight: 1,
-    paddingRight: 2,
-  },
+const pillActiveBase: CSSProperties = {
+  background: "rgba(255,255,255,0.1)",
+  borderColor: "rgba(255,255,255,0.2)",
+};
 
-  pillRow: {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: 8,
-    flex: "0 0 auto",
-  },
-  pill: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    textDecoration: "none",
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "rgba(255,255,255,0.95)",
-    borderRadius: 999,
-    padding: "8px 10px",
-    fontSize: 13,
-    fontWeight: 850,
-    color: "rgba(0,0,0,0.78)",
-    lineHeight: 1,
-    whiteSpace: "nowrap",
-    flex: "0 0 auto",
-  },
-  pillActive: {
-    background: "#0b0b0c",
-    borderColor: "#0b0b0c",
-    color: "#fff",
-    boxShadow: "0 10px 26px rgba(0,0,0,0.18)",
-  },
-  pillDisabled: {
-    opacity: 0.55,
-    cursor: "default",
-  },
+const numStyle: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: "0.05em",
+  lineHeight: 1,
+  flexShrink: 0,
+};
 
-  segmented: {
-    display: "inline-flex",
-    alignItems: "stretch",
-    borderRadius: 999,
-    border: "1px solid rgba(0,0,0,0.10)",
-    background: "rgba(255,255,255,0.95)",
-    overflow: "hidden",
-    flex: "0 0 auto",
-  },
-  segmentDivider: {
-    width: 1,
-    background: "rgba(0,0,0,0.10)",
-  },
-  segment: {
-    display: "inline-flex",
-    alignItems: "center",
-    justifyContent: "center",
-    textDecoration: "none",
-    padding: "8px 10px",
-    fontSize: 13,
-    fontWeight: 850,
-    color: "rgba(0,0,0,0.78)",
-    lineHeight: 1,
-    whiteSpace: "nowrap",
-    flex: "0 0 auto",
-  },
-  segmentActive: {
-    background: "#0b0b0c",
-    color: "#fff",
-  },
+const segBase: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "7px 10px",
+  textDecoration: "none",
+  fontSize: 13,
+  lineHeight: 1,
+  whiteSpace: "nowrap",
+  flexShrink: 0,
 };

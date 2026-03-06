@@ -87,7 +87,24 @@ export function estimateOU(state) {
   const samples = state.samples.filter(
     (s) => s && Number.isFinite(Number(s.tsSec)) && Number.isFinite(Number(s.logPrice))
   );
-  const minSamples = Math.max(5, Number(state.config?.minSamples || 60));
+  const configuredMinSamples = Math.max(5, Number(state.config?.minSamples || 60));
+  const windowSec = Math.max(30, Number(state.config?.windowSec || 1800));
+
+  // Derive a practical minimum from observed cadence so the estimator does not
+  // stall forever when actual sampling is slightly slower than configured.
+  const preliminaryDts = [];
+  for (let i = 1; i < samples.length; i += 1) {
+    const prev = samples[i - 1];
+    const next = samples[i];
+    const dt = Number(next.tsSec) - Number(prev.tsSec);
+    if (Number.isFinite(dt) && dt > 0) preliminaryDts.push(dt);
+  }
+  const observedDtSec = median(preliminaryDts);
+  const feasibleSamples = Number.isFinite(observedDtSec) && observedDtSec > 0
+    ? Math.max(5, Math.floor(windowSec / observedDtSec) + 1)
+    : configuredMinSamples;
+  const minSamples = Math.min(configuredMinSamples, feasibleSamples);
+
   if (samples.length < minSamples) {
     return {
       ...unknown,
@@ -283,4 +300,3 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
     },
   };
 }
-
