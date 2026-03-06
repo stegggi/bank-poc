@@ -1,7 +1,7 @@
 // pages/api/uc5/commands.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { verifyAdminSignature, verifyLinkSignerSenderSig } from "../../../lib/uc5/auth";
-import { getVmCommands, getVmConfigCached, postVmCommand } from "../../../lib/uc5/vmRuntime";
+import { verifyAdminSignature, verifyLinkSignerSenderSig } from "../../../use-cases/uc5-perp-trading/lib/auth";
+import { getVmCommands, getVmConfigCached, postVmCommand } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 function commandId(out: unknown): string {
   if (!out || typeof out !== "object") return "";

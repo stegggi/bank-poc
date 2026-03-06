@@ -1,6 +1,6 @@
 // pages/api/uc5/bot/commands.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmCommands, postVmCommandUpdates } from "../../../../lib/uc5/vmRuntime";
+import { getVmCommands, postVmCommandUpdates } from "../../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 function requireBotToken(req: NextApiRequest) {
   const expected = process.env.UC5_BOT_TOKEN || "";

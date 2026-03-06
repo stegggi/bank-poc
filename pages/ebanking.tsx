@@ -4,8 +4,8 @@ import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { BrowserProvider } from 'ethers';
 import { encodeFunctionData, formatEther, getAddress } from 'viem';
 import { useRouter } from 'next/router';
-import { publicClient } from '../lib/aa';
-import NavBar from '../components/NavBar';
+import { publicClient } from '../shared/lib/aa';
+import NavBar from '../shared/components/NavBar';
 
 const CHAIN_ID = 421614; // Arbitrum Sepolia
 const DEMO_ETH_CHF = 2000;

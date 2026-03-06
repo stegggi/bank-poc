@@ -3,8 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/router";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
-import NavBar from "../components/NavBar";
-import { publicClient } from "../lib/aa";
+import NavBar from "../shared/components/NavBar";
+import { publicClient } from "../shared/lib/aa";
 
 const BADGE = (process.env.NEXT_PUBLIC_KYC_BADGE_ADDRESS || "") as `0x${string}`;
 

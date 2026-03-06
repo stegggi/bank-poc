@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { verifyAdminSignature } from "../../../lib/uc5/auth";
-import { getVmConfigCached, getVmIngestionCached, postVmConfig } from "../../../lib/uc5/vmRuntime";
+import { verifyAdminSignature } from "../../../use-cases/uc5-perp-trading/lib/auth";
+import { getVmConfigCached, getVmIngestionCached, postVmConfig } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {

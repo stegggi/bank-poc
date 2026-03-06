@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
-import NavBar from "../components/NavBar";
+import NavBar from "../shared/components/NavBar";
 
 const BASE_CHAIN_ID_HEX = "0x2105";
 const BASE_CHAIN_ID_DEC = 8453;

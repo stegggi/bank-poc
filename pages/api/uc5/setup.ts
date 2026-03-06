@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmSetupCached } from "../../../lib/uc5/vmRuntime";
+import { getVmSetupCached } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
   const data = await getVmSetupCached(10_000);

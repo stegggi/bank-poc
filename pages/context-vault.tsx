@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
-import NavBar from "../components/NavBar";
-import CONTEXT_PASSPORT_ABI from "../lib/ContextPassportABI";
+import NavBar from "../shared/components/NavBar";
+import CONTEXT_PASSPORT_ABI from "../use-cases/uc4-context-passport/lib/ContextPassportABI";
 import {
   UserModulePackageV1,
   BankWrappedDekV1,
@@ -14,7 +14,7 @@ import {
   toBankStoredPackage,
   utf8ToBytes,
   wrapDekRsaOaepB64,
-} from "../lib/contextCrypto";
+} from "../use-cases/uc4-context-passport/lib/contextCrypto";
 
 const STORAGE_PREFIX = "xbank_uc4_ctx_";
 

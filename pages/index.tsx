@@ -1,7 +1,7 @@
 // pages/index.tsx
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
-import NavBar from "../components/NavBar";
+import NavBar from "../shared/components/NavBar";
 
 const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as
   | `0x${string}`

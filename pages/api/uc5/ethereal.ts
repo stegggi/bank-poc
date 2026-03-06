@@ -1,6 +1,6 @@
 // pages/api/uc5/ethereal.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmConfigCached } from "../../../lib/uc5/vmRuntime";
+import { getVmConfigCached } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const cfg = await getVmConfigCached(15_000);

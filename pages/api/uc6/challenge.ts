@@ -9,7 +9,7 @@ import {
   randomNonce,
   saveChallenge,
   sha256HexFromObject,
-} from "../../../lib/uc6OwnerAuth";
+} from "../../../use-cases/uc6-lp-automation/lib/uc6OwnerAuth";
 
 type ChallengeRequest = {
   address?: string;

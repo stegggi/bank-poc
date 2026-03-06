@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmPortfolioCached } from "../../../lib/uc5/vmRuntime";
+import { getVmPortfolioCached } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
   const raw = await getVmPortfolioCached(3_000);

@@ -1,6 +1,6 @@
 // pages/placeholder.tsx
 import type { CSSProperties } from "react";
-import NavBar from "../components/NavBar";
+import NavBar from "../shared/components/NavBar";
 
 export default function PlaceholderUseCase() {
   return (

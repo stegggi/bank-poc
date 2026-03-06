@@ -7,7 +7,7 @@ import {
   parseOwnerMessage,
   readChallenge,
   verifyOwnerSignatureOrThrow,
-} from "../../../../lib/uc6OwnerAuth";
+} from "../../../../use-cases/uc6-lp-automation/lib/uc6OwnerAuth";
 
 type ForceRebalanceRequest = {
   message?: string;

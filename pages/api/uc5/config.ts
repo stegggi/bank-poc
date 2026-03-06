@@ -1,8 +1,8 @@
 // pages/api/uc5/config.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { Uc5ConfigSchema, type Uc5Config } from "../../../lib/uc5/types";
-import { verifyAdminSignature, normAddr } from "../../../lib/uc5/auth";
-import { getVmConfigCached, postVmConfig } from "../../../lib/uc5/vmRuntime";
+import { Uc5ConfigSchema, type Uc5Config } from "../../../use-cases/uc5-perp-trading/lib/types";
+import { verifyAdminSignature, normAddr } from "../../../use-cases/uc5-perp-trading/lib/auth";
+import { getVmConfigCached, postVmConfig } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {

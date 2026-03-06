@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { verifyAdminSignature } from "../../../lib/uc5/auth";
-import { getVmConfigCached, getVmStatusCached, getVmTradingCached, postVmCommand, postVmConfig } from "../../../lib/uc5/vmRuntime";
+import { verifyAdminSignature } from "../../../use-cases/uc5-perp-trading/lib/auth";
+import { getVmConfigCached, getVmStatusCached, getVmTradingCached, postVmCommand, postVmConfig } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));

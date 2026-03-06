@@ -1,6 +1,6 @@
 // pages/api/uc5/bot/status.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmStatusCached } from "../../../../lib/uc5/vmRuntime";
+import { getVmStatusCached } from "../../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   // We only support GET for the UI. POST is accepted but ignored (compat during rollout).

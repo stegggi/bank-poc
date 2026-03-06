@@ -3,8 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
 import { encodePacked, keccak256 } from "viem";
-import { publicClient } from "../lib/aa";
-import NavBar from "../components/NavBar";
+import { publicClient } from "../shared/lib/aa";
+import NavBar from "../shared/components/NavBar";
 
 const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as `0x${string}`;
 const DIR = (process.env.NEXT_PUBLIC_DIRECTORY_ADDRESS || "") as `0x${string}`;

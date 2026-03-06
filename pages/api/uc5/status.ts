@@ -1,6 +1,6 @@
 // pages/api/uc5/status.ts
 import type { NextApiRequest, NextApiResponse } from "next";
-import { getVmStatusCached } from "../../../lib/uc5/vmRuntime";
+import { getVmStatusCached } from "../../../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 export default async function handler(_req: NextApiRequest, res: NextApiResponse) {
   const status = await getVmStatusCached(2_000);

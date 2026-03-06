@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
 import { CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import NavBar from "../components/NavBar";
-import { buildAdminMessage } from "../lib/uc5/auth";
-import type { Uc5Config, Uc5Status } from "../lib/uc5/types";
+import NavBar from "../shared/components/NavBar";
+import { buildAdminMessage } from "../use-cases/uc5-perp-trading/lib/auth";
+import type { Uc5Config, Uc5Status } from "../use-cases/uc5-perp-trading/lib/types";
 import type {
   VmChartResponse,
   VmIngestionStatus,
@@ -11,7 +11,7 @@ import type {
   VmSetupStatus,
   VmTradesSummary,
   VmTradingStatus,
-} from "../lib/uc5/vmRuntime";
+} from "../use-cases/uc5-perp-trading/lib/vmRuntime";
 
 const UI_REFRESH_SEC = 3;
 const CHART_REFRESH_SEC = 6;

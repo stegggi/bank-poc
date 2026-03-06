@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { bestEffortRateLimit, getClientIp } from "../../../lib/uc6OwnerAuth";
+import { bestEffortRateLimit, getClientIp } from "../../../use-cases/uc6-lp-automation/lib/uc6OwnerAuth";
 
 async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();

@@ -5,7 +5,7 @@ import { ethers } from "ethers";
 
 // IMPORTANT: this file is expected at: pages/api/bank/[bank]/plain.ts
 // The ABI import path assumes: /lib/ContextPassportABI.ts|json at project root.
-import CONTEXT_PASSPORT_ABI from "../../../../lib/ContextPassportABI";
+import CONTEXT_PASSPORT_ABI from "../../../../use-cases/uc4-context-passport/lib/ContextPassportABI";
 
 function isHexAddress(s: string): boolean {
   return /^0x[a-fA-F0-9]{40}$/.test(s);

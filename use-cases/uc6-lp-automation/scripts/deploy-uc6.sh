@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/uc6-lp-bot"
+APP_SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../bot"
 TARGET_ROOT="/opt/uc6-bot"
 TARGET_APP="${TARGET_ROOT}/app"
 

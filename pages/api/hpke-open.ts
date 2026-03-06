@@ -1,7 +1,7 @@
 // pages/api/hpke-open.ts
 import type { NextApiRequest, NextApiResponse } from "next";
 import { webcrypto } from "crypto";
-import { hpkeOpenEnvelopeHexToJson, type Hex } from "../../lib/hpke";
+import { hpkeOpenEnvelopeHexToJson, type Hex } from "../../use-cases/uc2-interbank-payment/lib/hpke";
 
 export const config = {
   api: { bodyParser: { sizeLimit: "2mb" } },
