@@ -28,11 +28,11 @@ const USE_CASES: UcDef[] = [
     n: "01",
     tag: "UC1 · eBanking",
     title: "Issue Crypto Wallet",
-    desc: "A bank creates a seedless embedded wallet inside the banking app. No seed phrases, no browser extensions — just a wallet that feels like a bank account.",
+    desc: "A bank creates a seedless embedded wallet inside the banking app. No seed phrases, no browser extensions. Just a wallet that feels like a bank account.",
     accent: "#3b82f6",
     highlights: [
       "Seedless Privy embedded wallet",
-      "Bank-sponsored gas on first use",
+      "Bank sponsored gas on first use",
       "xBank stablecoin on Arbitrum Sepolia",
     ],
     links: [{ href: "/ebanking", label: "Open eBanking", hint: "Password: finalix" }],
@@ -40,29 +40,26 @@ const USE_CASES: UcDef[] = [
   {
     n: "02",
     tag: "UC2 · Interbank Payment",
-    title: "Travel-Rule Payment",
-    desc: "Bank A encrypts compliance data into a travel-rule envelope and posts it on-chain. Bank B decrypts, ACKs, and the token transfer executes — with an immutable audit trail.",
+    title: "Travel Rule Payment",
+    desc: "Bank A encrypts compliance data into a travel rule envelope and posts it on chain. Bank B decrypts, ACKs, and the token transfer executes with an immutable audit trail.",
     accent: "#10b981",
     highlights: [
-      "HPKE-encrypted travel-rule envelope",
-      "On-chain ACK compliance gate",
+      "HPKE encrypted travel rule envelope",
+      "On chain ACK compliance gate",
       "ERC-20 transfer with full audit trail",
     ],
-    links: [
-      { href: "/bank-a", label: "Bank A — Sender" },
-      { href: "/bank-b", label: "Bank B — Receiver", secondary: true },
-    ],
+    links: [{ href: "/bank-a", label: "Open Interbank Payment" }],
   },
   {
     n: "03",
     tag: "UC3 · Trust Credential",
     title: "KYC Badge for Wallets",
-    desc: "Banks issue expiring, revocable trust badges to wallet addresses. Institutions and individuals can verify compliance status instantly — no wallet required.",
+    desc: "Banks issue expiring, revocable trust badges to wallet addresses. Institutions and individuals can verify compliance status instantly without needing a wallet.",
     accent: "#8b5cf6",
     highlights: [
       "Expiry + instant revocation by issuer",
       "Verifiable by anyone without a wallet",
-      "No PII stored on-chain",
+      "No PII stored on chain",
     ],
     links: [{ href: "/kyc-badge", label: "Open KYC Badge" }],
   },
@@ -70,11 +67,11 @@ const USE_CASES: UcDef[] = [
     n: "04",
     tag: "UC4 · Context Passport",
     title: "AI-Ready Banking Data",
-    desc: "Customers create encrypted KYC context modules and grant banks' AI agents time-bound access. Data portability with cryptographic consent — plaintext never leaves the device.",
+    desc: "Customers create encrypted KYC context modules and grant banks' AI agents time bound access. Data portability with cryptographic consent. Plaintext never leaves the device.",
     accent: "#f59e0b",
     highlights: [
-      "Client-side AES-GCM encryption",
-      "On-chain time-bound access grants",
+      "Client side AES-GCM encryption",
+      "On chain time bound access grants",
       "Portable across multiple bank AI agents",
     ],
     links: [{ href: "/context-vault", label: "Open Context Vault" }],
@@ -87,7 +84,7 @@ const USE_CASES: UcDef[] = [
     accent: "#ef4444",
     highlights: [
       "TREND / RANGE / UNKNOWN regime engine",
-      "Linked-signer on-chain authorization",
+      "Linked signer on chain authorization",
       "Live P&L chart and portfolio dashboard",
     ],
     links: [{ href: "/uc5", label: "Open Trading Bot" }],
@@ -96,11 +93,11 @@ const USE_CASES: UcDef[] = [
     n: "06",
     tag: "UC6 · LP Automation",
     title: "Liquidity Provider Bot",
-    desc: "A bot that autonomously manages concentrated liquidity positions on Base. It rebalances bands, harvests fees, and selects the best pool — 24/7, without human intervention.",
+    desc: "A bot that autonomously manages concentrated liquidity positions on Base. It rebalances bands, harvests fees, and selects the best pool 24/7 without human intervention.",
     accent: "#06b6d4",
     highlights: [
       "Uniswap V3 & Aerodrome Slipstream",
-      "Regime-aware band rebalancing",
+      "Regime aware band rebalancing",
       "Automated fee compounding",
     ],
     links: [{ href: "/uc6", label: "Open LP Bot" }],
@@ -143,13 +140,15 @@ export default function Home() {
 
             {/* Headline */}
             <h1 style={heroH1}>
-              Welcome to the{" "}
-              <span
-                key={heroWordIndex}
-                className="heroFlip"
-                style={heroAccentWord}
-              >
-                {HERO_WORDS[heroWordIndex]}
+              <span style={{ whiteSpace: "nowrap" }}>
+                Welcome to the{" "}
+                <span
+                  key={heroWordIndex}
+                  className="heroFlip"
+                  style={heroAccentWord}
+                >
+                  {HERO_WORDS[heroWordIndex]}
+                </span>
               </span>
               <br />
               concept bank
@@ -157,9 +156,9 @@ export default function Home() {
 
             {/* Subtext */}
             <p style={heroSubtext}>
-              A bank-grade, hands-on exploration of blockchain-based payment
+              A hands on, bank grade exploration of blockchain based payment
               infrastructure. Make the customer relationship, operating model,
-              and economics tangible — in a real on-chain environment.
+              and economics tangible in a real on chain environment.
             </p>
 
             {/* Env warning */}
