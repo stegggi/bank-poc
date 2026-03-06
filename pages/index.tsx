@@ -1,31 +1,113 @@
 // pages/index.tsx
 import Link from "next/link";
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import NavBar from "../shared/components/NavBar";
 
-const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as
-  | `0x${string}`
-  | "";
-const DIR = (process.env.NEXT_PUBLIC_DIRECTORY_ADDRESS || "") as
-  | `0x${string}`
-  | "";
-const XBANK = (process.env.NEXT_PUBLIC_XBANK_ADDRESS || "") as
-  | `0x${string}`
-  | "";
-const DEMO_RECIPIENT = (process.env.NEXT_PUBLIC_DEMO_RECIPIENT || "") as
-  | `0x${string}`
-  | "";
-
-const BANK_A_ID = Number(process.env.NEXT_PUBLIC_BANK_A_ID || 1);
-const BANK_B_ID = Number(process.env.NEXT_PUBLIC_BANK_B_ID || 2);
+/* ── Env vars (unchanged) ── */
+const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as `0x${string}` | "";
+const DIR = (process.env.NEXT_PUBLIC_DIRECTORY_ADDRESS || "") as `0x${string}` | "";
+const XBANK = (process.env.NEXT_PUBLIC_XBANK_ADDRESS || "") as `0x${string}` | "";
+const DEMO_RECIPIENT = (process.env.NEXT_PUBLIC_DEMO_RECIPIENT || "") as `0x${string}` | "";
 
 const HERO_WORDS = ["blockchain", "EVM", "crypto"] as const;
 
-type FlowStep = {
-  whatYouDo: ReactNode;
-  onChain: ReactNode;
+/* ── Use-case data ── */
+type UcLink = { href: string; label: string; hint?: string; secondary?: boolean };
+type UcDef = {
+  n: string;
+  tag: string;
+  title: string;
+  desc: string;
+  accent: string;
+  highlights: string[];
+  links: UcLink[];
 };
 
+const USE_CASES: UcDef[] = [
+  {
+    n: "01",
+    tag: "UC1 · eBanking",
+    title: "Issue Crypto Wallet",
+    desc: "A bank creates a seedless embedded wallet inside the banking app. No seed phrases, no browser extensions — just a wallet that feels like a bank account.",
+    accent: "#3b82f6",
+    highlights: [
+      "Seedless Privy embedded wallet",
+      "Bank-sponsored gas on first use",
+      "xBank stablecoin on Arbitrum Sepolia",
+    ],
+    links: [{ href: "/ebanking", label: "Open eBanking", hint: "Password: finalix" }],
+  },
+  {
+    n: "02",
+    tag: "UC2 · Interbank Payment",
+    title: "Travel-Rule Payment",
+    desc: "Bank A encrypts compliance data into a travel-rule envelope and posts it on-chain. Bank B decrypts, ACKs, and the token transfer executes — with an immutable audit trail.",
+    accent: "#10b981",
+    highlights: [
+      "HPKE-encrypted travel-rule envelope",
+      "On-chain ACK compliance gate",
+      "ERC-20 transfer with full audit trail",
+    ],
+    links: [
+      { href: "/bank-a", label: "Bank A — Sender" },
+      { href: "/bank-b", label: "Bank B — Receiver", secondary: true },
+    ],
+  },
+  {
+    n: "03",
+    tag: "UC3 · Trust Credential",
+    title: "KYC Badge for Wallets",
+    desc: "Banks issue expiring, revocable trust badges to wallet addresses. Institutions and individuals can verify compliance status instantly — no wallet required.",
+    accent: "#8b5cf6",
+    highlights: [
+      "Expiry + instant revocation by issuer",
+      "Verifiable by anyone without a wallet",
+      "No PII stored on-chain",
+    ],
+    links: [{ href: "/kyc-badge", label: "Open KYC Badge" }],
+  },
+  {
+    n: "04",
+    tag: "UC4 · Context Passport",
+    title: "AI-Ready Banking Data",
+    desc: "Customers create encrypted KYC context modules and grant banks' AI agents time-bound access. Data portability with cryptographic consent — plaintext never leaves the device.",
+    accent: "#f59e0b",
+    highlights: [
+      "Client-side AES-GCM encryption",
+      "On-chain time-bound access grants",
+      "Portable across multiple bank AI agents",
+    ],
+    links: [{ href: "/context-vault", label: "Open Context Vault" }],
+  },
+  {
+    n: "05",
+    tag: "UC5 · AI Trading Agent",
+    title: "Perp Trading Bot",
+    desc: "An autonomous AI agent trades BTCUSD perpetual futures on Ethereal mainnet. It classifies market regimes, sizes positions by confidence, and manages risk around the clock.",
+    accent: "#ef4444",
+    highlights: [
+      "TREND / RANGE / UNKNOWN regime engine",
+      "Linked-signer on-chain authorization",
+      "Live P&L chart and portfolio dashboard",
+    ],
+    links: [{ href: "/uc5", label: "Open Trading Bot" }],
+  },
+  {
+    n: "06",
+    tag: "UC6 · LP Automation",
+    title: "Liquidity Provider Bot",
+    desc: "A bot that autonomously manages concentrated liquidity positions on Base. It rebalances bands, harvests fees, and selects the best pool — 24/7, without human intervention.",
+    accent: "#06b6d4",
+    highlights: [
+      "Uniswap V3 & Aerodrome Slipstream",
+      "Regime-aware band rebalancing",
+      "Automated fee compounding",
+    ],
+    links: [{ href: "/uc6", label: "Open LP Bot" }],
+  },
+];
+
+/* ── Page ── */
 export default function Home() {
   const envStatus = useMemo(() => {
     const missing: string[] = [];
@@ -36,7 +118,6 @@ export default function Home() {
     return { ok: missing.length === 0, missing };
   }, []);
 
-  // Rotating header word (every 4 seconds)
   const [heroWordIndex, setHeroWordIndex] = useState(0);
   useEffect(() => {
     const t = setInterval(() => {
@@ -48,1168 +129,485 @@ export default function Home() {
   return (
     <>
       <NavBar active="home" />
-      <main style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-        {/* HERO */}
-        <section style={heroWrap}>
-          <div style={heroTopRow}>
-            <div style={{ flex: 1, minWidth: 260 }}>
-              <h1 style={{ margin: 0, lineHeight: 1.05 }}>
-                Welcome to the{" "}
-                <span key={heroWordIndex} style={rotatingWord} className="heroFlip">
-                  {HERO_WORDS[heroWordIndex]}
-                </span>{" "}
-                concept bank
-              </h1>
 
-              <p style={heroSub}>
-                A bank-grade, hands-on exploration of blockchain-based payment infrastructure solutions. <br />Make the customer relationship, operating model, and economics tangible in a real on-chain environment.
-              </p>
+      <div style={pageRoot}>
+        {/* ── HERO ── */}
+        <section className="hero-bg" style={heroSection}>
+          <div style={heroInner}>
+            {/* Eyebrow */}
+            <div style={eyebrowRow}>
+              <span style={eyebrowPill}>Blockchain Concept Bank</span>
+              <span style={eyebrowSep} />
+              <span style={eyebrowMeta}>6 use cases · Arbitrum &amp; Base</span>
+            </div>
 
-              {!envStatus.ok && (
-                <div
-                  style={{
-                    ...callout,
-                    background: "#fff6f6",
-                    borderColor: "#ffd5d5",
-                    marginTop: 14,
-                  }}
-                >
-                  <div style={{ fontWeight: 800, marginBottom: 6 }}>Setup note</div>
-                  <div style={{ fontSize: 14, color: "#7a1f1f" }}>
-                    Some environment variables are missing, so parts of the demo may not work yet:
-                    <div style={{ marginTop: 6, fontFamily: "monospace" }}>{envStatus.missing.join(", ")}</div>
+            {/* Headline */}
+            <h1 style={heroH1}>
+              Welcome to the{" "}
+              <span
+                key={heroWordIndex}
+                className="heroFlip"
+                style={heroAccentWord}
+              >
+                {HERO_WORDS[heroWordIndex]}
+              </span>
+              <br />
+              concept bank
+            </h1>
+
+            {/* Subtext */}
+            <p style={heroSubtext}>
+              A bank-grade, hands-on exploration of blockchain-based payment
+              infrastructure. Make the customer relationship, operating model,
+              and economics tangible — in a real on-chain environment.
+            </p>
+
+            {/* Env warning */}
+            {!envStatus.ok && (
+              <div style={envWarning}>
+                <span style={envIcon}>⚠</span>
+                <div>
+                  <div style={envTitle}>Setup incomplete</div>
+                  <div style={envBody}>
+                    Missing env vars:{" "}
+                    <code style={envCode}>{envStatus.missing.join(", ")}</code>
                   </div>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
+
+            {/* Journey prompt */}
+            <div style={scrollNudge}>Explore all 6 use cases below ↓</div>
           </div>
         </section>
 
-        {/* USE CASE 1 (FULL WIDTH) */}
-        <section style={{ marginTop: 16 }}>
-          <div style={useCaseCard}>
-            <div style={useCaseHeader}>
-              <div>
-                <div style={useCaseEyebrow}>Use case 1</div>
-                <h2 style={{ margin: 0 }}>Issue crypto wallet</h2>
-                <div style={useCaseSub}>
-                  eBanking creates a seedless embedded wallet and allows the user to acquire demo crypto assets.
-                </div>
-              </div>
-              <div style={useCaseActions}>
-                <Link href="/ebanking" style={btn}>
-                  Open eBanking →
-                </Link>
-                <span style={miniHint}>
-                  Password: <code style={code}>finalix</code>
-                </span>
-              </div>
-            </div>
-
-            <div style={twoPane}>
-              <div style={pane}>
-                <div style={paneTitle}>Flow (what you do)</div>
-                <StepList
-                  steps={[
-                    <>
-                      Log in to <strong>eBanking</strong> with the demo password (finalix).
-                    </>,
-                    <>
-                      Click <strong>Log-in or create wallet</strong> to open your <strong>embedded wallet</strong>.
-                    </>,
-                    <>
-                      Receive a small <strong>sponsored ETH top-up</strong> upon first wallet creation.
-                    </>,
-                    <>
-                      Click <strong>Buy 100 xBank stablecoin</strong> to add demo tokens to your wallet.
-                    </>,
-                  ]}
-                />
-              </div>
-
-              <div style={pane}>
-                <div style={paneTitle}>What you’ll notice</div>
-                <div style={insightBox}>
-                  <div style={insightTitle}>Feels like normal banking</div>
-                  <div style={insightText}>
-                    The wallet is created inside eBanking, the balance updates instantly, and the user never sees a seed
-                    phrase.
-                  </div>
-                </div>
-                <div style={insightBox}>
-                  <div style={insightTitle}>Crypto actions “just work”</div>
-                  <div style={insightText}>
-                    The bank can sponsor gas so first-time users don’t get stuck on “insufficient ETH”.
-                  </div>
-                </div>
-                <div style={insightBox}>
-                  <div style={insightTitle}>Your assets are real on-chain</div>
-                  <div style={insightText}>
-                    The wallet address and ERC-20 balances are public (that’s how blockchains work).
-                  </div>
-                </div>
-              </div>
-            </div>
-
+        {/* ── USE CASES ── */}
+        <div style={gridOuter}>
+          {/* Section divider */}
+          <div style={dividerRow}>
+            <div style={dividerLine} />
+            <span style={dividerLabel}>Use Cases</span>
+            <div style={dividerLine} />
           </div>
-        </section>
 
-        {/* USE CASE 2 (ONE UNIT: BANK A + BANK B) */}
-        <section style={{ marginTop: 16 }}>
-          <div style={useCaseCard}>
-            <div style={useCaseHeader}>
-              <div>
-                <div style={useCaseEyebrow}>Use case 2</div>
-                <h2 style={{ margin: 0 }}>Interbank travel-rule payment</h2>
-                <div style={useCaseSub}>
-                  Bank A posts an encrypted “travel-rule envelope” to the on-chain hub. Bank B reviews and ACKs. Then
-                  the token transfer executes.
-                </div>
-              </div>
-              <div style={useCaseActions}>
-                <Link href="/bank-a" style={btnSecondary}>
-                  Try it now →
-                </Link>
-              </div>
-            </div>
-
-            <div style={splitUseCase}>
-              {/* Bank A */}
-              <div style={splitPane}>
-                <div style={splitHead}>
-                  <div style={splitTitle}>Bank A</div>
-                  <div style={splitTag}>Sender workflow</div>
-                </div>
-
-                <StepList
-                  steps={[
-                    <>
-                      Enter the travel-rule minimum fields (originator + beneficiary + purpose).
-                    </>,
-                    <>
-                      Click <strong>Encrypt &amp; post request</strong> to submit an encrypted envelope to the Payment
-                      Hub (with a <strong>txRef</strong>).
-                    </>,
-                    <>
-                      Wait for Bank B’s <strong>ACK</strong> (if the toggle is enabled).
-                    </>,
-                    <>
-                      Click <strong>Send payment</strong> to execute the ERC-20 <strong>xBank transfer</strong> to the
-                      fixed recipient wallet.
-                    </>,
-                  ]}
-                />
-
-                <div style={{ marginTop: 12 }}>
-                  <div style={paneTitle}>What you’ll notice</div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>tx links = your on-chain tracking proof</div>
-                    <div style={insightText}>
-                      Once you post the request or send the payment, you receive unique <strong>tx links</strong> to the
-                      Arbitrum Sepolia blockchain you can use to trace the flow across Bank A and Bank B.
-                    </div>
-                  </div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>Privacy by default</div>
-                    <div style={insightText}>
-                      The public sees that a payload was posted, but the travel-rule fields are inside an{" "}
-                      <strong>encrypted field</strong>.
-                    </div>
-                  </div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>Interbank gate (ACK)</div>
-                    <div style={insightText}>
-                      If “Require ACK” is enabled, the transfer won’t proceed until Bank B confirms it — like a
-                      bank-to-bank compliance handshake.
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              {/* Bank B */}
-              <div style={splitPane}>
-                <div style={splitHead}>
-                  <div style={splitTitle}>Bank B</div>
-                  <div style={splitTagAlt}>Receiver workflow</div>
-                </div>
-
-                <StepList
-                  steps={[
-                    <>
-                      Refresh inbound requests (Bank B scans recent hub events).
-                    </>,
-                    <>
-                      Review the decrypted envelope (decryption happens off-chain via Bank B’s key).
-                    </>,
-                    <>
-                      Click <strong>ACK</strong> to approve (or Reject for the demo).
-                    </>,
-                    <>
-                      Explore the <strong>Directory Registry</strong> section to learn about bank routing and HPKE keys.
-                    </>,
-                  ]}
-                />
-
-                <div style={{ marginTop: 12 }}>
-                  <div style={paneTitle}>What you’ll notice</div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>Requests appear from payment hub events</div>
-                    <div style={insightText}>
-                      Bank B watches the on-chain hub and pulls new requests by scanning recent activity. It then
-                      records the ACK decision on-chain.
-                    </div>
-                  </div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>Decryption stays off-chain</div>
-                    <div style={insightText}>
-                      Bank B can open the payload using its private key, but observers on the blockchain can’t. That’s
-                      why you can show details in the UI without publishing them.
-                    </div>
-                  </div>
-
-                  <div style={insightBox}>
-                    <div style={insightTitle}>ACK is the visible approval</div>
-                    <div style={insightText}>
-                      When Bank B clicks ACK, it writes a small approval signal that Bank A can verify before moving
-                      tokens.
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div style={twoWindowBanner}>
-              <div style={{ fontWeight: 900, marginBottom: 4 }}>Two-window tip</div>
-              <div style={{ fontSize: 14, lineHeight: 1.45 }}>
-                For the best “interbank” feel: keep <strong>Bank A</strong> open, then open <strong>Bank B</strong> in
-                a separate window to ACK while Bank A waits.
-              </div>
-            </div>
+          {/* Cards */}
+          <div style={ucGrid}>
+            {USE_CASES.map((uc) => (
+              <UcCard key={uc.n} uc={uc} />
+            ))}
           </div>
-        </section>
+        </div>
 
-        {/* USE CASE 3 */}
-        <section style={{ marginTop: 16 }}>
-          <div style={useCaseCard}>
-            <div style={useCaseHeader}>
-              <div>
-                <div style={useCaseEyebrow}>Use case 3</div>
-                <h2 style={{ margin: 0 }}>KYC badge for wallets</h2>
-                <div style={useCaseSub}>
-                  A bank issues an expiring &amp; revocable badge to a wallet. Anyone can verify it instantly — without
-                  holding a wallet themselves.
-                </div>
-              </div>
-              <div style={useCaseActions}>
-                <Link href="/kyc-badge" style={btnTertiary}>
-                  Open KYC badge →
-                </Link>
-              </div>
-            </div>
+        {/* ── FOOTER ── */}
+        <footer style={footer}>
+          Prototype for discussion · Testnet only · No real funds
+        </footer>
+      </div>
 
-            <div style={twoPane}>
-              <div style={pane}>
-                <div style={paneTitle}>Flow (what you do)</div>
-                <StepList
-                  steps={[
-                    <>
-                      As the “bank”, connect your embedded wallet (Privy) in the issuer panel.
-                    </>,
-                    <>
-                      Enter a target wallet address, choose validity + claims, then click <strong>Issue / renew</strong>.
-                    </>,
-                    <>
-                      Copy the share link or paste any wallet address into the verifier section.
-                    </>,
-                    <>
-                      To simulate risk changes, click <strong>Revoke</strong> and re-verify.
-                    </>,
-                  ]}
-                />
-              </div>
+      {/* ── Global styles + animations ── */}
+      <style jsx global>{`
+        html,
+        body {
+          background: #07080f;
+          margin: 0;
+          padding: 0;
+          -webkit-font-smoothing: antialiased;
+        }
 
-              <div style={pane}>
-                <div style={paneTitle}>What you’ll notice</div>
+        /* Hero ambient gradient */
+        .hero-bg {
+          background:
+            radial-gradient(ellipse 70% 55% at 15% 45%, rgba(59, 130, 246, 0.13) 0%, transparent 60%),
+            radial-gradient(ellipse 55% 50% at 82% 18%, rgba(139, 92, 246, 0.11) 0%, transparent 55%),
+            radial-gradient(ellipse 65% 55% at 55% 85%, rgba(16, 185, 129, 0.09) 0%, transparent 55%),
+            #07080f;
+        }
 
-                <div style={insightBox}>
-                  <div style={insightTitle}>Verifiable by anyone</div>
-                  <div style={insightText}>
-                    A verifier doesn’t need a wallet — they can read the badge status like checking a public registry.
-                  </div>
-                </div>
-
-                <div style={insightBox}>
-                  <div style={insightTitle}>Expiry + revocation = bank control</div>
-                  <div style={insightText}>
-                    The badge isn’t forever. It expires automatically, and the bank can revoke instantly if risk changes.
-                  </div>
-                </div>
-
-                <div style={insightBox}>
-                  <div style={insightTitle}>No PII on-chain</div>
-                  <div style={insightText}>
-                    Only a minimal status record is public (validity + a small claims mask). Identity evidence stays in
-                    bank systems.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </section>
-
-        {/* USE CASE 4 */}
-        <section style={{ marginTop: 16 }}>
-          <div style={useCaseCard}>
-            <div style={useCaseHeader}>
-              <div>
-                <div style={useCaseEyebrow}>Use case 4</div>
-                <h2 style={{ margin: 0 }}>Context passport for banking AI agents</h2>
-                <div style={useCaseSub}>
-                  Customers create KYC context modules and grant banks AI agents time‑bound access. Allowing the bank to serve the client better while keeping the customer in control of their data.
-                </div>
-              </div>
-              <div style={useCaseActions}>
-                <Link href="/context-vault" style={btnSecondary}>
-                  Open context vault →
-                </Link>
-              </div>
-            </div>
-
-            <div style={twoPane}>
-              <div style={pane}>
-                <div style={paneTitle}>Flow (what you do)</div>
-                <StepList
-                  steps={[
-                    <>
-                      Log in as the customer and select a module (Suitability, Sustainability, Service Scope).
-                    </>,
-                    <>
-                      Fill in preferences and click <strong>Save module</strong> to encrypt locally.
-                    </>,
-                    <>
-                      As a bank, request access for a purpose via MetaMask.
-                    </>,
-                    <>
-                      Back as the customer, click <strong>Grant</strong> — the bank can now load &amp; decrypt.
-                    </>,
-                  ]}
-                />
-              </div>
-
-              <div style={pane}>
-                <div style={paneTitle}>What you’ll notice</div>
-
-                <div style={insightBox}>
-                  <div style={insightTitle}>Customer‑owned portability</div>
-                  <div style={insightText}>
-                    Modules can be exported and reused across bank's AI agents without re‑entering data.
-                  </div>
-                </div>
-
-                <div style={insightBox}>
-                  <div style={insightTitle}>Consent is enforceable</div>
-                  <div style={insightText}>
-                    Grants are on‑chain, time‑bound, and revocable — banks can’t decrypt without explicit consent.
-                  </div>
-                </div>
-
-                <div style={insightBox}>
-                  <div style={insightTitle}>No plaintext in bank storage</div>
-                  <div style={insightText}>
-                    Banks store ciphertext + wrapped keys; the plaintext never leaves the customer’s device.
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </section>
-
-        <p style={{ color: "#777", marginTop: 24, fontSize: 14 }}>
-          Prototype for discussion. Use testnet only. Don’t send real funds.
-        </p>
-
-        {/* Animations / micro-interactions (kept lightweight + respects reduced motion) */}
-        <style jsx global>{`
-          .heroFlip {
-            animation: heroFlip 400ms ease;
-            transform-origin: 50% 60%;
-            display: inline-block;
+        /* Rotating hero word */
+        .heroFlip {
+          animation: heroFlip 380ms ease;
+          transform-origin: 50% 55%;
+          display: inline-block;
+        }
+        @keyframes heroFlip {
+          0% {
+            opacity: 0;
+            transform: translateY(10px) scale(0.96);
           }
-
-          @keyframes heroFlip {
-            0% {
-              opacity: 0;
-              transform: translateY(8px) scale(0.98);
-            }
-            100% {
-              opacity: 1;
-              transform: translateY(0px) scale(1);
-            }
+          100% {
+            opacity: 1;
+            transform: translateY(0) scale(1);
           }
+        }
 
-          @media (prefers-reduced-motion: reduce) {
-            .heroFlip {
-              animation: none !important;
-            }
+        /* Card hover */
+        .uc-card {
+          transition: transform 160ms ease, background 160ms ease,
+            box-shadow 160ms ease;
+        }
+        .uc-card:hover {
+          transform: translateY(-4px);
+          background: rgba(255, 255, 255, 0.055) !important;
+          box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55),
+            0 0 0 1px rgba(255, 255, 255, 0.11);
+        }
+
+        /* Link buttons */
+        .uc-btn {
+          transition: opacity 140ms ease, filter 140ms ease;
+        }
+        .uc-btn:hover {
+          opacity: 0.88;
+          filter: brightness(1.08);
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .heroFlip,
+          .uc-card,
+          .uc-btn {
+            animation: none !important;
+            transition: none !important;
           }
-        `}</style>
-      </main>
+        }
+      `}</style>
     </>
   );
 }
 
-/* ---------- Components ---------- */
-
-function Kpi({
-  label,
-  value,
-  sub,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-}) {
+/* ── Card component ── */
+function UcCard({ uc }: { uc: UcDef }) {
   return (
-    <div style={kpiCard}>
-      <div style={{ fontSize: 14, color: "#666", fontWeight: 800 }}>
-        {label}
-      </div>
-      <div style={{ fontSize: 16, fontWeight: 950, marginTop: 4 }}>{value}</div>
-      <div
-        style={{ fontSize: 14, color: "#666", marginTop: 4, lineHeight: 1.35 }}
-      >
-        {sub}
-      </div>
-    </div>
-  );
-}
-
-function Chip({ ok, label }: { ok: boolean; label: string }) {
-  return (
-    <span
-      style={{
-        ...chipBase,
-        background: ok ? "#e6f9f0" : "#fff6f6",
-        borderColor: ok ? "#b7f0d3" : "#ffd5d5",
-        color: ok ? "#0b6b3a" : "#7a1f1f",
-      }}
-      title={ok ? "Configured" : "Missing env var"}
+    <article
+      className="uc-card"
+      style={{ ...ucCard, borderTopColor: uc.accent }}
     >
-      {ok ? "✓" : "!"} {label}
-    </span>
-  );
-}
-
-function StepList({ steps }: { steps: ReactNode[] }) {
-  return (
-    <div style={{ display: "grid", gap: 10 }}>
-      {steps.map((s, i) => (
-        <div key={i} style={stepRow}>
-          <div style={stepBadge}>{i + 1}</div>
-          <div style={stepBody}>{s}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function UnderTheHoodDiagram() {
-  // Accurate to the implemented demo mechanics.
-  const flow1Steps: FlowStep[] = [
-    {
-      whatYouDo: (
-        <>
-          Log in to <strong>eBanking</strong> and open/create your embedded
-          wallet.
-        </>
-      ),
-      onChain: <>No transaction yet — you’re just accessing your wallet address.</>,
-    },
-    {
-      whatYouDo: (
-        <>
-          Use the <strong>bank-sponsored ETH</strong> for your first on-chain
-          actions.
-        </>
-      ),
-      onChain: (
-        <>
-          A tiny amount of test ETH is sent to your wallet so your first
-          transactions can succeed.
-        </>
-      ),
-    },
-    {
-      whatYouDo: (
-        <>
-          Click <strong>Buy 100 xBank</strong> (demo purchase).
-        </>
-      ),
-      onChain: (
-        <>
-          The xBank ERC-20 contract credits your wallet (mint/transfer), so your
-          token balance becomes visible on-chain.
-        </>
-      ),
-    },
-  ];
-
-  const flow2Steps: FlowStep[] = [
-    {
-      whatYouDo: (
-        <>
-          In <strong>Bank A</strong>, enter travel-rule minimum fields (sender +
-          beneficiary + purpose).
-        </>
-      ),
-      onChain: (
-        <>
-          Bank A reads <strong>Bank B’s public encryption key</strong> from the
-          on-chain Directory (like a phonebook).
-        </>
-      ),
-    },
-    {
-      whatYouDo: (
-        <>
-          Click <strong>Encrypt &amp; post request</strong>.
-        </>
-      ),
-      onChain: (
-        <>
-          The Payment Hub records an on-chain submission keyed by{" "}
-          <strong>txRef</strong> plus an <strong>encrypted envelope</strong>.
-        </>
-      ),
-    },
-    {
-      whatYouDo: (
-        <>
-          In <strong>Bank B</strong>, refresh incoming requests and review the
-          decrypted payload.
-        </>
-      ),
-      onChain: (
-        <>
-          Bank B reads public hub events; decryption happens off-chain using Bank
-          B’s key (the chain still cannot read the contents).
-        </>
-      ),
-    },
-    {
-      whatYouDo: (
-        <>
-          If required, Bank B clicks <strong>ACK</strong> (or reject).
-        </>
-      ),
-      onChain: (
-        <>
-          An ACK transaction is written to the hub (in this demo, reject is
-          local-only, used to simulate a denial).
-        </>
-      ),
-    },
-    {
-      whatYouDo: (
-        <>
-          Back in <strong>Bank A</strong>, click <strong>Send payment</strong>.
-        </>
-      ),
-      onChain: (
-        <>
-          The xBank ERC-20 transfer executes to the receiver wallet address
-          (after ACK, if the toggle is enabled).
-        </>
-      ),
-    },
-  ];
-
-  return (
-    <div style={{ display: "grid", gap: 12 }}>
-      <FlowBlock
-        title={<>Flow 1 — Wallet issuance + xBank purchase</>}
-        steps={flow1Steps}
-        footerTags={[
-          {
-            kind: "public",
-            text: "Wallet address + ERC-20 balances are public (normal for blockchains).",
-          },
-        ]}
-      />
-
-      <FlowBlock
-        title={<>Flow 2 — Interbank payment: encrypt → ACK → transfer</>}
-        steps={flow2Steps}
-        footerTags={[
-          {
-            kind: "public",
-            text: "The chain can see an envelope was posted and its txRef.",
-          },
-          {
-            kind: "private",
-            text: "The travel-rule details inside the envelope are encrypted.",
-          },
-        ]}
-      />
-    </div>
-  );
-}
-
-function FlowBlock({
-  title,
-  steps,
-  footerTags,
-}: {
-  title: ReactNode;
-  steps: FlowStep[];
-  footerTags?: Array<{ kind: "public" | "private"; text: string }>;
-}) {
-  return (
-    <div style={flowBox}>
-      <div style={flowTitle}>{title}</div>
-
-      <div style={twoColWrap}>
-        <div style={twoColHeader}>
-          <div style={twoColHeadCell}>What you do</div>
-          <div style={twoColHeadCell}>What happens on-chain</div>
-        </div>
-
-        <div style={{ display: "grid", gap: 8 }}>
-          {steps.map((s, idx) => (
-            <div key={idx} style={twoColRow}>
-              <div style={twoColCellLeft}>
-                <div style={stepNum}>Step {idx + 1}</div>
-                <div style={stepText}>{s.whatYouDo}</div>
-              </div>
-              <div style={twoColCellRight}>
-                <div style={stepText}>{s.onChain}</div>
-              </div>
-            </div>
-          ))}
-        </div>
+      {/* Number + tag row */}
+      <div style={cardTopRow}>
+        <span style={{ ...cardNumber, color: uc.accent }}>{uc.n}</span>
+        <span style={cardTag}>{uc.tag}</span>
       </div>
 
-      {footerTags?.length ? (
-        <div style={{ marginTop: 10, display: "grid", gap: 8 }}>
-          {footerTags.map((t, i) => (
-            <div key={i} style={legendRow}>
-              <span style={t.kind === "public" ? tagPublic : tagPrivate}>
-                {t.kind === "public" ? "Public" : "Private"}
-              </span>
-              <span style={legendText}>{t.text}</span>
-            </div>
-          ))}
-        </div>
-      ) : null}
-    </div>
+      {/* Title */}
+      <h2 style={cardTitle}>{uc.title}</h2>
+
+      {/* Description */}
+      <p style={cardDesc}>{uc.desc}</p>
+
+      {/* Highlights */}
+      <ul style={cardHighlights}>
+        {uc.highlights.map((h, i) => (
+          <li key={i} style={cardHighlightItem}>
+            <span style={{ ...highlightArrow, color: uc.accent }}>▸</span>
+            {h}
+          </li>
+        ))}
+      </ul>
+
+      {/* CTA buttons */}
+      <div style={cardLinks}>
+        {uc.links.map((l, i) => (
+          <div key={i} style={ctaRow}>
+            <Link
+              href={l.href}
+              className="uc-btn"
+              style={
+                l.secondary
+                  ? { ...ctaBtn, ...ctaBtnGhost }
+                  : { ...ctaBtn, background: uc.accent }
+              }
+            >
+              {l.label} →
+            </Link>
+            {l.hint && <span style={ctaHint}>{l.hint}</span>}
+          </div>
+        ))}
+      </div>
+    </article>
   );
 }
 
-/* ---------- Styles ---------- */
+/* ── Styles ── */
 
-const heroWrap: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 18,
-  padding: 16,
-  background:
-    "linear-gradient(135deg, rgba(47,92,243,0.10), rgba(15,123,108,0.08), rgba(17,17,17,0.03))",
+const pageRoot: CSSProperties = {
+  background: "#07080f",
+  minHeight: "100vh",
+  color: "#e8e8f0",
+  fontFamily:
+    "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
-const heroTopRow: CSSProperties = {
+/* Hero */
+const heroSection: CSSProperties = {
+  padding: "72px 24px 88px",
+};
+
+const heroInner: CSSProperties = {
+  maxWidth: 800,
+  margin: "0 auto",
+};
+
+const eyebrowRow: CSSProperties = {
   display: "flex",
-  gap: 16,
-  alignItems: "stretch",
-  flexWrap: "wrap",
-};
-
-const heroSub: CSSProperties = {
-  color: "#555",
-  marginTop: 12,
-  marginBottom: 0,
-  maxWidth: 980,
-  fontSize: 14,
-  lineHeight: 1.5,
-};
-
-const heroCtas: CSSProperties = {
-  display: "flex",
+  alignItems: "center",
   gap: 10,
+  marginBottom: 32,
   flexWrap: "wrap",
-  marginTop: 14,
 };
 
-const heroRight: CSSProperties = {
-  minWidth: 280,
-  flex: "0 0 360px",
-  border: "1px solid rgba(230,232,235,0.9)",
-  borderRadius: 16,
-  padding: 14,
-  background: "rgba(255,255,255,0.75)",
-  backdropFilter: "blur(8px)",
-};
-
-const heroRightTitle: CSSProperties = {
-  fontWeight: 950,
-  marginBottom: 10,
-  color: "#111",
-};
-
-const kpiGrid: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
-  gap: 10,
-};
-
-const kpiCard: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 14,
-  padding: 10,
-  background: "#fff",
-};
-
-const chipRow: CSSProperties = {
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-  marginTop: 10,
-};
-
-const chipBase: CSSProperties = {
+const eyebrowPill: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
-  gap: 6,
-  padding: "4px 10px",
+  padding: "5px 13px",
   borderRadius: 999,
-  border: "1px solid #e6e8eb",
-  fontSize: 14,
-  fontWeight: 900,
-};
-
-const useCaseCard: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 18,
-  padding: 16,
-  background: "#fff",
-  boxShadow: "0 1px 0 rgba(17,17,17,0.02)",
-};
-
-const useCaseHeader: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-  alignItems: "flex-end",
-};
-
-const useCaseEyebrow: CSSProperties = {
-  display: "inline-block",
-  fontSize: 14,
-  fontWeight: 950,
-  letterSpacing: "0.06em",
+  border: "1px solid rgba(255,255,255,0.13)",
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.09em",
   textTransform: "uppercase",
-  color: "#2f5cf3",
-  marginBottom: 6,
+  color: "rgba(255,255,255,0.55)",
+  background: "rgba(255,255,255,0.045)",
 };
 
-const useCaseSub: CSSProperties = {
-  fontSize: 14,
-  color: "#666",
-  marginTop: 6,
-  maxWidth: 820,
-  lineHeight: 1.5,
+const eyebrowSep: CSSProperties = {
+  width: 4,
+  height: 4,
+  borderRadius: "50%",
+  background: "rgba(255,255,255,0.18)",
+  flexShrink: 0,
 };
 
-const useCaseActions: CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-  alignItems: "center",
+const eyebrowMeta: CSSProperties = {
+  fontSize: 13,
+  color: "rgba(255,255,255,0.35)",
+  fontWeight: 500,
 };
 
-const twoPane: CSSProperties = {
-  marginTop: 14,
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-};
-
-const pane: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 16,
-  padding: 14,
-  background: "#fafafa",
-};
-
-const paneTitle: CSSProperties = {
-  fontWeight: 950,
-  marginBottom: 10,
-  color: "#111",
-};
-
-const stepRow: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "34px 1fr",
-  gap: 10,
-  alignItems: "start",
-  padding: 10,
-  borderRadius: 14,
-  border: "1px solid #eef0f2",
-  background: "#fff",
-};
-
-const stepBadge: CSSProperties = {
-  width: 34,
-  height: 34,
-  borderRadius: 12,
-  display: "grid",
-  placeItems: "center",
-  fontWeight: 950,
-  background: "#111",
-  color: "#fff",
-  fontSize: 14,
-};
-
-const stepBody: CSSProperties = {
-  color: "#111",
-  fontSize: 14,
-  lineHeight: 1.45,
-};
-
-const insightBox: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 14,
-  padding: 12,
-  background: "#fff",
-  marginBottom: 10,
-};
-
-const insightTitle: CSSProperties = {
-  fontWeight: 950,
-  marginBottom: 6,
-};
-
-const insightText: CSSProperties = {
-  color: "#555",
-  fontSize: 14,
-  lineHeight: 1.5,
-};
-
-const splitUseCase: CSSProperties = {
-  marginTop: 14,
-  display: "grid",
-  gap: 12,
-  gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))",
-};
-
-const splitPane: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 16,
-  padding: 14,
-  background: "#fafafa",
-};
-
-const splitHead: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 10,
-  alignItems: "center",
-  marginBottom: 10,
-};
-
-const splitTitle: CSSProperties = {
-  fontWeight: 950,
-  fontSize: 16,
-};
-
-const splitTag: CSSProperties = {
-  fontSize: 14,
+const heroH1: CSSProperties = {
+  margin: 0,
+  fontSize: "clamp(38px, 6.5vw, 64px)",
   fontWeight: 900,
-  padding: "4px 10px",
+  lineHeight: 1.06,
+  letterSpacing: "-0.025em",
+  color: "#ffffff",
+};
+
+const heroAccentWord: CSSProperties = {
+  display: "inline-block",
+  padding: "4px 20px 6px",
   borderRadius: 999,
-  background: "#e6f0ff",
-  border: "1px solid #d6e4ff",
-  color: "#1f3a8a",
-};
-
-const splitTagAlt: CSSProperties = {
-  ...splitTag,
-  background: "#e6f9f0",
-  borderColor: "#b7f0d3",
-  color: "#0b6b3a",
-};
-
-const splitCtas: CSSProperties = {
-  marginTop: 12,
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-  alignItems: "center",
-};
-
-const checklistHeader: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-  alignItems: "flex-end",
-};
-
-const checklistRight: CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "center",
-};
-
-const progressPill: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 14,
-  padding: "8px 12px",
-  background: "#fafafa",
-  display: "grid",
-  gap: 2,
-  textAlign: "right",
-};
-
-const checklistGrid: CSSProperties = {
-  marginTop: 12,
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))",
-};
-
-const card: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 14,
-  padding: 16,
-  background: "#fff",
-};
-
-const panel: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 14,
-  padding: 16,
-  background: "#fff",
-};
-
-const btn: CSSProperties = {
-  display: "inline-block",
-  padding: "10px 14px",
-  background: "#2f5cf3",
+  background: "linear-gradient(130deg, #3b82f6 0%, #8b5cf6 100%)",
   color: "#fff",
-  borderRadius: 12,
-  textDecoration: "none",
   fontWeight: 900,
+  letterSpacing: "-0.015em",
 };
 
-const btnSecondary: CSSProperties = {
-  ...btn,
-  background: "#0f7b6c",
+const heroSubtext: CSSProperties = {
+  margin: "26px 0 0",
+  fontSize: 17,
+  lineHeight: 1.68,
+  color: "rgba(255,255,255,0.45)",
+  maxWidth: 620,
 };
 
-const btnTertiary: CSSProperties = {
-  ...btn,
-  background: "#111",
-};
-
-const btnGhost: CSSProperties = {
-  padding: "8px 12px",
+const envWarning: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 12,
+  marginTop: 28,
+  padding: "14px 18px",
   borderRadius: 12,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  cursor: "pointer",
-  fontWeight: 900,
+  border: "1px solid rgba(239,68,68,0.28)",
+  background: "rgba(239,68,68,0.07)",
 };
 
-const btnGhostLink: CSSProperties = {
-  ...btnGhost,
-  textDecoration: "none",
-  display: "inline-block",
-  color: "#111",
+const envIcon: CSSProperties = {
+  fontSize: 15,
+  color: "#ef4444",
+  flexShrink: 0,
+  marginTop: 1,
 };
 
-const code: CSSProperties = {
+const envTitle: CSSProperties = {
+  fontWeight: 700,
+  fontSize: 13,
+  color: "#fca5a5",
+  marginBottom: 4,
+};
+
+const envBody: CSSProperties = {
+  fontSize: 13,
+  color: "rgba(255,255,255,0.38)",
+};
+
+const envCode: CSSProperties = {
   fontFamily:
-    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 14,
-  background: "#f6f8fa",
-  border: "1px solid #e6e8eb",
-  padding: "1px 6px",
-  borderRadius: 8,
+    "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
+  fontSize: 12,
+  color: "#fca5a5",
 };
 
-const callout: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 12,
-  padding: 12,
-  background: "#fafafa",
+const scrollNudge: CSSProperties = {
+  marginTop: 44,
+  fontSize: 13,
+  color: "rgba(255,255,255,0.22)",
+  fontWeight: 500,
+  letterSpacing: "0.02em",
 };
 
-const miniHint: CSSProperties = {
-  fontSize: 14,
-  color: "#666",
-  alignSelf: "center",
+/* Grid section */
+const gridOuter: CSSProperties = {
+  maxWidth: 1160,
+  margin: "0 auto",
+  padding: "0 24px 80px",
 };
 
-const progressWrap: CSSProperties = {
-  width: "100%",
-  height: 10,
-  background: "#f2f3f5",
-  borderRadius: 999,
-  overflow: "hidden",
-  border: "1px solid #e6e8eb",
-};
-
-const progressBar: CSSProperties = {
-  height: "100%",
-  background: "#2f5cf3",
-};
-
-const checkRow: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 12,
-  padding: 12,
-  background: "#fff",
-};
-
-/* under-the-hood flow styles */
-const flowBox: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 12,
-  padding: 12,
-  background: "#fff",
-};
-
-const flowTitle: CSSProperties = {
-  fontWeight: 950,
-  fontSize: 14,
-  color: "#111",
-  marginBottom: 10,
+const dividerRow: CSSProperties = {
   display: "flex",
   alignItems: "center",
-  gap: 8,
-  flexWrap: "wrap",
+  gap: 18,
+  marginBottom: 36,
 };
 
-const twoColWrap: CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 12,
-  padding: 10,
-  background: "#fafafa",
+const dividerLine: CSSProperties = {
+  flex: 1,
+  height: 1,
+  background: "rgba(255,255,255,0.06)",
 };
 
-const twoColHeader: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 10,
-  marginBottom: 10,
-};
-
-const twoColHeadCell: CSSProperties = {
-  fontSize: 14,
-  fontWeight: 950,
-  color: "#444",
+const dividerLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.11em",
   textTransform: "uppercase",
-  letterSpacing: "0.04em",
+  color: "rgba(255,255,255,0.22)",
+  flexShrink: 0,
 };
 
-const twoColRow: CSSProperties = {
+const ucGrid: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: 10,
-  alignItems: "start",
-  background: "#fff",
-  border: "1px solid #eef0f2",
-  borderRadius: 12,
-  padding: 10,
+  gridTemplateColumns: "repeat(auto-fill, minmax(330px, 1fr))",
+  gap: 16,
 };
 
-const twoColCellLeft: CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const twoColCellRight: CSSProperties = {
-  display: "grid",
-  gap: 6,
-};
-
-const stepNum: CSSProperties = {
-  fontSize: 14,
-  fontWeight: 950,
-  color: "#666",
-};
-
-const stepText: CSSProperties = {
-  fontSize: 14,
-  color: "#111",
-  lineHeight: 1.45,
-};
-
-const legendRow: CSSProperties = {
+/* Card */
+const ucCard: CSSProperties = {
+  background: "rgba(255,255,255,0.032)",
+  border: "1px solid rgba(255,255,255,0.075)",
+  borderTop: "2px solid", /* borderTopColor set per card */
+  borderRadius: 16,
+  padding: "24px 24px 22px",
   display: "flex",
-  gap: 8,
+  flexDirection: "column",
+  cursor: "default",
+};
+
+const cardTopRow: CSSProperties = {
+  display: "flex",
   alignItems: "center",
-  flexWrap: "wrap",
+  gap: 10,
+  marginBottom: 18,
 };
 
-const legendText: CSSProperties = {
-  fontSize: 14,
-  color: "#666",
-};
-
-const tagBase: CSSProperties = {
-  display: "inline-block",
-  padding: "2px 8px",
-  borderRadius: 999,
-  border: "1px solid #e6e8eb",
+const cardNumber: CSSProperties = {
   fontSize: 12,
   fontWeight: 900,
+  letterSpacing: "0.06em",
+  fontVariantNumeric: "tabular-nums",
 };
 
-const tagPublic: CSSProperties = {
-  ...tagBase,
-  background: "#f6f8fa",
-  color: "#333",
+const cardTag: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 600,
+  color: "rgba(255,255,255,0.28)",
+  letterSpacing: "0.03em",
 };
 
-const tagPrivate: CSSProperties = {
-  ...tagBase,
-  background: "#fff1f1",
-  color: "#7a1f1f",
-  borderColor: "#ffd5d5",
+const cardTitle: CSSProperties = {
+  margin: "0 0 12px",
+  fontSize: 22,
+  fontWeight: 800,
+  color: "#ffffff",
+  lineHeight: 1.18,
+  letterSpacing: "-0.022em",
 };
 
-const rotatingWord: CSSProperties = {
-  display: "inline-block",
-  padding: "3px 12px",
-  borderRadius: 999,
-  background: "#111",
+const cardDesc: CSSProperties = {
+  margin: "0 0 20px",
+  fontSize: 14,
+  color: "rgba(255,255,255,0.42)",
+  lineHeight: 1.68,
+  flexGrow: 1,
+};
+
+const cardHighlights: CSSProperties = {
+  margin: "0 0 24px",
+  padding: 0,
+  listStyle: "none",
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+};
+
+const cardHighlightItem: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 9,
+  fontSize: 13,
+  color: "rgba(255,255,255,0.52)",
+  fontWeight: 500,
+  lineHeight: 1.4,
+};
+
+const highlightArrow: CSSProperties = {
+  fontSize: 9,
+  flexShrink: 0,
+  marginTop: 1,
+};
+
+const cardLinks: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  marginTop: "auto",
+};
+
+const ctaRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const ctaBtn: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "9px 16px",
+  borderRadius: 10,
+  textDecoration: "none",
+  fontSize: 13,
+  fontWeight: 700,
   color: "#fff",
-  fontWeight: 950,
   letterSpacing: "0.01em",
+  border: "1px solid transparent",
 };
 
-const twoWindowBanner: CSSProperties = {
-  marginTop: 12,
-  border: "1px solid #e6e8eb",
-  borderRadius: 16,
-  padding: 14,
-  background: "#fafafa",
+const ctaBtnGhost: CSSProperties = {
+  background: "transparent",
+  border: "1px solid rgba(255,255,255,0.14)",
+  color: "rgba(255,255,255,0.55)",
 };
 
-function short(x: string) {
-  try {
-    if (!x) return "";
-    if (x.length <= 14) return x;
-    return x.slice(0, 8) + "…" + x.slice(-6);
-  } catch {
-    return x;
-  }
-}
+const ctaHint: CSSProperties = {
+  fontSize: 12,
+  color: "rgba(255,255,255,0.28)",
+  fontWeight: 500,
+};
+
+/* Footer */
+const footer: CSSProperties = {
+  textAlign: "center",
+  padding: "28px 24px",
+  fontSize: 13,
+  color: "rgba(255,255,255,0.18)",
+  borderTop: "1px solid rgba(255,255,255,0.05)",
+};
