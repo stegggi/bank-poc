@@ -1306,30 +1306,46 @@ export default function Uc6Page() {
       const eth = getEthereum();
       if (!eth) throw new Error("MetaMask is unavailable.");
 
-      const challenge = await fetchJson<{ ok: true; message: string; expiresAt: string }>("/api/uc6/challenge", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          address: walletAddress,
-          action,
-          payload,
-        }),
-      });
+      const runSignedRequest = async () => {
+        const challenge = await fetchJson<{ ok: true; message: string; expiresAt: string }>("/api/uc6/challenge", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            address: walletAddress,
+            action,
+            payload,
+          }),
+        });
 
-      const provider = new BrowserProvider(eth);
-      const signer = await provider.getSigner();
-      const signature = await signer.signMessage(challenge.message);
+        const provider = new BrowserProvider(eth);
+        const signer = await provider.getSigner();
+        const signature = await signer.signMessage(challenge.message);
 
-      const out = await fetchJson<{ ok?: boolean; settings?: Uc6Status["settings"] }>(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ message: challenge.message, signature, payload }),
-      });
+        const out = await fetchJson<{ ok?: boolean; settings?: Uc6Status["settings"] }>(endpoint, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ message: challenge.message, signature, payload }),
+        });
+        return out;
+      };
+
+      let out: { ok?: boolean; settings?: Uc6Status["settings"] };
+      try {
+        out = await runSignedRequest();
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "";
+        const shouldRetry =
+          message === "Challenge missing or expired" ||
+          message === "Challenge was already used" ||
+          message === "Message has expired";
+        if (!shouldRetry) throw err;
+        out = await runSignedRequest();
+      }
 
       if (out.settings) {
         setDraft(coerceDraft(out.settings));
       }
-      setNotice(`${successPrefix}. Challenge expired at ${challenge.expiresAt}.`);
+      setNotice(successPrefix);
       await refreshStatus();
     },
     [isOwner, refreshStatus, walletAddress]

@@ -17,6 +17,8 @@ type ChallengeRequest = {
   payload?: unknown;
 };
 
+const CHALLENGE_TTL_MS = 3 * 60_000;
+
 export const config = {
   api: {
     bodyParser: {
@@ -73,7 +75,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const payloadSha256 = sha256HexFromObject(normalizedPayload);
     const nonce = randomNonce(16);
     const issuedAt = new Date().toISOString();
-    const expiresAt = new Date(Date.now() + 60_000).toISOString();
+    const expiresAt = new Date(Date.now() + CHALLENGE_TTL_MS).toISOString();
     const message = makeOwnerMessage({
       action,
       owner,
