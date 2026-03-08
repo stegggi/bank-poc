@@ -377,7 +377,7 @@ const eyebrowSep: CSSProperties = {
 
 const eyebrowMeta: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.35)",
+  color: "rgba(255,255,255,0.50)",
   fontWeight: 500,
 };
 
@@ -404,7 +404,7 @@ const heroSubtext: CSSProperties = {
   margin: "26px 0 0",
   fontSize: 17,
   lineHeight: 1.68,
-  color: "rgba(255,255,255,0.45)",
+  color: "rgba(255,255,255,0.65)",
   maxWidth: 620,
 };
 
@@ -448,7 +448,7 @@ const envCode: CSSProperties = {
 const scrollNudge: CSSProperties = {
   marginTop: 44,
   fontSize: 13,
-  color: "rgba(255,255,255,0.22)",
+  color: "rgba(255,255,255,0.38)",
   fontWeight: 500,
   letterSpacing: "0.02em",
 };
@@ -517,7 +517,7 @@ const cardNumber: CSSProperties = {
 const cardTag: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: "rgba(255,255,255,0.28)",
+  color: "rgba(255,255,255,0.42)",
   letterSpacing: "0.03em",
 };
 
@@ -533,7 +533,7 @@ const cardTitle: CSSProperties = {
 const cardDesc: CSSProperties = {
   margin: "0 0 20px",
   fontSize: 14,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.62)",
   lineHeight: 1.68,
   flexGrow: 1,
 };
@@ -552,7 +552,7 @@ const cardHighlightItem: CSSProperties = {
   alignItems: "center",
   gap: 9,
   fontSize: 13,
-  color: "rgba(255,255,255,0.52)",
+  color: "rgba(255,255,255,0.70)",
   fontWeight: 500,
   lineHeight: 1.4,
 };
@@ -598,7 +598,7 @@ const ctaBtnGhost: CSSProperties = {
 
 const ctaHint: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.28)",
+  color: "rgba(255,255,255,0.42)",
   fontWeight: 500,
 };
 

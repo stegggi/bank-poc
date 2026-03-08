@@ -514,6 +514,7 @@ const navWrap: CSSProperties = {
   backdropFilter: "blur(16px)",
   WebkitBackdropFilter: "blur(16px)",
   borderBottom: "1px solid rgba(255,255,255,0.07)",
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
 const navInner: CSSProperties = {
@@ -537,7 +538,6 @@ const brandStyle: CSSProperties = {
   display: "flex",
   alignItems: "baseline",
   whiteSpace: "nowrap",
-  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
 const stripRoot: CSSProperties = {
