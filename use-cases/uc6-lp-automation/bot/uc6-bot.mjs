@@ -4821,6 +4821,8 @@ class Uc6Bot {
         confidence: 0,
         updatedAtIso: null,
         sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        requiredMinSamples: cfg.minSamples,
+        feasibleSamples: null,
         windowSec: cfg.windowSec,
       };
       latest.regimeDecision = baseDecisionView;
@@ -4887,6 +4889,8 @@ class Uc6Bot {
         confidence: Number.isFinite(Number(est?.confidence)) ? Number(est.confidence) : 0,
         updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
         sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        requiredMinSamples: Number.isFinite(Number(est?.requiredMinSamples)) ? Number(est.requiredMinSamples) : cfg.minSamples,
+        feasibleSamples: Number.isFinite(Number(est?.feasibleSamples)) ? Number(est.feasibleSamples) : null,
         windowSec: cfg.windowSec,
       };
       latest.regimeDecision = {
@@ -4915,6 +4919,8 @@ class Uc6Bot {
         confidence: 0,
         updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
         sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
+        requiredMinSamples: cfg.minSamples,
+        feasibleSamples: null,
         windowSec: cfg.windowSec,
       };
       latest.regimeDecision = {
@@ -8859,6 +8865,8 @@ class Uc6Bot {
         confidence: 0,
         updatedAtIso: null,
         sampleCount: 0,
+        requiredMinSamples: Number(this.settings.regime?.minSamples || 0),
+        feasibleSamples: null,
         windowSec: Number(this.settings.regime?.windowSec || 0),
       },
       decision: latest.regimeDecision || {

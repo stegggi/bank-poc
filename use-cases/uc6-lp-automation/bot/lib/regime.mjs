@@ -89,6 +89,7 @@ export function estimateOU(state) {
   );
   const configuredMinSamples = Math.max(5, Number(state.config?.minSamples || 60));
   const windowSec = Math.max(30, Number(state.config?.windowSec || 1800));
+  const sampleTolerance = 0.95;
 
   // Derive a practical minimum from observed cadence so the estimator does not
   // stall forever when actual sampling is slightly slower or jittery.
@@ -114,12 +115,17 @@ export function estimateOU(state) {
   const feasibleSamples = Number.isFinite(observedDtSec) && observedDtSec > 0
     ? Math.max(5, Math.floor(windowSec / observedDtSec))
     : configuredMinSamples;
-  const minSamples = Math.min(configuredMinSamples, feasibleSamples);
+  const practicalMinSamples = Math.max(
+    5,
+    Math.ceil(Math.min(configuredMinSamples, feasibleSamples) * sampleTolerance)
+  );
 
-  if (samples.length < minSamples) {
+  if (samples.length < practicalMinSamples) {
     return {
       ...unknown,
-      confidence: clamp(samples.length / Math.max(minSamples, 1), 0, 0.49),
+      confidence: clamp(samples.length / Math.max(practicalMinSamples, 1), 0, 0.49),
+      requiredMinSamples: practicalMinSamples,
+      feasibleSamples,
     };
   }
 
@@ -138,10 +144,12 @@ export function estimateOU(state) {
     ys.push(y);
     dts.push(dt);
   }
-  if (xs.length < minSamples - 1) {
+  if (xs.length < practicalMinSamples - 1) {
     return {
       ...unknown,
-      confidence: clamp(xs.length / Math.max(minSamples - 1, 1), 0, 0.49),
+      confidence: clamp(xs.length / Math.max(practicalMinSamples - 1, 1), 0, 0.49),
+      requiredMinSamples: practicalMinSamples,
+      feasibleSamples,
     };
   }
 
@@ -201,7 +209,7 @@ export function estimateOU(state) {
     else if (halfLifeSec >= 900) label = "trending";
   }
 
-  const sampleScore = clamp(n / Math.max(minSamples * 2, 1), 0, 1);
+  const sampleScore = clamp(n / Math.max(practicalMinSamples * 2, 1), 0, 1);
   const fitScore = clamp(Number.isFinite(r2) ? Math.max(r2, 0) : 0, 0, 1);
   const bScore = clamp(1 - Math.min(Math.abs(1 - b), 1), 0, 1);
   let confidence = 0.15 + 0.45 * sampleScore + 0.3 * fitScore + 0.1 * bScore;
@@ -221,6 +229,8 @@ export function estimateOU(state) {
     slope: b,
     dtSec,
     sampleCount: n + 1,
+    requiredMinSamples: practicalMinSamples,
+    feasibleSamples,
     r2: Number.isFinite(r2) ? r2 : 0,
   };
   state.lastEstimate = out;
