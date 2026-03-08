@@ -336,6 +336,21 @@ export default function EBanking() {
           .eb-arbi:hover {
             color: rgba(255,255,255,0.90) !important;
           }
+          /* Why This Matters tabs */
+          .wtm-tab {
+            transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
+          }
+          .wtm-tab:hover {
+            background: rgba(255,255,255,0.07) !important;
+            border-color: rgba(255,255,255,0.14) !important;
+          }
+          .wtm-panel {
+            animation: wtmIn 220ms ease;
+          }
+          @keyframes wtmIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to   { opacity: 1; transform: translateY(0);   }
+          }
         `}</style>
 
         {!bankLoggedIn ? (
@@ -491,209 +506,196 @@ export default function EBanking() {
 }
 
 /* ─────────────────────────────────────────────
-   Why This Matters — dark collapsible section
+   Why This Matters — tabbed section
 ───────────────────────────────────────────── */
 
 function WhyThisMatters() {
-  const [open, setOpen] = useState(false);
-  const innerRef = useRef<HTMLDivElement | null>(null);
-  const [maxH, setMaxH] = useState(0);
+  const [tab, setTab] = useState(0);
 
-  useEffect(() => {
-    const update = () => {
-      if (!innerRef.current) return;
-      setMaxH(open ? innerRef.current.scrollHeight : 0);
-    };
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, [open]);
-
-  return (
-    <div style={whyStickyWrap}>
-      <div style={whyShell}>
-        <button
-          type="button"
-          onClick={() => setOpen((v) => !v)}
-          aria-expanded={open}
-          style={whyHeaderBtn}
-        >
-          <span style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
-            <span style={whyBadge}>Why this matters</span>
-            <span style={whyTitle}>
-              Issue a crypto wallet that feels like banking — and settles on-chain
-            </span>
-          </span>
-          <span style={whyRight}>
-            <span style={whyHint}>{open ? 'Hide' : 'Show'}</span>
-            <span style={{ ...chevWrap, transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>
-              <Chevron />
-            </span>
-          </span>
-        </button>
-
-        <div
-          style={{
-            ...whyBodyOuter,
-            maxHeight: open ? maxH : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? 'translateY(0px)' : 'translateY(-4px)',
-          }}
-        >
-          <div ref={innerRef} style={whyBodyInner}>
-            {/* 1 */}
-            <Section
-              k="1"
-              title="What you experience (non-technical)"
-              subtitle="It looks and feels like normal eBanking — but you end up with a real blockchain wallet."
-            >
-              <ul style={whyList}>
-                <li>You log in, click one button, and you have a <strong>seedless embedded wallet</strong>.</li>
-                <li>You see a <strong>real wallet address</strong> (EOA) and balances you can verify on the explorer.</li>
-                <li>You "buy" xBank and the balance updates because an <strong>actual on-chain action</strong> happened.</li>
-              </ul>
-            </Section>
-
-            {/* 2 */}
-            <Section
-              k="2"
-              title="What's happening technically (in plain English)"
-              subtitle="Three moving pieces: identity, wallet control, and a chain connection."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Identity + wallet UX (Privy)</div>
-                  <div style={whyText}>
-                    Privy (TPP) handles authentication and creates the embedded wallet. The app waits until an address exists
-                    and then issues some "welcome" ETH for first-time users.
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>Privy</span>
-                    <span style={pill}>Embedded wallet</span>
-                  </div>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Network correctness (Arbitrum Sepolia)</div>
-                  <div style={whyText}>
-                    The UI ensures the wallet is pointed at the right test chain using{' '}
-                    <code style={whyCode}>wallet_switchEthereumChain</code> (and can add the chain if missing).
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>Chain safety</span>
-                    <span style={pill}>No "wrong network" traps</span>
-                  </div>
-                </div>
-              </div>
-            </Section>
-
-            {/* 3 */}
-            <Section
-              k="3"
-              title="What goes on-chain on this page"
-              subtitle="This page proves the core blockchain promise: the balances you show match the ledger you don't control."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Reads (no tx)</div>
-                  <ul style={whyList}>
-                    <li>ETH balance is read directly from the chain (no database).</li>
-                    <li>xBank token balance is read via <code style={whyCode}>balanceOf(address)</code>.</li>
-                  </ul>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Writes (transactions)</div>
-                  <ul style={whyList}>
-                    <li>
-                      <strong>Sponsored gas top-up</strong> (demo): if your wallet is newly created, the app calls{' '}
-                      <code style={whyCode}>/api/grant</code> to send a tiny amount of "welcome" ETH.
-                    </li>
-                    <li>
-                      <strong>xBank purchase</strong>: clicking "Buy 100 xBank" sends a tx to the xBank ERC-20 contract's{' '}
-                      <code style={whyCode}>buy()</code>.
-                    </li>
-                  </ul>
-                </div>
-              </div>
-              <div style={bannerNote}>
-                <strong>Why it matters:</strong> the "bank UI" is no longer the source of truth — the chain is.
-              </div>
-            </Section>
-
-            {/* 4 */}
-            <Section
-              k="4"
-              title="Why banks should care (compliance & business)"
-              subtitle="This is the onboarding layer that makes regulated on-chain finance usable for normal customers."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Regulatory lens</div>
-                  <ul style={whyList}>
-                    <li>
-                      A real rollout binds wallet issuance to a <strong>KYC'd</strong> session (the demo password stands in for that).
-                    </li>
-                    <li>
-                      Banks need a clean foundation before Travel Rule messaging: <strong>who owns the address</strong>, and who the bank can vouch for.
-                    </li>
-                  </ul>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Operational lens</div>
-                  <ul style={whyList}>
-                    <li>
-                      <strong>Fewer user failures</strong>: gas sponsorship avoids "insufficient ETH" support tickets.
-                    </li>
-                    <li>
-                      The demo uses a simple grant today — production typically uses an <strong>EIP-4337 Paymaster</strong>{' '}
-                      so users can transact without holding ETH at all.
-                    </li>
-                  </ul>
-                </div>
-              </div>
-              <div style={nextStep}>
-                <div style={{ fontWeight: 800, marginBottom: 4, color: '#fff' }}>What it unlocks next</div>
-                <div style={{ color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>
-                  Once the customer has a wallet and assets, the bank can enable interbank transfers, DeFi access, and more.
-                </div>
-              </div>
-            </Section>
+  const tabs = [
+    {
+      n: '01', label: 'Experience',
+      title: 'What you experience',
+      subtitle: 'It looks and feels like normal eBanking — but you end up with a real blockchain wallet.',
+      body: (
+        <div style={wtmList}>
+          {([
+            <>You log in, click one button, and you have a <strong>seedless embedded wallet</strong>.</>,
+            <>You see a <strong>real wallet address</strong> (EOA) and balances verifiable on the block explorer.</>,
+            <>You "buy" xBank and the balance updates — because an <strong>actual on-chain transaction</strong> just happened.</>,
+          ] as React.ReactNode[]).map((item, i) => (
+            <div key={i} style={wtmListItem}>
+              <span style={wtmArrow}>▸</span>
+              <span style={wtmListText}>{item}</span>
+            </div>
+          ))}
+        </div>
+      ),
+    },
+    {
+      n: '02', label: 'Technical',
+      title: "What's happening under the hood",
+      subtitle: 'Three moving pieces: identity, wallet control, and a chain connection.',
+      body: (
+        <div style={whyGrid2}>
+          <div style={whyCard}>
+            <div style={whyCardTitle}>Identity + wallet UX (Privy)</div>
+            <div style={whyText}>
+              Privy (TPP) handles authentication and creates the embedded wallet. The app waits until an address
+              exists and then issues some "welcome" ETH for first-time users.
+            </div>
+            <div style={pillRow}>
+              <span style={pill}>Privy</span>
+              <span style={pill}>Embedded wallet</span>
+            </div>
+          </div>
+          <div style={whyCard}>
+            <div style={whyCardTitle}>Network correctness (Arbitrum Sepolia)</div>
+            <div style={whyText}>
+              The UI ensures the wallet is pointed at the right test chain using{' '}
+              <code style={whyCode}>wallet_switchEthereumChain</code> and can add the chain automatically if missing.
+            </div>
+            <div style={pillRow}>
+              <span style={pill}>Chain safety</span>
+              <span style={pill}>No "wrong network" traps</span>
+            </div>
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
+      ),
+    },
+    {
+      n: '03', label: 'On-Chain',
+      title: 'What goes on-chain',
+      subtitle: "The balances shown match the ledger you don't control — the chain is the source of truth.",
+      body: (
+        <>
+          <div style={whyGrid2}>
+            <div style={whyCard}>
+              <div style={whyCardTitle}>Reads (no transaction)</div>
+              <div style={wtmList}>
+                {([
+                  <>ETH balance read directly from the chain — no database involved.</>,
+                  <>xBank token balance via <code style={whyCode}>balanceOf(address)</code>.</>,
+                ] as React.ReactNode[]).map((item, i) => (
+                  <div key={i} style={wtmListItem}>
+                    <span style={wtmArrow}>▸</span>
+                    <span style={wtmListText}>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={whyCard}>
+              <div style={whyCardTitle}>Writes (transactions)</div>
+              <div style={wtmList}>
+                {([
+                  <><strong>Sponsored gas top-up:</strong> if the wallet is newly created, <code style={whyCode}>/api/grant</code> sends a tiny amount of "welcome" ETH.</>,
+                  <><strong>xBank purchase:</strong> "Buy 100 xBank" calls the ERC-20 contract's <code style={whyCode}>buy()</code> function.</>,
+                ] as React.ReactNode[]).map((item, i) => (
+                  <div key={i} style={wtmListItem}>
+                    <span style={wtmArrow}>▸</span>
+                    <span style={wtmListText}>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={bannerNote}>
+            <strong>Key insight:</strong> the "bank UI" is no longer the source of truth — the chain is.
+          </div>
+        </>
+      ),
+    },
+    {
+      n: '04', label: 'For Banks',
+      title: 'Why banks should care',
+      subtitle: 'This is the onboarding layer that makes regulated on-chain finance usable for normal customers.',
+      body: (
+        <>
+          <div style={whyGrid2}>
+            <div style={whyCard}>
+              <div style={whyCardTitle}>Regulatory lens</div>
+              <div style={wtmList}>
+                {([
+                  <>A real rollout binds wallet issuance to a <strong>KYC'd</strong> session — the demo password stands in for that.</>,
+                  <>Banks need a clean foundation before Travel Rule messaging: <strong>who owns the address</strong>, and who the bank can vouch for.</>,
+                ] as React.ReactNode[]).map((item, i) => (
+                  <div key={i} style={wtmListItem}>
+                    <span style={wtmArrow}>▸</span>
+                    <span style={wtmListText}>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div style={whyCard}>
+              <div style={whyCardTitle}>Operational lens</div>
+              <div style={wtmList}>
+                {([
+                  <><strong>Fewer support tickets:</strong> gas sponsorship removes "insufficient ETH" failures for new users.</>,
+                  <>Production typically uses an <strong>EIP-4337 Paymaster</strong> so customers transact without holding ETH at all.</>,
+                ] as React.ReactNode[]).map((item, i) => (
+                  <div key={i} style={wtmListItem}>
+                    <span style={wtmArrow}>▸</span>
+                    <span style={wtmListText}>{item}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+          <div style={nextStep}>
+            <div style={nextStepTitle}>What it unlocks next</div>
+            <div style={nextStepBody}>
+              Once the customer has a wallet and assets, the bank can enable interbank transfers, DeFi access, and more —
+              each use case built on this foundation.
+            </div>
+          </div>
+        </>
+      ),
+    },
+  ];
 
-function Section({
-  k,
-  title,
-  subtitle,
-  children,
-}: {
-  k: string;
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
+  const active = tabs[tab];
+
   return (
-    <div style={secWrap}>
-      <div style={secHead}>
-        <div style={secK}>{k}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={secTitle}>{title}</div>
-          <div style={secSub}>{subtitle}</div>
+    <div style={wtmOuter}>
+      {/* Divider */}
+      <div style={wtmDivider}>
+        <div style={wtmDividerLine} />
+        <span style={wtmDividerLabel}>Why this matters</span>
+        <div style={wtmDividerLine} />
+      </div>
+
+      <p style={wtmIntro}>
+        A breakdown of what this demo proves — and why it matters for banking.
+      </p>
+
+      {/* Tab strip */}
+      <div style={wtmTabStrip} role="tablist">
+        {tabs.map((t, i) => (
+          <button
+            key={i}
+            role="tab"
+            aria-selected={tab === i}
+            onClick={() => setTab(i)}
+            className="wtm-tab"
+            style={{ ...wtmTabBase, ...(tab === i ? wtmTabActive : {}) }}
+          >
+            <span style={{ ...wtmTabN, color: tab === i ? UC_ACCENT : 'rgba(255,255,255,0.22)' }}>
+              {t.n}
+            </span>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Content panel — key forces remount + fade-in animation on tab change */}
+      <div key={tab} role="tabpanel" className="wtm-panel" style={wtmPanel}>
+        <div style={wtmPanelHead}>
+          <div style={wtmPanelTitle}>{active.title}</div>
+          <div style={wtmPanelSub}>{active.subtitle}</div>
         </div>
+        {active.body}
       </div>
-      <div style={{ marginTop: 12 }}>{children}</div>
     </div>
-  );
-}
-
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
   );
 }
 
@@ -1034,138 +1036,128 @@ const actionRow: CSSProperties = {
   flexWrap: 'wrap',
 };
 
-/* ─── Why This Matters — dark styles ─── */
+/* ─── Why This Matters — tabbed section styles ─── */
 
-const whyStickyWrap: CSSProperties = {
-  marginTop: 24,
-  position: 'sticky',
-  bottom: 14,
-  zIndex: 20,
+const wtmOuter: CSSProperties = {
   maxWidth: 900,
-  margin: '24px auto 0',
-  padding: '0 24px',
+  margin: '0 auto',
+  padding: '48px 24px 80px',
 };
 
-const whyShell: CSSProperties = {
-  border: '1px solid rgba(255,255,255,0.10)',
-  borderRadius: 16,
-  overflow: 'hidden',
-  background: 'rgba(7,8,15,0.92)',
-  backdropFilter: 'blur(16px)',
-  WebkitBackdropFilter: 'blur(16px)',
-  boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
-};
-
-const whyHeaderBtn: CSSProperties = {
-  width: '100%',
-  border: 'none',
-  background: 'transparent',
-  padding: '14px 16px',
-  cursor: 'pointer',
+const wtmDivider: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
-  justifyContent: 'space-between',
-  gap: 12,
-  color: '#fff',
+  gap: 18,
+  marginBottom: 20,
+};
+
+const wtmDividerLine: CSSProperties = {
+  flex: 1,
+  height: 1,
+  background: 'rgba(255,255,255,0.06)',
+};
+
+const wtmDividerLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: '0.11em',
+  textTransform: 'uppercase',
+  color: 'rgba(255,255,255,0.28)',
+  flexShrink: 0,
+};
+
+const wtmIntro: CSSProperties = {
+  margin: '0 0 28px',
+  fontSize: 15,
+  color: 'rgba(255,255,255,0.52)',
+  lineHeight: 1.6,
+  maxWidth: 560,
+};
+
+const wtmTabStrip: CSSProperties = {
+  display: 'flex',
+  gap: 6,
+  flexWrap: 'wrap',
+  marginBottom: 20,
+};
+
+const wtmTabBase: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  gap: 7,
+  padding: '8px 14px',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(255,255,255,0.03)',
+  color: 'rgba(255,255,255,0.55)',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
   fontFamily: 'inherit',
 };
 
-const whyBadge: CSSProperties = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  padding: '4px 10px',
-  borderRadius: 999,
-  background: 'rgba(255,255,255,0.07)',
-  border: '1px solid rgba(255,255,255,0.12)',
-  color: 'rgba(255,255,255,0.80)',
-  fontWeight: 700,
-  fontSize: 12,
-  flex: '0 0 auto',
+const wtmTabActive: CSSProperties = {
+  background: `${UC_ACCENT}18`,
+  borderColor: `${UC_ACCENT}44`,
+  color: '#fff',
 };
 
-const whyTitle: CSSProperties = {
-  fontWeight: 700,
-  color: 'rgba(255,255,255,0.75)',
-  whiteSpace: 'nowrap',
-  overflow: 'hidden',
-  textOverflow: 'ellipsis',
+const wtmTabN: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: '0.04em',
+};
+
+const wtmPanel: CSSProperties = {
+  background: 'rgba(255,255,255,0.032)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 16,
+  padding: '24px',
+};
+
+const wtmPanelHead: CSSProperties = {
+  marginBottom: 20,
+  paddingBottom: 18,
+  borderBottom: '1px solid rgba(255,255,255,0.07)',
+};
+
+const wtmPanelTitle: CSSProperties = {
+  fontSize: 18,
+  fontWeight: 800,
+  color: '#fff',
+  letterSpacing: '-0.015em',
+  marginBottom: 6,
+};
+
+const wtmPanelSub: CSSProperties = {
   fontSize: 14,
+  color: 'rgba(255,255,255,0.52)',
+  lineHeight: 1.55,
 };
 
-const whyRight: CSSProperties = {
+const wtmList: CSSProperties = {
   display: 'flex',
-  alignItems: 'center',
-  gap: 10,
-  flex: '0 0 auto',
+  flexDirection: 'column',
+  gap: 12,
 };
 
-const whyHint: CSSProperties = {
-  fontSize: 12,
-  color: 'rgba(255,255,255,0.35)',
-  fontWeight: 600,
-};
-
-const chevWrap: CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.10)',
-  display: 'grid',
-  placeItems: 'center',
-  color: 'rgba(255,255,255,0.60)',
-  background: 'rgba(255,255,255,0.05)',
-  transition: 'transform 180ms ease',
-};
-
-const whyBodyOuter: CSSProperties = {
-  borderTop: '1px solid rgba(255,255,255,0.07)',
-  overflow: 'hidden',
-  transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
-  willChange: 'max-height, opacity, transform',
-};
-
-const whyBodyInner: CSSProperties = {
-  padding: 14,
-};
-
-const secWrap: CSSProperties = {
-  padding: 14,
-  borderRadius: 14,
-  border: '1px solid rgba(255,255,255,0.07)',
-  background: 'rgba(255,255,255,0.025)',
-  marginBottom: 10,
-};
-
-const secHead: CSSProperties = {
+const wtmListItem: CSSProperties = {
   display: 'flex',
-  gap: 10,
   alignItems: 'flex-start',
+  gap: 10,
 };
 
-const secK: CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: 10,
-  display: 'grid',
-  placeItems: 'center',
-  background: UC_ACCENT,
-  color: '#fff',
-  fontWeight: 800,
-  fontSize: 13,
-  flex: '0 0 auto',
+const wtmArrow: CSSProperties = {
+  color: UC_ACCENT,
+  fontSize: 10,
+  flexShrink: 0,
+  marginTop: 3,
 };
 
-const secTitle: CSSProperties = {
-  fontWeight: 800,
-  color: '#fff',
-  lineHeight: 1.2,
-};
-
-const secSub: CSSProperties = {
-  marginTop: 4,
-  fontSize: 12,
-  color: 'rgba(255,255,255,0.50)',
-  lineHeight: 1.45,
+const wtmListText: CSSProperties = {
+  fontSize: 14,
+  color: 'rgba(255,255,255,0.68)',
+  lineHeight: 1.6,
 };
 
 const whyGrid2: CSSProperties = {
@@ -1242,9 +1234,22 @@ const bannerNote: CSSProperties = {
 };
 
 const nextStep: CSSProperties = {
-  marginTop: 10,
-  padding: 12,
+  marginTop: 14,
+  padding: '16px 18px',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.07)',
-  background: 'rgba(255,255,255,0.025)',
+  border: `1px solid ${UC_ACCENT}33`,
+  background: `${UC_ACCENT}0d`,
+};
+
+const nextStepTitle: CSSProperties = {
+  fontWeight: 800,
+  marginBottom: 6,
+  color: '#fff',
+  fontSize: 14,
+};
+
+const nextStepBody: CSSProperties = {
+  color: 'rgba(255,255,255,0.65)',
+  lineHeight: 1.6,
+  fontSize: 14,
 };
