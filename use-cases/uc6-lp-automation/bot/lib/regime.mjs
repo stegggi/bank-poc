@@ -91,7 +91,7 @@ export function estimateOU(state) {
   const windowSec = Math.max(30, Number(state.config?.windowSec || 1800));
 
   // Derive a practical minimum from observed cadence so the estimator does not
-  // stall forever when actual sampling is slightly slower than configured.
+  // stall forever when actual sampling is slightly slower or jittery.
   const preliminaryDts = [];
   for (let i = 1; i < samples.length; i += 1) {
     const prev = samples[i - 1];
@@ -99,9 +99,20 @@ export function estimateOU(state) {
     const dt = Number(next.tsSec) - Number(prev.tsSec);
     if (Number.isFinite(dt) && dt > 0) preliminaryDts.push(dt);
   }
-  const observedDtSec = median(preliminaryDts);
+  const observedDtMedianSec = median(preliminaryDts);
+  const observedDtMeanSec =
+    preliminaryDts.length > 0 ? preliminaryDts.reduce((sum, v) => sum + Number(v), 0) / preliminaryDts.length : null;
+  // Use a conservative cadence estimate (larger dt => fewer feasible samples).
+  const observedDtSec =
+    Number.isFinite(observedDtMedianSec) && Number.isFinite(observedDtMeanSec)
+      ? Math.max(Number(observedDtMedianSec), Number(observedDtMeanSec))
+      : Number.isFinite(observedDtMedianSec)
+        ? Number(observedDtMedianSec)
+        : Number.isFinite(observedDtMeanSec)
+          ? Number(observedDtMeanSec)
+          : null;
   const feasibleSamples = Number.isFinite(observedDtSec) && observedDtSec > 0
-    ? Math.max(5, Math.floor(windowSec / observedDtSec) + 1)
+    ? Math.max(5, Math.floor(windowSec / observedDtSec))
     : configuredMinSamples;
   const minSamples = Math.min(configuredMinSamples, feasibleSamples);
 

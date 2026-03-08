@@ -1,5 +1,5 @@
 // pages/ebanking.tsx
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { usePrivy, useWallets } from '@privy-io/react-auth';
 import { BrowserProvider } from 'ethers';
 import { encodeFunctionData, formatEther, getAddress } from 'viem';
@@ -9,6 +9,7 @@ import NavBar from '../shared/components/NavBar';
 
 const CHAIN_ID = 421614; // Arbitrum Sepolia
 const DEMO_ETH_CHF = 2000;
+const UC_ACCENT = '#3b82f6';
 
 const ERC20_MIN_ABI = [
   {
@@ -37,7 +38,6 @@ const RPC = process.env.NEXT_PUBLIC_RPC_URL;
 
 export default function EBanking() {
   const router = useRouter();
-  // NOTE: pull createWallet from usePrivy
   const { ready, authenticated, login, logout, createWallet } = usePrivy() as any;
   const { wallets } = useWallets();
 
@@ -84,7 +84,6 @@ export default function EBanking() {
     }
   };
 
-  // Wait for an address; create the wallet if none exists
   const waitForEOAAddress = async (maxMs = 60000): Promise<`0x${string}`> => {
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
     const tryGetAddress = async () => {
@@ -95,20 +94,16 @@ export default function EBanking() {
       let addr: string | undefined;
       if (w?.address && typeof w.address === 'string') addr = w.address;
       if (!addr && typeof w?.address === 'function') {
-        try {
-          addr = await w.address();
-        } catch {}
+        try { addr = await w.address(); } catch {}
       }
       return addr && /^0x[0-9a-fA-F]{40}$/.test(addr) ? (getAddress(addr) as `0x${string}`) : undefined;
     };
 
-    // If there are no wallets at all, proactively create one
     if (!walletsRef.current?.length && typeof createWallet === 'function') {
       setStatus('Creating your embedded wallet…');
       try {
         await createWallet();
       } catch (e: any) {
-        // If this fails, still continue to poll; the dashboard policy might auto-create shortly.
         setStatus(`Creating wallet… ${e?.message ?? 'retrying'}`);
       }
     }
@@ -169,7 +164,7 @@ export default function EBanking() {
     grantInFlight.current = true;
     try {
       const b = await publicClient.getBalance({ address: addr });
-      const threshold = BigInt('20000000000000'); // ~0.00002
+      const threshold = BigInt('20000000000000');
       if (b < threshold) {
         setStatus('Bank is sponsoring a small gas top-up…');
         const r = await fetch('/api/grant', {
@@ -208,8 +203,6 @@ export default function EBanking() {
       await grantWelcomeIfLow(addr);
       await refreshBalances(addr);
       setStatus('Wallet created. Finalizing…');
-
-      // Warm up provider in background
       try {
         const eip1193 = await waitForEmbeddedProvider(60000);
         await ensureSepolia(eip1193);
@@ -251,18 +244,15 @@ export default function EBanking() {
     try {
       if (!authenticated) return setStatus('Please open the wallet first.');
       if (!XBANK || !/^0x[0-9a-fA-F]{40}$/.test(XBANK)) return setStatus('XBANK address missing/invalid (.env).');
-
       const eip1193 = await waitForEmbeddedProvider(60000);
       await ensureSepolia(eip1193);
       const ethersProvider = new BrowserProvider(eip1193);
       const signer = await ethersProvider.getSigner();
-
       const data = encodeFunctionData({ abi: ERC20_MIN_ABI as any, functionName: 'buy', args: [] });
       setStatus('Buying 100 XBANK…');
       const tx = await signer.sendTransaction({ to: XBANK, data });
       setStatus(`Submitted. Waiting… ${short(tx.hash)}`);
       const rec = await tx.wait();
-
       if (eoa) await refreshBalances(eoa as `0x${string}`);
       setStatus(`Purchase successful! Tx: ${rec?.hash ?? tx.hash}`);
     } catch (e: any) {
@@ -273,9 +263,7 @@ export default function EBanking() {
   const onGoTransact = () => router.push('/bank-a');
 
   const onEbankingLogout = async () => {
-    try {
-      await logout();
-    } catch {}
+    try { await logout(); } catch {}
     setBankLoggedIn(false);
     setEoa('');
     setEthBal(BigInt(0));
@@ -290,125 +278,221 @@ export default function EBanking() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authenticated, eoa]);
 
-  if (!ready)
-    return (
-      <>
-        <NavBar active="ebanking" />
-        <div style={{ padding: 24 }}>Loading…</div>
-      </>
-    );
+  /* ── Loading ── */
+  if (!ready) return (
+    <>
+      <NavBar active="ebanking" />
+      <div style={pageRoot}>
+        <div style={loadingWrap}>
+          <span style={loadingText}>Initializing…</span>
+        </div>
+      </div>
+    </>
+  );
 
+  /* ── Main render ── */
   return (
     <>
       <NavBar active="ebanking" />
-      <div style={{ padding: 24, maxWidth: 900, margin: '0 auto' }}>
-        <h2>eBanking</h2>
+      <div style={pageRoot}>
+        <style jsx global>{`
+          html, body {
+            background: #07080f;
+            margin: 0;
+            padding: 0;
+            -webkit-font-smoothing: antialiased;
+          }
+          .eb-input {
+            transition: border-color 140ms ease, box-shadow 140ms ease;
+          }
+          .eb-input:focus {
+            outline: none;
+            border-color: rgba(59,130,246,0.60) !important;
+            box-shadow: 0 0 0 3px rgba(59,130,246,0.12) !important;
+          }
+          .eb-btn-pri {
+            transition: opacity 140ms ease, filter 140ms ease;
+          }
+          .eb-btn-pri:hover {
+            opacity: 0.88;
+            filter: brightness(1.08);
+          }
+          .eb-btn-sec {
+            transition: background 130ms ease, border-color 130ms ease;
+          }
+          .eb-btn-sec:hover {
+            background: rgba(255,255,255,0.09) !important;
+            border-color: rgba(255,255,255,0.18) !important;
+          }
+          .eb-bal {
+            transition: background 150ms ease;
+          }
+          .eb-bal:hover {
+            background: rgba(255,255,255,0.055) !important;
+          }
+          .eb-arbi {
+            transition: color 130ms ease;
+          }
+          .eb-arbi:hover {
+            color: rgba(255,255,255,0.90) !important;
+          }
+        `}</style>
 
         {!bankLoggedIn ? (
-          <div style={panel}>
-            <h3>Bank login</h3>
-            <p>Please enter the password to open your eBanking.</p>
-            <input
-              type="password"
-              placeholder="Password (finalix)"
-              value={passwordInput}
-              onChange={(e) => setPasswordInput(e.target.value)}
-              style={{ width: '100%', padding: 8, marginBottom: 8 }}
-            />
-            <button onClick={onBankLogin}>Login</button>
-            {status && <p style={{ marginTop: 8 }}>{status}</p>}
+          /* ── Login screen ── */
+          <div style={loginOuter}>
+            <div style={loginCard}>
+              {/* UC chip */}
+              <div style={loginChipRow}>
+                <span style={loginChip}>
+                  <span style={{ color: UC_ACCENT, fontWeight: 800 }}>01</span>
+                  <span style={{ color: 'rgba(255,255,255,0.30)', margin: '0 5px' }}>·</span>
+                  eBanking
+                </span>
+              </div>
+
+              <h1 style={loginTitle}>Welcome back</h1>
+              <p style={loginSub}>Enter your password to access your eBanking portal.</p>
+
+              <input
+                type="password"
+                placeholder="Password (finalix)"
+                value={passwordInput}
+                onChange={(e) => setPasswordInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && onBankLogin()}
+                className="eb-input"
+                style={inputField}
+              />
+              <button onClick={onBankLogin} className="eb-btn-pri" style={btnPrimary}>
+                Sign in →
+              </button>
+
+              {status && <div style={statusBox}>{status}</div>}
+            </div>
           </div>
         ) : (
-          <>
-            <div style={grid}>
-              <div style={card}>
-                <h3>Checking (CHF)</h3>
-                <p style={bigAmount}>
-                  {checkingChf.toLocaleString('en-CH', { style: 'currency', currency: 'CHF' })}
-                </p>
-                <small>IBAN: CHxx 1234 5678 9012 3456 7</small>
+          /* ── Dashboard ── */
+          <div style={pageOuter}>
+            {/* Page header */}
+            <div style={dashHeader}>
+              <div>
+                <div style={dashChip}>
+                  <span style={{ color: UC_ACCENT }}>01</span> · eBanking
+                </div>
+                <h1 style={dashTitle}>Your Accounts</h1>
               </div>
-              <div style={card}>
-                <h3>Saving (CHF)</h3>
-                <p style={bigAmount}>
+              <button onClick={onEbankingLogout} className="eb-btn-sec" style={btnGhost}>
+                Sign out
+              </button>
+            </div>
+
+            {/* Traditional CHF accounts */}
+            <div style={acctGrid}>
+              <div style={acctCard}>
+                <div style={acctLabel}>Checking Account</div>
+                <div style={acctAmount}>
+                  {checkingChf.toLocaleString('en-CH', { style: 'currency', currency: 'CHF' })}
+                </div>
+                <div style={acctIban}>IBAN · CHxx 1234 5678 9012 3456 7</div>
+              </div>
+              <div style={acctCard}>
+                <div style={acctLabel}>Savings Account</div>
+                <div style={acctAmount}>
                   {savingChf.toLocaleString('en-CH', { style: 'currency', currency: 'CHF' })}
-                </p>
-                <small>IBAN: CHxx 7654 3210 9876 5432 1</small>
+                </div>
+                <div style={acctIban}>IBAN · CHxx 7654 3210 9876 5432 1</div>
               </div>
             </div>
 
-            <div style={panel}>
-              <h3>Crypto Wallet (EVM) </h3>
+            {/* Crypto wallet panel */}
+            <div style={walletPanel}>
+              <div style={walletPanelHead}>
+                <span style={walletPanelTitle}>Crypto Wallet</span>
+                <span style={walletEvmBadge}>EVM</span>
+              </div>
 
               {!authenticated ? (
-                <button onClick={onLoginOrOpen}>Log-in or create wallet</button>
+                <div style={walletUnauth}>
+                  <p style={walletUnauthText}>
+                    Connect your embedded wallet to view on-chain balances and transact.
+                  </p>
+                  <button onClick={onLoginOrOpen} className="eb-btn-pri" style={btnPrimary}>
+                    Open Wallet
+                  </button>
+                </div>
               ) : (
                 <>
-                  <p>
-                    <strong>Wallet Address:</strong>{' '}
-                    {eoa ? (
-                      <>
-                        <span style={{ fontFamily: 'monospace' }}>{eoa}</span>{' '}
-                        <a href={arbiscanAddr(eoa)} target="_blank" rel="noreferrer">
-                          Arbiscan
+                  {/* Address row */}
+                  <div style={addrRow}>
+                    <span style={addrLabel}>Address</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <code style={addrValue}>{eoa || '…'}</code>
+                      {eoa && (
+                        <a
+                          href={arbiscanAddr(eoa)}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="eb-arbi"
+                          style={arbiscanLink}
+                        >
+                          Arbiscan ↗
                         </a>
-                      </>
-                    ) : (
-                      '…'
-                    )}
-                  </p>
+                      )}
+                    </div>
+                  </div>
 
-                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                    <div>
-                      <div>
-                        <small>ETH balance</small>
-                      </div>
-                      <div style={{ fontFamily: 'monospace', fontSize: 18 }}>
-                        {Number(formatEther(ethBal)).toFixed(6)} ETH
+                  {/* Balances */}
+                  <div style={balGrid}>
+                    <div className="eb-bal" style={balCard}>
+                      <div style={balLabel}>ETH Balance</div>
+                      <div style={balValue}>
+                        {Number(formatEther(ethBal)).toFixed(6)}
+                        <span style={balUnit}> ETH</span>
                       </div>
                     </div>
-                    <div>
-                      <div>
-                        <small>~ CHF value</small>
-                      </div>
-                      <div style={{ fontSize: 18 }}>
+                    <div className="eb-bal" style={balCard}>
+                      <div style={balLabel}>~ CHF Value</div>
+                      <div style={balValue}>
                         {(Number(formatEther(ethBal)) * DEMO_ETH_CHF).toLocaleString('en-CH', {
                           style: 'currency',
                           currency: 'CHF',
                         })}
                       </div>
                     </div>
-                    <div>
-                      <div>
-                        <small>{xbSymbol} balance</small>
+                    <div className="eb-bal" style={balCard}>
+                      <div style={balLabel}>{xbSymbol} Balance</div>
+                      <div style={balValue}>
+                        {(Number(xbBal) / 1e18).toLocaleString('en-CH')}
                       </div>
-                      <div style={{ fontSize: 18 }}>{(Number(xbBal) / 1e18).toLocaleString('en-CH')}</div>
                     </div>
                   </div>
 
-                  <div style={{ marginTop: 12, display: 'flex', gap: 12, flexWrap: 'wrap' }}>
-                    <button onClick={onBuyXBank}>Buy 100 xBank stablecoin</button>
-                    <button onClick={onGoTransact}>Interbank payment transfer</button>
-                    <button onClick={onEbankingLogout} style={{ marginLeft: 'auto', opacity: 0.7 }}>
-                      Logout from eBanking
+                  {/* Actions */}
+                  <div style={actionRow}>
+                    <button onClick={onBuyXBank} className="eb-btn-pri" style={btnPrimary}>
+                      Buy 100 xBank →
+                    </button>
+                    <button onClick={onGoTransact} className="eb-btn-sec" style={btnSecondary}>
+                      Interbank Transfer →
                     </button>
                   </div>
                 </>
               )}
 
-              {status && <p style={{ marginTop: 8 }}>{status}</p>}
+              {status && <div style={statusBox}>{status}</div>}
             </div>
-          </>
+          </div>
         )}
 
-        {/* ✅ Updated: Why this matters (premium + logical narrative) */}
         <WhyThisMatters />
       </div>
     </>
   );
 }
 
-/* ---------- Updated Section Component ---------- */
+/* ─────────────────────────────────────────────
+   Why This Matters — dark collapsible section
+───────────────────────────────────────────── */
 
 function WhyThisMatters() {
   const [open, setOpen] = useState(false);
@@ -440,7 +524,6 @@ function WhyThisMatters() {
               Issue a crypto wallet that feels like banking — and settles on-chain
             </span>
           </span>
-
           <span style={whyRight}>
             <span style={whyHint}>{open ? 'Hide' : 'Show'}</span>
             <span style={{ ...chevWrap, transform: open ? 'rotate(180deg)' : 'rotate(0deg)' }}>
@@ -458,29 +541,23 @@ function WhyThisMatters() {
           }}
         >
           <div ref={innerRef} style={whyBodyInner}>
-            {/* 1) Experience */}
+            {/* 1 */}
             <Section
               k="1"
               title="What you experience (non-technical)"
               subtitle="It looks and feels like normal eBanking — but you end up with a real blockchain wallet."
             >
               <ul style={whyList}>
-                <li>
-                  You log in, click one button, and you have a <strong>seedless embedded wallet</strong>.
-                </li>
-                <li>
-                  You see a <strong>real wallet address</strong> (EOA) and balances you can verify on the explorer.
-                </li>
-                <li>
-                  You “buy” xBank and the balance updates because an <strong>actual on-chain action</strong> happened.
-                </li>
+                <li>You log in, click one button, and you have a <strong>seedless embedded wallet</strong>.</li>
+                <li>You see a <strong>real wallet address</strong> (EOA) and balances you can verify on the explorer.</li>
+                <li>You "buy" xBank and the balance updates because an <strong>actual on-chain action</strong> happened.</li>
               </ul>
             </Section>
 
-            {/* 2) Building blocks */}
+            {/* 2 */}
             <Section
               k="2"
-              title="What’s happening technically (in plain English)"
+              title="What's happening technically (in plain English)"
               subtitle="Three moving pieces: identity, wallet control, and a chain connection."
             >
               <div style={whyGrid2}>
@@ -495,7 +572,6 @@ function WhyThisMatters() {
                     <span style={pill}>Embedded wallet</span>
                   </div>
                 </div>
-
                 <div style={whyCard}>
                   <div style={whyCardTitle}>Network correctness (Arbitrum Sepolia)</div>
                   <div style={whyText}>
@@ -504,31 +580,26 @@ function WhyThisMatters() {
                   </div>
                   <div style={pillRow}>
                     <span style={pill}>Chain safety</span>
-                    <span style={pill}>No “wrong network” traps</span>
+                    <span style={pill}>No "wrong network" traps</span>
                   </div>
                 </div>
               </div>
             </Section>
 
-            {/* 3) On-chain actions */}
+            {/* 3 */}
             <Section
               k="3"
               title="What goes on-chain on this page"
-              subtitle="This page proves the core blockchain promise: the balances you show match the ledger you don’t control."
+              subtitle="This page proves the core blockchain promise: the balances you show match the ledger you don't control."
             >
               <div style={whyGrid2}>
                 <div style={whyCard}>
                   <div style={whyCardTitle}>Reads (no tx)</div>
                   <ul style={whyList}>
-                    <li>
-                      ETH balance is read directly from the chain (no database).
-                    </li>
-                    <li>
-                      xBank token balance is read via <code style={whyCode}>balanceOf(address)</code>.
-                    </li>
+                    <li>ETH balance is read directly from the chain (no database).</li>
+                    <li>xBank token balance is read via <code style={whyCode}>balanceOf(address)</code>.</li>
                   </ul>
                 </div>
-
                 <div style={whyCard}>
                   <div style={whyCardTitle}>Writes (transactions)</div>
                   <ul style={whyList}>
@@ -537,19 +608,18 @@ function WhyThisMatters() {
                       <code style={whyCode}>/api/grant</code> to send a tiny amount of "welcome" ETH.
                     </li>
                     <li>
-                      <strong>xBank purchase</strong>: clicking “Buy 100 xBank” sends a tx to the xBank ERC-20 contract’s{' '}
+                      <strong>xBank purchase</strong>: clicking "Buy 100 xBank" sends a tx to the xBank ERC-20 contract's{' '}
                       <code style={whyCode}>buy()</code>.
                     </li>
                   </ul>
                 </div>
               </div>
-
               <div style={bannerNote}>
-                <strong>Why it matters:</strong> the “bank UI” is no longer the source of truth — the chain is.
+                <strong>Why it matters:</strong> the "bank UI" is no longer the source of truth — the chain is.
               </div>
             </Section>
 
-            {/* 4) Why banks care */}
+            {/* 4 */}
             <Section
               k="4"
               title="Why banks should care (compliance & business)"
@@ -560,21 +630,18 @@ function WhyThisMatters() {
                   <div style={whyCardTitle}>Regulatory lens</div>
                   <ul style={whyList}>
                     <li>
-                      A real rollout binds wallet issuance to a <strong>KYC’d</strong> session (the demo password stands in
-                      for that).
+                      A real rollout binds wallet issuance to a <strong>KYC'd</strong> session (the demo password stands in for that).
                     </li>
                     <li>
-                      Banks need a clean foundation before Travel Rule messaging: <strong>who owns the address</strong>, and
-                      who the bank can vouch for.
+                      Banks need a clean foundation before Travel Rule messaging: <strong>who owns the address</strong>, and who the bank can vouch for.
                     </li>
                   </ul>
                 </div>
-
                 <div style={whyCard}>
                   <div style={whyCardTitle}>Operational lens</div>
                   <ul style={whyList}>
                     <li>
-                      <strong>Fewer user failures</strong>: gas sponsorship avoids “insufficient ETH” support tickets.
+                      <strong>Fewer user failures</strong>: gas sponsorship avoids "insufficient ETH" support tickets.
                     </li>
                     <li>
                       The demo uses a simple grant today — production typically uses an <strong>EIP-4337 Paymaster</strong>{' '}
@@ -583,11 +650,10 @@ function WhyThisMatters() {
                   </ul>
                 </div>
               </div>
-
               <div style={nextStep}>
-                <div style={{ fontWeight: 950, marginBottom: 4 }}>What it unlocks next</div>
-                <div style={{ color: '#333', lineHeight: 1.5 }}>
-                  Once the customer has a wallet & assets, the bank can enable interbank transfers, DeFi access, and more.
+                <div style={{ fontWeight: 800, marginBottom: 4, color: '#fff' }}>What it unlocks next</div>
+                <div style={{ color: 'rgba(255,255,255,0.65)', lineHeight: 1.5 }}>
+                  Once the customer has a wallet and assets, the bank can enable interbank transfers, DeFi access, and more.
                 </div>
               </div>
             </Section>
@@ -618,7 +684,7 @@ function Section({
           <div style={secSub}>{subtitle}</div>
         </div>
       </div>
-      <div style={{ marginTop: 10 }}>{children}</div>
+      <div style={{ marginTop: 12 }}>{children}</div>
     </div>
   );
 }
@@ -631,214 +697,554 @@ function Chevron() {
   );
 }
 
-/* ---------- Existing Styles ---------- */
+/* ── Styles ── */
 
-const panel: React.CSSProperties = { border: '1px solid #e6e8eb', borderRadius: 14, padding: 16, background: '#fff' };
-const grid: React.CSSProperties = { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, margin: '12px 0 20px' };
-const card: React.CSSProperties = { border: '1px solid #eee', borderRadius: 14, padding: 16, background: '#fff' };
-const bigAmount: React.CSSProperties = { fontSize: 24, margin: 0 };
+const pageRoot: CSSProperties = {
+  background: '#07080f',
+  minHeight: '100vh',
+  color: '#e8e8f0',
+  fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+};
 
-/* ---------- Updated "Why this matters" Premium Styles ---------- */
+const loadingWrap: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  minHeight: '60vh',
+};
 
-const whyStickyWrap: React.CSSProperties = {
-  marginTop: 18,
+const loadingText: CSSProperties = {
+  color: 'rgba(255,255,255,0.38)',
+  fontSize: 15,
+};
+
+/* Login */
+const loginOuter: CSSProperties = {
+  display: 'flex',
+  justifyContent: 'center',
+  padding: '88px 24px 140px',
+};
+
+const loginCard: CSSProperties = {
+  width: '100%',
+  maxWidth: 420,
+  background: 'rgba(255,255,255,0.032)',
+  border: '1px solid rgba(255,255,255,0.09)',
+  borderRadius: 20,
+  padding: '32px 28px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 0,
+};
+
+const loginChipRow: CSSProperties = {
+  marginBottom: 24,
+};
+
+const loginChip: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '5px 12px',
+  borderRadius: 999,
+  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(255,255,255,0.04)',
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.65)',
+  letterSpacing: '0.02em',
+};
+
+const loginTitle: CSSProperties = {
+  margin: '0 0 10px',
+  fontSize: 28,
+  fontWeight: 900,
+  color: '#fff',
+  letterSpacing: '-0.022em',
+  lineHeight: 1.15,
+};
+
+const loginSub: CSSProperties = {
+  margin: '0 0 24px',
+  fontSize: 14,
+  color: 'rgba(255,255,255,0.55)',
+  lineHeight: 1.6,
+};
+
+const inputField: CSSProperties = {
+  width: '100%',
+  padding: '11px 14px',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.05)',
+  color: '#fff',
+  fontSize: 14,
+  marginBottom: 12,
+  boxSizing: 'border-box',
+  fontFamily: 'inherit',
+};
+
+/* Buttons */
+const btnPrimary: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '11px 20px',
+  borderRadius: 12,
+  border: '1px solid transparent',
+  background: UC_ACCENT,
+  color: '#fff',
+  fontSize: 14,
+  fontWeight: 700,
+  cursor: 'pointer',
+  letterSpacing: '0.01em',
+  fontFamily: 'inherit',
+};
+
+const btnGhost: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '9px 16px',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.12)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.60)',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const btnSecondary: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '11px 20px',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.14)',
+  background: 'rgba(255,255,255,0.05)',
+  color: 'rgba(255,255,255,0.75)',
+  fontSize: 14,
+  fontWeight: 700,
+  cursor: 'pointer',
+  fontFamily: 'inherit',
+};
+
+const statusBox: CSSProperties = {
+  marginTop: 16,
+  padding: '10px 14px',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.09)',
+  background: 'rgba(255,255,255,0.04)',
+  color: 'rgba(255,255,255,0.65)',
+  fontSize: 13,
+  lineHeight: 1.5,
+  wordBreak: 'break-all',
+};
+
+/* Dashboard */
+const pageOuter: CSSProperties = {
+  maxWidth: 900,
+  margin: '0 auto',
+  padding: '40px 24px 120px',
+};
+
+const dashHeader: CSSProperties = {
+  display: 'flex',
+  alignItems: 'flex-end',
+  justifyContent: 'space-between',
+  marginBottom: 28,
+  gap: 16,
+  flexWrap: 'wrap',
+};
+
+const dashChip: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.42)',
+  letterSpacing: '0.04em',
+  marginBottom: 6,
+};
+
+const dashTitle: CSSProperties = {
+  margin: 0,
+  fontSize: 30,
+  fontWeight: 900,
+  color: '#fff',
+  letterSpacing: '-0.022em',
+};
+
+/* Account cards */
+const acctGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))',
+  gap: 14,
+  marginBottom: 20,
+};
+
+const acctCard: CSSProperties = {
+  background: 'rgba(255,255,255,0.032)',
+  border: '1px solid rgba(255,255,255,0.08)',
+  borderRadius: 16,
+  padding: '22px 24px',
+};
+
+const acctLabel: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.40)',
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  marginBottom: 10,
+};
+
+const acctAmount: CSSProperties = {
+  fontSize: 30,
+  fontWeight: 800,
+  color: '#fff',
+  letterSpacing: '-0.02em',
+  marginBottom: 8,
+};
+
+const acctIban: CSSProperties = {
+  fontSize: 12,
+  color: 'rgba(255,255,255,0.30)',
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
+  letterSpacing: '0.02em',
+};
+
+/* Crypto wallet panel */
+const walletPanel: CSSProperties = {
+  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(255,255,255,0.10)',
+  borderRadius: 16,
+  padding: '24px',
+  marginBottom: 16,
+};
+
+const walletPanelHead: CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 10,
+  marginBottom: 20,
+};
+
+const walletPanelTitle: CSSProperties = {
+  fontSize: 17,
+  fontWeight: 800,
+  color: '#fff',
+};
+
+const walletEvmBadge: CSSProperties = {
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '3px 9px',
+  borderRadius: 999,
+  border: `1px solid ${UC_ACCENT}44`,
+  background: `${UC_ACCENT}18`,
+  color: UC_ACCENT,
+  fontSize: 11,
+  fontWeight: 800,
+  letterSpacing: '0.05em',
+};
+
+const walletUnauth: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 14,
+};
+
+const walletUnauthText: CSSProperties = {
+  margin: 0,
+  fontSize: 14,
+  color: 'rgba(255,255,255,0.55)',
+  lineHeight: 1.6,
+};
+
+const addrRow: CSSProperties = {
+  display: 'flex',
+  flexDirection: 'column',
+  gap: 6,
+  marginBottom: 16,
+  padding: '14px 16px',
+  borderRadius: 12,
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(255,255,255,0.07)',
+};
+
+const addrLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.35)',
+  letterSpacing: '0.06em',
+  textTransform: 'uppercase',
+};
+
+const addrValue: CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
+  fontSize: 13,
+  color: 'rgba(255,255,255,0.80)',
+  wordBreak: 'break-all',
+};
+
+const arbiscanLink: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 700,
+  color: UC_ACCENT,
+  textDecoration: 'none',
+  flexShrink: 0,
+};
+
+const balGrid: CSSProperties = {
+  display: 'grid',
+  gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))',
+  gap: 10,
+  marginBottom: 20,
+};
+
+const balCard: CSSProperties = {
+  background: 'rgba(255,255,255,0.03)',
+  border: '1px solid rgba(255,255,255,0.07)',
+  borderRadius: 12,
+  padding: '14px 16px',
+};
+
+const balLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.38)',
+  letterSpacing: '0.05em',
+  textTransform: 'uppercase',
+  marginBottom: 6,
+};
+
+const balValue: CSSProperties = {
+  fontSize: 18,
+  fontWeight: 700,
+  color: '#fff',
+  letterSpacing: '-0.01em',
+};
+
+const balUnit: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 500,
+  color: 'rgba(255,255,255,0.45)',
+};
+
+const actionRow: CSSProperties = {
+  display: 'flex',
+  gap: 10,
+  flexWrap: 'wrap',
+};
+
+/* ─── Why This Matters — dark styles ─── */
+
+const whyStickyWrap: CSSProperties = {
+  marginTop: 24,
   position: 'sticky',
   bottom: 14,
   zIndex: 20,
+  maxWidth: 900,
+  margin: '24px auto 0',
+  padding: '0 24px',
 };
 
-const whyShell: React.CSSProperties = {
-  border: '1px solid #e6e8eb',
+const whyShell: CSSProperties = {
+  border: '1px solid rgba(255,255,255,0.10)',
   borderRadius: 16,
   overflow: 'hidden',
-  background: 'rgba(255,255,255,0.88)',
-  backdropFilter: 'blur(10px)',
-  boxShadow: '0 10px 24px rgba(0,0,0,0.06)',
+  background: 'rgba(7,8,15,0.92)',
+  backdropFilter: 'blur(16px)',
+  WebkitBackdropFilter: 'blur(16px)',
+  boxShadow: '0 12px 40px rgba(0,0,0,0.55)',
 };
 
-const whyHeaderBtn: React.CSSProperties = {
+const whyHeaderBtn: CSSProperties = {
   width: '100%',
   border: 'none',
   background: 'transparent',
-  padding: 14,
+  padding: '14px 16px',
   cursor: 'pointer',
   display: 'flex',
   alignItems: 'center',
   justifyContent: 'space-between',
   gap: 12,
+  color: '#fff',
+  fontFamily: 'inherit',
 };
 
-const whyBadge: React.CSSProperties = {
+const whyBadge: CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   padding: '4px 10px',
   borderRadius: 999,
-  background: '#111',
-  color: '#fff',
-  fontWeight: 900,
+  background: 'rgba(255,255,255,0.07)',
+  border: '1px solid rgba(255,255,255,0.12)',
+  color: 'rgba(255,255,255,0.80)',
+  fontWeight: 700,
   fontSize: 12,
   flex: '0 0 auto',
 };
 
-const whyTitle: React.CSSProperties = {
-  fontWeight: 900,
-  color: '#111',
+const whyTitle: CSSProperties = {
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.75)',
   whiteSpace: 'nowrap',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
+  fontSize: 14,
 };
 
-const whyRight: React.CSSProperties = {
+const whyRight: CSSProperties = {
   display: 'flex',
   alignItems: 'center',
   gap: 10,
   flex: '0 0 auto',
 };
 
-const whyHint: React.CSSProperties = {
+const whyHint: CSSProperties = {
   fontSize: 12,
-  color: '#666',
-  fontWeight: 800,
+  color: 'rgba(255,255,255,0.35)',
+  fontWeight: 600,
 };
 
-const chevWrap: React.CSSProperties = {
+const chevWrap: CSSProperties = {
   width: 32,
   height: 32,
-  borderRadius: 12,
-  border: '1px solid #e6e8eb',
+  borderRadius: 10,
+  border: '1px solid rgba(255,255,255,0.10)',
   display: 'grid',
   placeItems: 'center',
-  color: '#111',
-  background: '#fff',
+  color: 'rgba(255,255,255,0.60)',
+  background: 'rgba(255,255,255,0.05)',
   transition: 'transform 180ms ease',
 };
 
-const whyBodyOuter: React.CSSProperties = {
-  borderTop: '1px solid #e6e8eb',
+const whyBodyOuter: CSSProperties = {
+  borderTop: '1px solid rgba(255,255,255,0.07)',
   overflow: 'hidden',
   transition: 'max-height 260ms ease, opacity 200ms ease, transform 200ms ease',
   willChange: 'max-height, opacity, transform',
 };
 
-const whyBodyInner: React.CSSProperties = {
+const whyBodyInner: CSSProperties = {
   padding: 14,
-  background: '#fff',
 };
 
-const secWrap: React.CSSProperties = {
-  padding: 12,
+const secWrap: CSSProperties = {
+  padding: 14,
   borderRadius: 14,
-  border: '1px solid #eef0f2',
-  background: '#fafafa',
+  border: '1px solid rgba(255,255,255,0.07)',
+  background: 'rgba(255,255,255,0.025)',
   marginBottom: 10,
 };
 
-const secHead: React.CSSProperties = {
+const secHead: CSSProperties = {
   display: 'flex',
   gap: 10,
   alignItems: 'flex-start',
 };
 
-const secK: React.CSSProperties = {
+const secK: CSSProperties = {
   width: 30,
   height: 30,
-  borderRadius: 12,
+  borderRadius: 10,
   display: 'grid',
   placeItems: 'center',
-  background: '#111',
+  background: UC_ACCENT,
   color: '#fff',
-  fontWeight: 950,
+  fontWeight: 800,
   fontSize: 13,
   flex: '0 0 auto',
 };
 
-const secTitle: React.CSSProperties = {
-  fontWeight: 950,
-  color: '#111',
+const secTitle: CSSProperties = {
+  fontWeight: 800,
+  color: '#fff',
   lineHeight: 1.2,
 };
 
-const secSub: React.CSSProperties = {
+const secSub: CSSProperties = {
   marginTop: 4,
   fontSize: 12,
-  color: '#666',
+  color: 'rgba(255,255,255,0.50)',
   lineHeight: 1.45,
 };
 
-const whyGrid2: React.CSSProperties = {
+const whyGrid2: CSSProperties = {
   display: 'grid',
   gap: 10,
   gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))',
 };
 
-const whyCard: React.CSSProperties = {
-  border: '1px solid #eef0f2',
-  borderRadius: 14,
+const whyCard: CSSProperties = {
+  border: '1px solid rgba(255,255,255,0.07)',
+  borderRadius: 12,
   padding: 12,
-  background: '#fff',
+  background: 'rgba(255,255,255,0.03)',
 };
 
-const whyCardTitle: React.CSSProperties = {
-  fontWeight: 900,
+const whyCardTitle: CSSProperties = {
+  fontWeight: 800,
   marginBottom: 8,
-  color: '#111',
+  color: '#fff',
+  fontSize: 14,
 };
 
-const whyText: React.CSSProperties = {
-  color: '#333',
+const whyText: CSSProperties = {
+  color: 'rgba(255,255,255,0.62)',
   lineHeight: 1.55,
   fontSize: 13,
 };
 
-const whyList: React.CSSProperties = {
+const whyList: CSSProperties = {
   margin: 0,
   paddingLeft: 18,
-  color: '#333',
-  lineHeight: 1.55,
+  color: 'rgba(255,255,255,0.62)',
+  lineHeight: 1.65,
+  fontSize: 13,
 };
 
-const whyCode: React.CSSProperties = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 12,
-  background: '#f6f8fa',
-  border: '1px solid #e6e8eb',
+const whyCode: CSSProperties = {
+  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace",
+  fontSize: 11,
+  background: 'rgba(255,255,255,0.08)',
+  border: '1px solid rgba(255,255,255,0.10)',
+  color: 'rgba(255,255,255,0.88)',
   padding: '1px 6px',
-  borderRadius: 8,
+  borderRadius: 6,
 };
 
-const pillRow: React.CSSProperties = {
+const pillRow: CSSProperties = {
   marginTop: 10,
   display: 'flex',
   gap: 8,
   flexWrap: 'wrap',
 };
 
-const pill: React.CSSProperties = {
+const pill: CSSProperties = {
   display: 'inline-flex',
   padding: '4px 10px',
   borderRadius: 999,
-  border: '1px solid #e6e8eb',
-  background: '#fafafa',
+  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(255,255,255,0.05)',
   fontSize: 12,
-  fontWeight: 800,
-  color: '#444',
+  fontWeight: 700,
+  color: 'rgba(255,255,255,0.60)',
 };
 
-const bannerNote: React.CSSProperties = {
+const bannerNote: CSSProperties = {
   marginTop: 10,
   padding: 12,
-  borderRadius: 14,
-  border: '1px solid #e6e8eb',
-  background: '#fafafa',
-  color: '#333',
+  borderRadius: 12,
+  border: `1px solid ${UC_ACCENT}33`,
+  background: `${UC_ACCENT}0d`,
+  color: 'rgba(255,255,255,0.72)',
   lineHeight: 1.5,
+  fontSize: 13,
 };
 
-const nextStep: React.CSSProperties = {
+const nextStep: CSSProperties = {
   marginTop: 10,
   padding: 12,
-  borderRadius: 14,
-  border: '1px solid #e6e8eb',
-  background: '#fff',
-  color: '#333',
+  borderRadius: 12,
+  border: '1px solid rgba(255,255,255,0.07)',
+  background: 'rgba(255,255,255,0.025)',
 };
