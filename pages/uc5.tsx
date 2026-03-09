@@ -81,7 +81,7 @@ function markerColor(marker: ChartMarker) {
   return "#475467";
 }
 
-function shortAddr(addr: string) {
+function shortAddr(addr: string | undefined | null) {
   if (!addr) return "";
   return `${addr.slice(0, 6)}…${addr.slice(-4)}`;
 }
@@ -725,916 +725,613 @@ export default function Uc5Page() {
 
   return (
     <>
+      <style jsx global>{`
+        .uc5-recharts .recharts-cartesian-axis-tick text { fill: rgba(232,232,240,0.35) !important; font-size: 10px !important; }
+        .uc5-recharts .recharts-cartesian-grid line { stroke: rgba(255,255,255,0.05) !important; }
+        .uc5-ctrl details > summary { list-style: none; }
+        .uc5-ctrl details > summary::-webkit-details-marker { display: none; }
+        .uc5-ctrl input[type=range] { accent-color: #f59e0b; }
+        .uc5-ctrl input[type=checkbox] { accent-color: #f59e0b; width: 15px; height: 15px; }
+        .uc5-ctrl input[type=number], .uc5-ctrl input[type=text] {
+          background: rgba(255,255,255,0.06) !important;
+          border: 1px solid rgba(255,255,255,0.12) !important;
+          color: #e8e8f0 !important; border-radius: 8px !important;
+          padding: 8px 10px !important; width: 100% !important;
+          outline: none !important; font-size: 13px !important;
+        }
+        .uc5-ctrl input[type=number]:disabled { opacity: 0.4 !important; }
+        .uc5-ctrl input[type=number]:focus { border-color: rgba(245,158,11,0.5) !important; }
+        .uc5-ctrl input[type=range] { width: 100%; }
+        .uc5-ctrl summary:hover { background: rgba(255,255,255,0.03) !important; }
+      `}</style>
       <NavBar active={"uc5" as never} />
       <div style={wrap}>
-        <div style={hero}>
-          <div>
-            <h1 style={{ margin: 0, fontSize: 32 }}>UC5 — AI Autopilot Perps Bot</h1>
-            <p style={{ margin: "8px 0 0", color: "#555" }}>
-              Public dashboard stays read-only. Owner wallet can change strategy and control runtime.
-            </p>
-            <div style={{ marginTop: 10 }}>
-              <span style={isOwner ? badgeOwner : badgeReadonly}>{modeLabel}</span>
+
+        {notices.length > 0 && (
+          <div style={{ display: "grid", gap: 6 }}>
+            {notices.map((n) => (
+              <div key={n.id} style={bannerStyle(n.kind)}>
+                <div>{n.pending ? "In progress: " : ""}{n.text}</div>
+                <button style={bannerClose} onClick={() => dismissNotice(n.id)} disabled={n.pending}>Dismiss</button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* HERO */}
+        <div style={heroBar}>
+          <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", flex: 1 }}>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", color: "#f59e0b", padding: "3px 7px", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 5 }}>UC5</span>
+              <span style={{ fontSize: 22, fontWeight: 800, color: "#e8e8f0", letterSpacing: "-0.01em" }}>AI Autopilot Perps</span>
+              <span style={{ fontSize: 13, color: "rgba(232,232,240,0.45)" }}>{edit?.ticker || "BTCUSD"} · Ethereal</span>
+            </div>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontSize: 28, fontWeight: 800, color: "#e8e8f0", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+                {status?.market?.price ? fmtUsd(status.market.price, 0) : "—"}
+              </span>
+              {status?.market?.oraclePrice && (
+                <span style={{ fontSize: 12, color: "rgba(232,232,240,0.38)" }}>oracle {fmtUsd(status.market.oraclePrice, 0)}</span>
+              )}
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, border: `1px solid ${status?.bot?.alive ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`, background: status?.bot?.alive ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: status?.bot?.alive ? "#22c55e" : "#ef4444", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px #22c55e" : "none" }} />
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", color: status?.bot?.alive ? "#22c55e" : "#ef4444" }}>{status?.bot?.alive ? "BOT RUNNING" : "BOT STOPPED"}</span>
+            </div>
+            {status?.agent?.desired && status.agent.desired !== "FLAT" && (
+              <div style={{ padding: "6px 12px", borderRadius: 999, fontWeight: 800, fontSize: 11, letterSpacing: "0.08em", background: status.agent.desired === "LONG" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", border: `1px solid ${status.agent.desired === "LONG" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`, color: status.agent.desired === "LONG" ? "#22c55e" : "#ef4444" }}>
+                {status.agent.desired === "LONG" ? "▲ LONG" : "▼ SHORT"}
+              </div>
+            )}
+            <span style={isOwner ? ownerBadge : readonlyBadge}>{modeLabel}</span>
             {walletAddr ? (
               <div style={{ textAlign: "right" }}>
-                <div style={{ fontSize: 12, color: "#666" }}>Connected</div>
-                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
-                  {shortAddr(walletAddr)}
-                </div>
+                <div style={{ fontSize: 10, color: "rgba(232,232,240,0.4)", letterSpacing: "0.06em" }}>CONNECTED</div>
+                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "#e8e8f0" }}>{shortAddr(walletAddr)}</div>
               </div>
             ) : (
-              <button onClick={connectWallet} style={btnPrimary}>
-                Connect MetaMask
-              </button>
+              <button onClick={connectWallet} style={btnPrimary}>Connect MetaMask</button>
             )}
           </div>
         </div>
 
-        {notices.length > 0 ? (
-          <div style={{ marginTop: 12, display: "grid", gap: 8 }}>
-            {notices.map((n) => (
-              <div key={n.id} style={bannerStyle(n.kind)}>
-                <div>{n.pending ? "In progress: " : ""}{n.text}</div>
-                <button style={bannerClose} onClick={() => dismissNotice(n.id)} disabled={n.pending}>
-                  Dismiss
-                </button>
+        {/* METRICS STRIP */}
+        <div style={metricsStrip}>
+          {([
+            { label: "BID", val: status?.market?.bestBid ? fmtUsd(status.market.bestBid, 0) : "—", color: "#22c55e" },
+            { label: "ASK", val: status?.market?.bestAsk ? fmtUsd(status.market.bestAsk, 0) : "—", color: "#ef4444" },
+            { label: "SPREAD", val: (status?.market?.bestBid && status?.market?.bestAsk) ? `${(((status.market.bestAsk - status.market.bestBid) / status.market.bestAsk) * 10000).toFixed(1)} bps` : "—", color: "rgba(232,232,240,0.7)" },
+            { label: "MARGIN USED", val: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, color: "rgba(232,232,240,0.7)" },
+            { label: "UNREAL PNL", val: fmtUsd(portfolio?.unrealizedPnl), color: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+            { label: "TODAY PNL", val: fmtUsd(portfolio?.realizedPnlToday), color: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+            { label: "REGIME", val: status?.agent?.regimeState ? `${status.agent.regimeState}${status.agent.regimeDirection ? " " + String(status.agent.regimeDirection) : ""}` : "—", color: "rgba(232,232,240,0.7)" },
+            { label: "CONFIDENCE", val: status?.agent?.regimeStrength != null ? `${(status.agent.regimeStrength * 100).toFixed(1)}% ${status.agent.confidenceBand || ""}` : "—", color: "#f59e0b" },
+          ] as Array<{ label: string; val: string; color: string }>).map(({ label, val, color }) => (
+            <div key={label} style={{ padding: "0 18px", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.32)", marginBottom: 3 }}>{label}</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>{val}</div>
+            </div>
+          ))}
+        </div>
+
+        {/* MAIN DASHBOARD GRID */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12, alignItems: "start", minWidth: 0 }}>
+
+          {/* Charts column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
+            <div style={darkCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                <div>
+                  <span style={chartCardTitle}>{edit?.ticker || "BTCUSD"} · 1m · 24h</span>
+                  <span style={{ marginLeft: 10, fontSize: 10, color: "rgba(232,232,240,0.3)" }}>{chart.candles.length} pts</span>
+                </div>
+                <div style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", textAlign: "right" }}>
+                  <span style={{ color: "#22c55e" }}>● entry</span>{" · "}<span style={{ color: "#f59e0b" }}>● regime end</span>{" · "}<span style={{ color: "#b45309" }}>● flip</span>{" · "}<span style={{ color: "#ef4444" }}>● risk exit</span>{" · "}<span style={{ color: "#6b7280" }}>● other</span>
+                </div>
+              </div>
+              {chart.partial24h && <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 8 }}>Partial 24h · missing: {(chart.missingDays || []).join(", ") || "unknown"}</div>}
+              {chartRows.length === 0 ? (
+                <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No chart data yet</div>
+              ) : (
+                <div className="uc5-recharts" style={{ width: "100%", height: MARKET_CHART_HEIGHT }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={chartRows} margin={{ top: 16, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} />
+                      <YAxis type="number" domain={yDomain ?? ["auto", "auto"]} tickFormatter={(v) => Number(v).toFixed(0)} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} width={52} />
+                      <Tooltip content={renderChartTooltip} />
+                      <Line dataKey="close" type="monotone" stroke="#f59e0b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                      {markerRows.slice(-500).map((m, i) => (
+                        <ReferenceDot key={`${m.t}-${i}`} x={m.t} y={Number(m.price)} r={4} fill={markerColor(m)} stroke="rgba(0,0,0,0.4)" strokeWidth={1} ifOverflow="visible" />
+                      ))}
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+            <div style={darkCard}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 10 }}>
+                <span style={chartCardTitle}>REGIME STRENGTH</span>
+                <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>Ornstein-Uhlenbeck · dashed = entry threshold</span>
+              </div>
+              {regimeRows.length === 0 ? (
+                <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No regime data yet</div>
+              ) : (
+                <div className="uc5-recharts" style={{ width: "100%", height: CONFIDENCE_CHART_HEIGHT }}>
+                  <ResponsiveContainer width="100%" height="100%">
+                    <ComposedChart data={regimeRows} margin={{ top: 8, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} />
+                      <YAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${Number(v).toFixed(0)}%`} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} width={40} />
+                      <Tooltip content={renderConfidenceTooltip} />
+                      <ReferenceLine y={trendEntryStrengthPct} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.6} ifOverflow="extendDomain" />
+                      <Line dataKey="strengthPct" type="monotone" stroke="#60a5fa" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                    </ComposedChart>
+                  </ResponsiveContainer>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Side column */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+
+            <div style={darkCard}>
+              <div style={sideCardLabel}>AGENT DECISION</div>
+              <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.02em", textAlign: "center", padding: "12px 0 8px", color: status?.agent?.desired === "LONG" ? "#22c55e" : status?.agent?.desired === "SHORT" ? "#ef4444" : "rgba(232,232,240,0.28)" }}>
+                {status?.agent?.desired === "LONG" ? "▲ LONG" : status?.agent?.desired === "SHORT" ? "▼ SHORT" : "— FLAT"}
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
+                {([
+                  { label: "REGIME", val: `${status?.agent?.regimeState || "—"}${status?.agent?.regimeDirection ? " " + String(status.agent.regimeDirection) : ""}` },
+                  { label: "STRENGTH", val: status?.agent?.regimeStrength != null ? `${(status.agent.regimeStrength * 100).toFixed(1)}%` : "—" },
+                  { label: "BAND", val: status?.agent?.confidenceBand || "—" },
+                  { label: "LAST CHANGE", val: status?.agent?.lastRegimeChangeAt ? fmtAgo(status.agent.lastRegimeChangeAt) : "—" },
+                ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
+                  <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.3)", marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+                {([
+                  { label: "Next decision", val: fmtCountdown(trading?.countdowns?.nextDecisionInSec) },
+                  { label: "Next reassess", val: fmtCountdown(trading?.countdowns?.nextReassessInSec) },
+                  { label: "Max hold ends", val: fmtCountdown(trading?.countdowns?.maxHoldEndsInSec) },
+                  { label: "Cooldown ends", val: fmtCountdown(trading?.countdowns?.cooldownEndsInSec) },
+                  { label: "Initial hold", val: fmtCountdown(trading?.countdowns?.initialHoldEndsInSec) },
+                ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                    <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
+                    <span style={{ fontWeight: 700, color: "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+              {status?.agent?.reasonHuman && (
+                <div style={{ marginTop: 10, padding: "8px 10px", background: "rgba(245,158,11,0.06)", border: "1px solid rgba(245,158,11,0.15)", borderRadius: 8, fontSize: 12, color: "rgba(232,232,240,0.7)", lineHeight: 1.5 }}>{status.agent.reasonHuman}</div>
+              )}
+              <details style={{ marginTop: 8 }}>
+                <summary style={{ cursor: "pointer", fontSize: 11, color: "rgba(232,232,240,0.35)", userSelect: "none" }}>Raw diagnostics</summary>
+                <pre style={{ marginTop: 6, fontSize: 10, color: "rgba(232,232,240,0.4)", overflowX: "auto", background: "rgba(0,0,0,0.3)", padding: 8, borderRadius: 6, lineHeight: 1.4 }}>{status?.agent?.reasonRaw || "No raw metrics."}</pre>
+              </details>
+            </div>
+
+            <div style={darkCard}>
+              <div style={sideCardLabel}>OPEN POSITION</div>
+              {status?.position?.open ? (
+                <div>
+                  <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: status.position.side === "LONG" ? "#22c55e" : "#ef4444" }}>
+                    {status.position.side === "LONG" ? "▲ LONG" : "▼ SHORT"}
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {([
+                      { label: "SIZE", val: `${status.position.size?.toFixed(6) || "—"} BTC` },
+                      { label: "ENTRY PRICE", val: fmtUsd(status.position.entryPrice) },
+                      { label: "AGE", val: status.position.ageSec != null ? `${Math.floor(status.position.ageSec / 60)}m ${Math.floor(status.position.ageSec % 60)}s` : "—" },
+                    ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
+                      <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
+                        <span style={{ fontWeight: 700, color: "#e8e8f0" }}>{val}</span>
+                      </div>
+                    ))}
+                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                      <span style={{ color: "rgba(232,232,240,0.45)" }}>UNREAL PNL</span>
+                      <span style={{ fontWeight: 700, color: (status.position.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtUsd(status.position.unrealizedPnl)}</span>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ textAlign: "center", padding: "20px 0", fontSize: 18, fontWeight: 700, color: "rgba(232,232,240,0.2)", letterSpacing: "0.1em" }}>— FLAT —</div>
+              )}
+            </div>
+
+            <div style={darkCard}>
+              <div style={sideCardLabel}>EXECUTION</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {([
+                  { label: "QUOTE FEED", val: status?.execution?.wsQuotes?.subscribed ? "WS LIVE" : "REST", ok: status?.execution?.wsQuotes?.subscribed as boolean | undefined },
+                  { label: "WS STATE", val: status?.execution?.wsQuotes?.connected ? "CONNECTED" : (status?.execution?.wsQuotes ? "DISCONNECTED" : "—"), ok: status?.execution?.wsQuotes?.connected as boolean | undefined },
+                  { label: "MAKER FILL %", val: status?.execution?.fillsAuditLast20?.summary ? `${(status.execution.fillsAuditLast20.summary.makerRatePct ?? 0).toFixed(1)}%` : "—", ok: (status?.execution?.fillsAuditLast20?.summary?.makerRatePct ?? 0) >= 70 as unknown as boolean | undefined },
+                  { label: "FEES 20 FILLS", val: status?.execution?.fillsAuditLast20?.summary ? fmtUsd(status.execution.fillsAuditLast20.summary.totalFeesUsd) : "—", ok: undefined as boolean | undefined },
+                  { label: "LAST ENTRY", val: status?.execution?.lastEntryFill ? (status.execution.lastEntryFill.isMaker ? "MAKER" : "TAKER") : "—", ok: status?.execution?.lastEntryFill?.isMaker as boolean | undefined },
+                  { label: "LAST EXIT", val: status?.execution?.lastExitMethod || "—", ok: (status?.execution?.lastExitMethod === "maker") as boolean | undefined },
+                ] as Array<{ label: string; val: string; ok: boolean | undefined }>).map(({ label, val, ok }) => (
+                  <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px" }}>
+                    <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.3)", marginBottom: 4 }}>{label}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: ok === undefined ? "#e8e8f0" : ok ? "#22c55e" : "#ef4444" }}>{val}</div>
+                  </div>
+                ))}
+              </div>
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 5 }}>
+                {([
+                  { label: "Avg fill time", val: status?.execution?.avgEntryTimeToFirstFillMs != null ? `${Math.round(status.execution.avgEntryTimeToFirstFillMs)} ms` : "—" },
+                  { label: "WS restarts", val: `${status?.execution?.wsQuotes?.restartCount ?? 0} (${status?.execution?.wsQuotes?.lastRestartReason || "—"})` },
+                  { label: "Partial fill accepts", val: status?.execution?.entryMakerOpened != null ? `${status.execution.entryMakerPartialAccepts ?? 0} (${(status.execution.entryMakerPartialRatePct ?? 0).toFixed(1)}%)` : "—" },
+                ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
+                  <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11 }}>
+                    <span style={{ color: "rgba(232,232,240,0.38)" }}>{label}</span>
+                    <span style={{ fontWeight: 600, color: "rgba(232,232,240,0.65)" }}>{val}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* STATUS ROW */}
+        <div style={statusRow}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: status?.bot?.alive ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${status?.bot?.alive ? "rgba(34,197,94,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 10 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: status?.bot?.alive ? "#22c55e" : "#ef4444", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px #22c55e" : "none" }} />
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>HEARTBEAT</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{fmtAgo(status?.updatedAt)}{status?.bot?.version ? ` · v${status.bot.version}` : ""}</div>
+            </div>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, flex: 1 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: ingestion?.running ? "#22c55e" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>DATA INGESTION</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{ingestion?.running ? "RUNNING" : "STOPPED"} · {(ingestion?.ingestionRatePerMin5m ?? 0).toFixed(1)} ticks/min</div>
+            </div>
+            <button style={ingestion?.enabled ? miniWarnBtn : miniGreenBtn} disabled={!isOwner || !!busy} onClick={() => void setIngestionEnabled(!(ingestion?.enabled ?? true))}>
+              {ingestion?.enabled ? "PAUSE" : "START"}
+            </button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, flex: 1 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: trading?.running ? "#22c55e" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>TRADING</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{trading?.running ? "RUNNING" : "STOPPED"} · {trading?.positionOpen ? `${trading.side || "OPEN"} · ${fmtCountdown(trading?.timeSinceEntrySec)} age` : "no position"}</div>
+            </div>
+            <button style={trading?.enabled ? miniWarnBtn : miniGreenBtn} disabled={!isOwner || !!busy} onClick={() => void setTradingEnabled(!(trading?.enabled ?? true))}>
+              {trading?.enabled ? "PAUSE" : "START"}
+            </button>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10 }}>
+            <div>
+              <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>LAST ACTION</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: status?.lastAction?.ok === false ? "#ef4444" : status?.lastAction?.ok ? "#22c55e" : "#e8e8f0" }}>
+                {status?.lastAction?.type || (trading?.lastAction && typeof trading.lastAction === "object" && "type" in (trading.lastAction as { type?: unknown }) ? String((trading.lastAction as { type?: unknown }).type) : "—")}
+              </div>
+            </div>
+          </div>
+          <div style={{ marginLeft: "auto" }}>
+            <button style={{ ...btnDanger, padding: "10px 20px", fontWeight: 900, letterSpacing: "0.05em" }} disabled={!isOwner || !!busy} onClick={() => void sendFlatten()}>■ FLATTEN NOW</button>
+          </div>
+        </div>
+
+        {/* PORTFOLIO + STATS */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 }}>
+          <div style={darkCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+              <span style={sideCardLabel}>PORTFOLIO</span>
+              <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", fontFamily: "ui-monospace, Menlo, monospace" }}>{shortAddr(cfg?.ownerAddress)}</span>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(portfolio?.portfolioValueUsd)}</div>
+              <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL VALUE</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {([
+                { k: "Available margin", v: fmtUsd(portfolio?.availableMarginUsd), c: undefined as string | undefined },
+                { k: "Used margin", v: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, c: undefined as string | undefined },
+                { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+              ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={darkCard}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+              <span style={sideCardLabel}>TRADE STATS</span>
+              <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>all-time</span>
+            </div>
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em" }}>{tradeSummary?.totalTrades ?? 0}</div>
+              <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL TRADES</div>
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {([
+                { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "#f59e0b" },
+                { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "#22c55e" },
+                { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "#ef4444" },
+                { k: "Regime end exits", v: String(tradeSummary?.closedByRegimeEnd ?? 0), c: undefined as string | undefined },
+                { k: "Regime flip exits", v: String(tradeSummary?.closedByRegimeFlip ?? 0), c: undefined as string | undefined },
+                { k: "Risk loop exits", v: String(tradeSummary?.closedByRiskLoop ?? 0), c: undefined as string | undefined },
+                { k: "Other / manual exits", v: String(tradeSummary?.closedByOther ?? 0), c: undefined as string | undefined },
+              ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                  <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        {/* INGESTION DETAIL */}
+        <details style={darkCard}>
+          <summary style={{ cursor: "pointer", fontWeight: 700, fontSize: 11, letterSpacing: "0.1em", color: "rgba(232,232,240,0.4)", userSelect: "none" }}>DATA INGESTION DETAIL</summary>
+          <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 6 }}>
+            {([
+              { k: "Collecting since", v: ingestion?.collectingSince ? new Date(ingestion.collectingSince).toLocaleString() : "—" },
+              { k: "Last tick at", v: ingestion?.lastTickAt ? `${new Date(ingestion.lastTickAt).toLocaleTimeString()} (${fmtAgo(ingestion.lastTickAt)})` : "—" },
+              { k: "Ticks collected", v: (ingestion?.ticksCollected ?? 0).toLocaleString() },
+              { k: "Last 24h ticks", v: (ingestion?.ticks24h ?? 0).toLocaleString() },
+              { k: "Ingestion rate (5m)", v: `${(ingestion?.ingestionRatePerMin5m ?? 0).toFixed(2)} ticks/min` },
+              { k: "DB size", v: ingestion?.dbSizeBytes != null ? `${(ingestion.dbSizeBytes / 1024 / 1024).toFixed(2)} MB` : "—" },
+            ] as Array<{ k: string; v: string }>).map(({ k, v }) => (
+              <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                <span style={{ color: "rgba(232,232,240,0.45)" }}>{k}</span>
+                <span style={{ fontWeight: 600, color: "#e8e8f0" }}>{v}</span>
               </div>
             ))}
           </div>
-        ) : null}
+        </details>
 
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Market</h2>
-          <div style={card}>
-            <div style={{ fontSize: 13, color: "#666", marginBottom: 8 }}>
-              24h chart ({chart.candles.length} points). Markers: green=entry, amber=regime end, brown=regime flip, red=risk exit, gray=other/manual close.
+        {/* CONTROL CENTER */}
+        <div className="uc5-ctrl" style={controlCenter}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: "#e8e8f0", letterSpacing: "0.04em" }}>
+                <span style={{ color: "#f59e0b", marginRight: 8 }}>&#9881;</span>CONTROL CENTER
+              </div>
+              <div style={{ fontSize: 12, color: "rgba(232,232,240,0.38)", marginTop: 3 }}>Owner settings · requires MetaMask signature</div>
             </div>
-            {chart.partial24h ? (
-              <div style={{ fontSize: 12, color: "#b54708", marginBottom: 8 }}>
-                Partial 24h data (missing DB day: {(chart.missingDays || []).join(", ") || "unknown"}).
-              </div>
-            ) : null}
-            {chartRows.length === 0 ? (
-              <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No chart data yet.</div>
-            ) : (
-              <div style={{ width: "100%", minWidth: 0, height: MARKET_CHART_HEIGHT, minHeight: MARKET_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={MARKET_CHART_HEIGHT}>
-                  <ComposedChart data={chartRows} margin={{ top: 16, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
-                    <XAxis
-                      dataKey="t"
-                      type="number"
-                      domain={["dataMin", "dataMax"]}
-                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={yDomain ?? ["auto", "auto"]}
-                      tickFormatter={(v) => Number(v).toFixed(0)}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                      width={58}
-                    />
-                    <Tooltip content={renderChartTooltip} />
-                    <Line dataKey="close" type="monotone" stroke="#111827" strokeWidth={2} dot={false} isAnimationActive={false} />
-                    {markerRows.slice(-500).map((m, i) => (
-                      <ReferenceDot
-                        key={`${m.t}-${i}`}
-                        x={m.t}
-                        y={Number(m.price)}
-                        r={4}
-                        fill={markerColor(m)}
-                        stroke="none"
-                        ifOverflow="visible"
-                      />
-                    ))}
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
-            <div style={{ fontSize: 13, color: "#666", margin: "12px 0 8px" }}>
-              Regime strength history (0-100%), with TREND entry threshold.
-            </div>
-            {regimeRows.length === 0 ? (
-              <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "#666" }}>No regime data yet.</div>
-            ) : (
-              <div style={{ width: "100%", minWidth: 0, height: CONFIDENCE_CHART_HEIGHT, minHeight: CONFIDENCE_CHART_HEIGHT }}>
-                <ResponsiveContainer width="100%" height="100%" minWidth={0} minHeight={CONFIDENCE_CHART_HEIGHT}>
-                  <ComposedChart data={regimeRows} margin={{ top: 8, right: 24, left: 8, bottom: 8 }} syncId="uc5-price-confidence">
-                    <CartesianGrid strokeDasharray="3 3" stroke="#edf0f4" />
-                    <XAxis
-                      dataKey="t"
-                      type="number"
-                      domain={["dataMin", "dataMax"]}
-                      tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                    />
-                    <YAxis
-                      type="number"
-                      domain={[0, 100]}
-                      tickFormatter={(v) => `${Number(v).toFixed(0)}%`}
-                      tick={{ fontSize: 12, fill: "#667085" }}
-                      width={58}
-                    />
-                    <Tooltip content={renderConfidenceTooltip} />
-                    <ReferenceLine y={trendEntryStrengthPct} stroke="#b54708" strokeDasharray="4 4" ifOverflow="extendDomain" />
-                    <Line dataKey="strengthPct" type="monotone" stroke="#0c4a6e" strokeWidth={2} dot={false} isAnimationActive={false} />
-                  </ComposedChart>
-                </ResponsiveContainer>
-              </div>
-            )}
+            <span style={isOwner ? ownerBadge : readonlyBadge}>{modeLabel}</span>
           </div>
-        </section>
 
-        <section style={{ marginTop: 14 }}>
-          <h2 style={sectionTitle}>Bot Status</h2>
-          <div style={grid3}>
-            <div style={card}>
-              <div style={cardTitle}>Heartbeat</div>
-              <KV k="Heartbeat" v={fmtAgo(status?.updatedAt)} />
-              <KV k="Alive" v={status?.bot?.alive ? "RUNNING" : "STOPPED"} />
-              <KV k="Message" v={status?.bot?.message || "—"} />
-              <KV k="Version" v={status?.bot?.version || "—"} />
-            </div>
-
-            <div style={card}>
-              <div style={cardTitle}>Data Ingestion</div>
-              <KV k="Status" v={ingestion?.running ? "RUNNING" : "STOPPED"} />
-              <KV k="Collecting since" v={ingestion?.collectingSince ? new Date(ingestion.collectingSince).toLocaleString() : "—"} />
-              <KV k="Last tick at" v={ingestion?.lastTickAt ? `${new Date(ingestion.lastTickAt).toLocaleTimeString()} (${fmtAgo(ingestion.lastTickAt)})` : "—"} />
-              <KV k="Ticks collected" v={(ingestion?.ticksCollected ?? 0).toLocaleString()} />
-              <KV k="Last 24h ticks" v={(ingestion?.ticks24h ?? 0).toLocaleString()} />
-              <KV k="Ingestion rate (5m)" v={`${(ingestion?.ingestionRatePerMin5m ?? 0).toFixed(2)} ticks/min`} />
-              <KV k="DB size" v={ingestion?.dbSizeBytes != null ? `${(ingestion.dbSizeBytes / 1024 / 1024).toFixed(2)} MB` : "—"} />
-              <div style={{ marginTop: 10 }}>
-                <button
-                  style={ingestion?.enabled ? btnWarn : btnPrimary}
-                  disabled={!isOwner || !!busy}
-                  onClick={() => void setIngestionEnabled(!(ingestion?.enabled ?? true))}
-                >
-                  {ingestion?.enabled ? "Ingestion OFF" : "Ingestion ON"}
-                </button>
+          <details open style={ctrlSection}>
+            <summary style={ctrlSummary}>
+              <span style={{ marginRight: 8, color: "#f59e0b" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#f59e0b" }}>STRATEGY &amp; SIGNAL</span>
+              <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>regime thresholds · timing · loops</span>
+            </summary>
+            <div style={ctrlBody}>
+              <div style={grid4ctrl}>
+                <Field label="openConfidenceThreshold" help="Min confidence to open a position." error={validation.openConfidenceThreshold}>
+                  <input style={input} type="number" min={0.5} max={0.95} step={0.01} value={edit?.openConfidenceThreshold ?? 0.65} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, openConfidenceThreshold: Number(e.target.value), confidenceThreshold: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="closeConfidenceThreshold" help="Min confidence to keep position open." error={validation.closeConfidenceThreshold}>
+                  <input style={input} type="number" min={0.45} max={0.9} step={0.01} value={edit?.closeConfidenceThreshold ?? 0.55} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, closeConfidenceThreshold: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="trendEntryStrength" help="Only TREND regimes at or above this strength may open a position." error={validation.trendEntryStrength}>
+                  <input style={input} type="number" min={0.5} max={0.99} step={0.01} value={edit?.trendEntryStrength ?? 0.7} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, trendEntryStrength: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="trendHalfLifeMinSec" help="Minimum OU half-life (sec) before treating a regime as TREND." error={validation.trendHalfLifeMinSec}>
+                  <input style={input} type="number" min={60} max={7200} step={30} value={edit?.trendHalfLifeMinSec ?? 450} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, trendHalfLifeMinSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="regimeLookbackSeconds" help="Bar history window for the regime engine." error={validation.regimeLookbackSeconds}>
+                  <input style={input} type="number" min={60} max={86400} step={60} value={edit?.regimeLookbackSeconds ?? 1800} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeLookbackSeconds: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="regimeBarSeconds" help="Tick aggregation bar size before regime evaluation." error={validation.regimeBarSeconds}>
+                  <input style={input} type="number" min={1} max={60} step={1} value={edit?.regimeBarSeconds ?? 1} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeBarSeconds: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="regimeSampleEverySec" help="Regime estimator ingests one bar every N seconds." error={validation.regimeSampleEverySec}>
+                  <input style={input} type="number" min={1} max={300} step={1} value={edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeSampleEverySec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="flipCooldownSec" help="Cooldown after REGIME_END or REGIME_FLIP exit." error={validation.flipCooldownSec}>
+                  <input style={input} type="number" min={0} max={600} step={1} value={edit?.flipCooldownSec ?? 15} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, flipCooldownSec: Number(e.target.value), cooldownAfterCloseSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="decisionLoopIntervalSec" help="Flat decision cadence (3-60s)." error={validation.decisionLoopIntervalSec}>
+                  <input style={input} type="number" min={3} max={60} step={1} value={edit?.decisionLoopIntervalSec ?? 4} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, decisionLoopIntervalSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="inPositionReassessIntervalSec" help="In-position reassessment cadence (5-300s)." error={validation.inPositionReassessIntervalSec}>
+                  <input style={input} type="number" min={5} max={300} step={1} value={edit?.inPositionReassessIntervalSec ?? 8} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, reassessIntervalSec: Number(e.target.value), inPositionReassessIntervalSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="riskLoopIntervalSec" help="Fast risk/execution loop (1-5s)." error={validation.riskLoopIntervalSec}>
+                  <input style={input} type="number" min={1} max={5} step={1} value={edit?.riskLoopIntervalSec ?? 1} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, riskLoopIntervalSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="metricsLoopIntervalSec" help="Slow funding/OI polling interval (30-300s)." error={validation.metricsLoopIntervalSec}>
+                  <input style={input} type="number" min={30} max={300} step={1} value={edit?.metricsLoopIntervalSec ?? 45} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, metricsLoopIntervalSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="ingestIntervalSec" help="Tick write cadence into SQLite (0.2-60s)." error={validation.ingestIntervalSec}>
+                  <input style={input} type="number" min={0.2} max={60} step={0.1} value={edit?.ingestIntervalSec ?? 0.5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, ingestIntervalSec: Number(e.target.value), pollIntervalSeconds: Number(e.target.value) } : p))} />
+                </Field>
               </div>
             </div>
+          </details>
 
-            <div style={card}>
-              <div style={cardTitle}>Trading</div>
-              <KV k="Status" v={trading?.running ? "RUNNING" : "STOPPED"} />
-              <KV k="Position" v={trading?.positionOpen ? `${trading.side || "OPEN"}` : "No open trade"} />
-              <KV k="Time since entry" v={fmtCountdown(trading?.timeSinceEntrySec)} />
-              <KV k="Risk loop" v={`${status?.runtime?.riskLoopIntervalSec ?? edit?.riskLoopIntervalSec ?? 1}s`} />
-              <KV k="Flat decision loop" v={`${status?.runtime?.decisionLoopIntervalSec ?? edit?.decisionLoopIntervalSec ?? 4}s`} />
-              <KV k="Regime sample cadence" v={`${status?.runtime?.regimeSampleEverySec ?? edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}s`} />
-              <KV k="Trend half-life min" v={`${status?.runtime?.trendHalfLifeMinSec ?? edit?.trendHalfLifeMinSec ?? 450}s`} />
-              <KV
-                k="In-position loop"
-                v={`${status?.runtime?.inPositionReassessIntervalSec ?? edit?.inPositionReassessIntervalSec ?? 8}s`}
-              />
-              <KV k="Initial hold ends" v={fmtCountdown(trading?.countdowns?.initialHoldEndsInSec)} />
-              <KV k="Next reassessment" v={fmtCountdown(trading?.countdowns?.nextReassessInSec)} />
-              <KV k="Max hold ends" v={fmtCountdown(trading?.countdowns?.maxHoldEndsInSec)} />
-              <KV k="Cooldown ends" v={fmtCountdown(trading?.countdowns?.cooldownEndsInSec)} />
-              <KV k="Next entry evaluation" v={fmtCountdown(trading?.countdowns?.nextDecisionInSec)} />
-              <KV k="Last action" v={String(trading?.lastAction && typeof trading.lastAction === "object" && "type" in (trading.lastAction as { type?: unknown }) ? (trading.lastAction as { type?: unknown }).type : "—")} />
-              <KV k="Maker-only entry" v={status?.execution?.makerOnlyEntry ? "ON (locked)" : "—"} />
-              <KV k="Exit safety override" v={status?.execution?.makerFirstExitWithMarketSafety ? `ON (${status.execution?.exitMarketSafetyAfterSec ?? 5}s)` : "—"} />
-              <KV
-                k="Quote feed"
-                v={
-                  status?.execution?.wsQuotes?.subscribed ? "WS BookDepth" : status?.execution?.quoteSource || "REST"
-                }
-              />
-              <KV
-                k="WS quotes"
-                v={
-                  status?.execution?.wsQuotes
-                    ? `${status.execution.wsQuotes.connected ? "connected" : "disconnected"} / ${status.execution.wsQuotes.subscribed ? "subscribed" : "not subscribed"}`
-                    : "—"
-                }
-              />
-              <KV
-                k="WS restart"
-                v={
-                  status?.execution?.wsQuotes
-                    ? `${status.execution.wsQuotes.restartCount ?? 0} (${status.execution.wsQuotes.lastRestartReason || "—"})`
-                    : "—"
-                }
-              />
-              <KV
-                k="Last entry fill"
-                v={
-                  status?.execution?.lastEntryFill
-                    ? `${status.execution.lastEntryFill.isMaker ? "maker" : "taker"} | fee ${fmtUsd(status.execution.lastEntryFill.feeUsd)}`
-                    : "—"
-                }
-              />
-              <KV k="Last exit method" v={status?.execution?.lastExitMethod || "—"} />
-              <KV
-                k="Last 20 fills"
-                v={
-                  status?.execution?.fillsAuditLast20?.summary
-                    ? `maker ${(status.execution.fillsAuditLast20.summary.makerRatePct ?? 0).toFixed(1)}% | fees ${fmtUsd(
-                        status.execution.fillsAuditLast20.summary.totalFeesUsd
-                      )}`
-                    : "—"
-                }
-              />
-              <KV
-                k="Entry maker fill rate"
-                v={
-                  status?.execution?.entryMakerChases != null
-                    ? `${(status.execution.entryMakerFillRatePct ?? 0).toFixed(1)}% (${status.execution.entryMakerOpened ?? 0}/${status.execution.entryMakerChases ?? 0})`
-                    : "—"
-                }
-              />
-              <KV
-                k="Entry time to fill"
-                v={
-                  status?.execution?.avgEntryTimeToFirstFillMs != null
-                    ? `${Math.round(status.execution.avgEntryTimeToFirstFillMs)} ms`
-                    : "—"
-                }
-              />
-              <KV
-                k="Partial-fill accepts"
-                v={
-                  status?.execution?.entryMakerOpened != null
-                    ? `${status.execution.entryMakerPartialAccepts ?? 0} (${(status.execution.entryMakerPartialRatePct ?? 0).toFixed(1)}%)`
-                    : "—"
-                }
-              />
-              <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button
-                  style={trading?.enabled ? btnWarn : btnPrimary}
-                  disabled={!isOwner || !!busy}
-                  onClick={() => void setTradingEnabled(!(trading?.enabled ?? true))}
-                >
-                  {trading?.enabled ? "Trading OFF" : "Trading ON"}
-                </button>
-                <button style={btnDanger} disabled={!isOwner || !!busy} onClick={() => void sendFlatten()}>
-                  Flatten Now
-                </button>
-              </div>
-            </div>
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Position & Portfolio Performance</h2>
-          <div style={grid2}>
-            <div style={card}>
-              <div style={cardTitle}>Portfolio</div>
-              <KV k="Portfolio value" v={fmtUsd(portfolio?.portfolioValueUsd)} />
-              <KV k="Available margin" v={fmtUsd(portfolio?.availableMarginUsd)} />
-              <KV k="Used margin" v={`${fmtUsd(portfolio?.usedMarginUsd)} (${fmtPct(portfolio?.usedMarginPct)})`} />
-              <KV k="Unrealized PnL" v={fmtUsd(portfolio?.unrealizedPnl)} />
-              <KV k="Realized PnL (today)" v={fmtUsd(portfolio?.realizedPnlToday)} />
-              <KV k="Realized PnL (total)" v={fmtUsd(portfolio?.realizedPnlTotal)} />
-            </div>
-            <div style={card}>
-              <div style={cardTitle}>Trade Stats</div>
-              <KV k="Total trades" v={String(tradeSummary?.totalTrades ?? 0)} />
-              <KV k="Closed by regime end" v={String(tradeSummary?.closedByRegimeEnd ?? 0)} />
-              <KV k="Closed by regime flip" v={String(tradeSummary?.closedByRegimeFlip ?? 0)} />
-              <KV k="Closed by risk loop" v={String(tradeSummary?.closedByRiskLoop ?? 0)} />
-              <KV k="Closed by other/manual" v={String(tradeSummary?.closedByOther ?? 0)} />
-              <KV k="Win rate" v={fmtPct((tradeSummary?.winRate ?? 0) * 100)} />
-              <KV k="Avg win" v={fmtUsd(tradeSummary?.avgWin)} />
-              <KV k="Avg loss" v={fmtUsd(tradeSummary?.avgLoss)} />
-              <KV k="Open position" v={status?.position?.open ? `${status.position.side || "OPEN"} (${status.position.size?.toFixed(6) || "0"})` : "No"} />
-              <KV
-                k="Entry"
-                v={
-                  status?.position?.entryAt
-                    ? `${fmtUsd(
-                        status.position.entryPrice ??
-                          (status.position.open ? status?.market?.price : null)
-                      )} @ ${new Date(status.position.entryAt).toLocaleTimeString()}`
-                    : "—"
-                }
-              />
-            </div>
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Agent</h2>
-          <div style={card}>
-            <KV k="Desired" v={status?.agent?.desired || "—"} />
-            <KV k="Regime state" v={status?.agent?.regimeState || status?.agent?.regime || "—"} />
-            <KV k="Regime direction" v={status?.agent?.regimeDirection || "—"} />
-            <KV
-              k="Trend strength"
-              v={
-                status?.agent?.regimeStrength != null
-                  ? `${(status.agent.regimeStrength * 100).toFixed(1)}% (${status.agent.confidenceBand || "—"})`
-                  : "—"
-              }
-            />
-            <KV
-              k="Last regime change"
-              v={status?.agent?.lastRegimeChangeAt ? new Date(status.agent.lastRegimeChangeAt).toLocaleString() : "—"}
-            />
-            <KV
-              k="Regime failure code"
-              v={
-                status?.agent?.regimeDiagnostics &&
-                typeof status.agent.regimeDiagnostics === "object" &&
-                "failureCode" in (status.agent.regimeDiagnostics as Record<string, unknown>)
-                  ? String((status.agent.regimeDiagnostics as Record<string, unknown>).failureCode || "—")
-                  : "—"
-              }
-            />
-            <KV k="Reason" v={status?.agent?.reasonHuman || status?.agent?.reason || "—"} />
-            <details style={{ marginTop: 10 }}>
-              <summary style={{ cursor: "pointer", fontWeight: 700 }}>Advanced details</summary>
-              <div style={{ marginTop: 8, color: "#555", fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12 }}>
-                {status?.agent?.reasonRaw || "No raw metrics."}
-              </div>
-            </details>
-          </div>
-        </section>
-
-        <section style={{ marginTop: 16 }}>
-          <h2 style={sectionTitle}>Owner Controls</h2>
-          <p style={{ marginTop: 0, color: "#666" }}>
-            Strategy/risk knobs only. Runtime toggles are in Bot Status.
-          </p>
-          <div style={grid4}>
-            <Field label="Max leverage" help="Range 1.0 to 20.0, step 0.1." error={validation.maxLeverage}>
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={20}
-                step={0.1}
-                value={edit?.maxLeverage ?? 2}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, maxLeverage: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field
-              label="Max margin used (%)"
-              help={`Portfolio ${fmtUsd(portfolio?.portfolioValueUsd)} | Cap amount ${fmtUsd(marginCapAmount)} | Used ${fmtUsd(
-                portfolio?.usedMarginUsd
-              )} (${fmtPct(portfolio?.usedMarginPct)})`}
-              error={validation.maxMarginPct}
-            >
-              <div style={{ display: "grid", gap: 8 }}>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={edit?.maxMarginPct ?? 25}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, maxMarginPct: Number(e.target.value) } : p))}
-                />
-                <input
-                  style={input}
-                  type="number"
-                  min={0}
-                  max={100}
-                  step={1}
-                  value={edit?.maxMarginPct ?? 25}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, maxMarginPct: Number(e.target.value) } : p))}
-                />
-              </div>
-            </Field>
-
-            <Field label="Regime lookback (sec)" help="Bar history window sent into the UC5 regime engine." error={validation.regimeLookbackSeconds}>
-              <input
-                style={input}
-                type="number"
-                min={60}
-                max={86400}
-                step={60}
-                value={edit?.regimeLookbackSeconds ?? 1800}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, regimeLookbackSeconds: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Regime bar size (sec)" help="SQLite ticks are aggregated to this bar size before regime evaluation." error={validation.regimeBarSeconds}>
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={60}
-                step={1}
-                value={edit?.regimeBarSeconds ?? 1}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, regimeBarSeconds: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Regime sample cadence (sec)" help="UC6 regime estimator ingests one bar every N seconds. Default 12s matches UC6." error={validation.regimeSampleEverySec}>
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={300}
-                step={1}
-                value={edit?.regimeSampleEverySec ?? Math.max(12, edit?.regimeBarSeconds ?? 1)}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, regimeSampleEverySec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Trend half-life min (sec)" help="Minimum OU half-life required before UC5 treats a regime as TREND." error={validation.trendHalfLifeMinSec}>
-              <input
-                style={input}
-                type="number"
-                min={60}
-                max={7200}
-                step={30}
-                value={edit?.trendHalfLifeMinSec ?? 450}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, trendHalfLifeMinSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Trend entry strength" help="Only TREND regimes at or above this strength may open a position." error={validation.trendEntryStrength}>
-              <input
-                style={input}
-                type="number"
-                min={0.5}
-                max={0.99}
-                step={0.01}
-                value={edit?.trendEntryStrength ?? 0.7}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, trendEntryStrength: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Flip cooldown (sec)" help="Cooldown after REGIME_END or REGIME_FLIP exit to avoid whipsaw re-entry." error={validation.flipCooldownSec}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={600}
-                step={1}
-                value={edit?.flipCooldownSec ?? 15}
-                disabled={!isOwner}
-                onChange={(e) =>
-                  setEdit((p) =>
-                    p
-                      ? { ...p, flipCooldownSec: Number(e.target.value), cooldownAfterCloseSec: Number(e.target.value) }
-                      : p
-                  )
-                }
-              />
-            </Field>
-
-            <Field label="Min time in market (sec)" help="Minimum 5 sec." error={validation.minHoldSeconds}>
-              <input
-                style={input}
-                type="number"
-                min={5}
-                max={259200}
-                step={1}
-                value={edit?.minHoldSeconds ?? 5}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Max time in market (sec)" help="Up to 259200 sec (72h)." error={validation.maxHoldSeconds}>
-              <input
-                style={input}
-                type="number"
-                min={5}
-                max={259200}
-                step={1}
-                value={edit?.maxHoldSeconds ?? 7200}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, maxHoldSeconds: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="ingestIntervalSec" help="Tick write cadence into SQLite (0.2-60s, 0.5s recommended)." error={validation.ingestIntervalSec}>
-              <input
-                style={input}
-                type="number"
-                min={0.2}
-                max={60}
-                step={0.1}
-                value={edit?.ingestIntervalSec ?? 0.5}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, ingestIntervalSec: Number(e.target.value), pollIntervalSeconds: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="riskLoopIntervalSec" help="Fast risk/execution loop (1-5s)." error={validation.riskLoopIntervalSec}>
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={5}
-                step={1}
-                value={edit?.riskLoopIntervalSec ?? 1}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, riskLoopIntervalSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field
-              label="decisionLoopIntervalSec"
-              help="Flat decision cadence (3-60s)."
-              error={validation.decisionLoopIntervalSec}
-            >
-              <input
-                style={input}
-                type="number"
-                min={3}
-                max={60}
-                step={1}
-                value={edit?.decisionLoopIntervalSec ?? 4}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, decisionLoopIntervalSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field
-              label="inPositionReassessIntervalSec"
-              help="In-position reassessment cadence (5-300s)."
-              error={validation.inPositionReassessIntervalSec}
-            >
-              <input
-                style={input}
-                type="number"
-                min={5}
-                max={300}
-                step={1}
-                value={edit?.inPositionReassessIntervalSec ?? 8}
-                disabled={!isOwner}
-                onChange={(e) =>
-                  setEdit((p) =>
-                    p
-                      ? {
-                          ...p,
-                          reassessIntervalSec: Number(e.target.value),
-                          inPositionReassessIntervalSec: Number(e.target.value),
-                        }
-                      : p
-                  )
-                }
-              />
-            </Field>
-
-            <Field
-              label="metricsLoopIntervalSec"
-              help="Slow funding/OI polling interval (30-300s)."
-              error={validation.metricsLoopIntervalSec}
-            >
-              <input
-                style={input}
-                type="number"
-                min={30}
-                max={300}
-                step={1}
-                value={edit?.metricsLoopIntervalSec ?? 45}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, metricsLoopIntervalSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Max spread (bps)" help="Skip entries when live spread is wider than this." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={1}
-                max={100}
-                step={0.1}
-                value={edit?.maxSpreadBpsForTrade ?? 12}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, maxSpreadBpsForTrade: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Entry chase max (sec)" help="Abort unfilled maker entry after this many seconds and stay flat." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0.5}
-                max={30}
-                step={0.5}
-                value={edit?.entryChaseMaxSec ?? 10}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, entryChaseMaxSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Exit chase max (sec)" help="After this window, market safety override is allowed on exit." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0.5}
-                max={30}
-                step={0.5}
-                value={edit?.exitChaseMaxSec ?? 5}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, exitChaseMaxSec: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Execution reprice (ms)" help="Cancel/replace cadence for active maker chases." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={100}
-                max={2000}
-                step={50}
-                value={edit?.executionRepriceMs ?? 350}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, executionRepriceMs: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field
-              label="entryMakerPreferred"
-              help="Entry execution is locked to maker-only post-only chase."
-              error={undefined}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked
-                  disabled
-                  onChange={() => {}}
-                />
-                Maker-only entry (locked)
-              </label>
-            </Field>
-
-            <Field
-              label="exitMakerFirstSafety"
-              help="Exit uses post-only chasing first, then market safety override after ~5s."
-              error={undefined}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input type="checkbox" checked disabled onChange={() => {}} />
-                Maker-first exit + market safety (locked)
-              </label>
-            </Field>
-
-            <Field label="Maker min rest (ms)" help="Minimum rest time before replacing a resting maker order." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={100}
-                max={5000}
-                step={50}
-                value={edit?.makerMinRestMs ?? 700}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, makerMinRestMs: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="Entry min fill ratio" help="Accept partial maker fills once this share of target size is filled." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0.1}
-                max={1}
-                step={0.05}
-                value={edit?.entryMinFillRatio ?? 0.5}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, entryMinFillRatio: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field
-              label="makerReplaceOnlyOnTouchMove"
-              help="Preserve queue priority unless the touch actually moves."
-              error={undefined}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(edit?.makerReplaceOnlyOnTouchMove ?? true)}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, makerReplaceOnlyOnTouchMove: e.target.checked } : p))}
-                />
-                Replace only on touch move
-              </label>
-            </Field>
-
-            <Field
-              label="makerImproveOneTickOnWideSpread"
-              help="When spread is wide enough, improve by one tick while staying post-only."
-              error={undefined}
-            >
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked={Boolean(edit?.makerImproveOneTickOnWideSpread ?? true)}
-                  disabled={!isOwner}
-                  onChange={(e) => setEdit((p) => (p ? { ...p, makerImproveOneTickOnWideSpread: e.target.checked } : p))}
-                />
-                Improve one tick on wide spread
-              </label>
-            </Field>
-
-
-            {/* ── Profitability Controls ─────────────────────────────── */}
-            <div style={{ gridColumn: "1 / -1", borderTop: "1px solid rgba(255,255,255,0.07)", marginTop: 4, paddingTop: 16 }}>
-              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.38)", marginBottom: 12 }}>
-                Profitability Controls
-              </div>
-            </div>
-
-            <Field label="minExpectedMoveBps" help="Minimum expected price move (bps) required to enter. 0 = disabled. Recommended: 14." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={500}
-                step={1}
-                value={edit?.minExpectedMoveBps ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="edgeCostMultiplier" help="Required edge as a multiple of estimated round-trip cost. 0 = disabled. Recommended: 1.5." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={5}
-                step={0.1}
-                value={edit?.edgeCostMultiplier ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, edgeCostMultiplier: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="stopLossPct" help="Fixed stop loss as fraction of entry price (e.g. 0.003 = 0.3%). Leave blank (0) to use ATR-based stop instead." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={1}
-                step={0.001}
-                value={edit?.stopLossPct ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setEdit((p) => (p ? { ...p, stopLossPct: v === 0 ? null : v } : p));
-                }}
-              />
-            </Field>
-
-            <Field label="stopLossAtrMult" help="ATR-based stop: stop = entry ± N × ATR. Used when stopLossPct is null/0. Recommended: 2.0." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={20}
-                step={0.1}
-                value={edit?.stopLossAtrMult ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setEdit((p) => (p ? { ...p, stopLossAtrMult: v === 0 ? null : v } : p));
-                }}
-              />
-            </Field>
-
-            <Field label="takeProfitPct" help="Fixed take profit as fraction of entry price (e.g. 0.006 = 0.6%). Leave blank (0) to use ATR-based TP instead." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={1}
-                step={0.001}
-                value={edit?.takeProfitPct ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setEdit((p) => (p ? { ...p, takeProfitPct: v === 0 ? null : v } : p));
-                }}
-              />
-            </Field>
-
-            <Field label="takeProfitAtrMult" help="ATR-based TP: target = entry ± N × ATR. Used when takeProfitPct is null/0. Recommended: 4.0 (2:1 R/R vs stopLossAtrMult 2.0)." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={20}
-                step={0.1}
-                value={edit?.takeProfitAtrMult ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setEdit((p) => (p ? { ...p, takeProfitAtrMult: v === 0 ? null : v } : p));
-                }}
-              />
-            </Field>
-
-            <Field label="trailingStopPct" help="Trail the stop by this fraction once the trade moves in your favour (e.g. 0.006 = 0.6%). 0 = disabled." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={1}
-                step={0.001}
-                value={edit?.trailingStopPct ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => {
-                  const v = Number(e.target.value);
-                  setEdit((p) => (p ? { ...p, trailingStopPct: v === 0 ? null : v } : p));
-                }}
-              />
-            </Field>
-
-            <Field label="fundingRateLimitPct" help="Max hourly funding rate (fraction) allowed before entry is blocked. 0 = disabled. Recommended: 0.0005 (0.05%)." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={1}
-                step={0.0001}
-                value={edit?.fundingRateLimitPct ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, fundingRateLimitPct: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-            <Field label="maxDailyTrades" help="Max completed trades allowed per calendar day. 0 = unlimited. Recommended: 6." error={undefined}>
-              <input
-                style={input}
-                type="number"
-                min={0}
-                max={100}
-                step={1}
-                value={edit?.maxDailyTrades ?? 0}
-                disabled={!isOwner}
-                onChange={(e) => setEdit((p) => (p ? { ...p, maxDailyTrades: Number(e.target.value) } : p))}
-              />
-            </Field>
-
-          </div>
-          <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
-            <button style={btnPrimary} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>
-              {busy === "save" ? "Saving..." : "Save settings"}
-            </button>
-          </div>
-        </section>
-
-        {shouldShowSetup ? (
-          <section style={{ marginTop: 16 }}>
-            <h2 style={sectionTitle}>Setup Wizard (Advanced)</h2>
-            <div style={card}>
-              <div style={{ color: "#555", marginBottom: 10 }}>
-                Missing setup: {missingSetup.join(", ")}
-              </div>
-              <div style={{ display: "grid", gap: 10 }}>
-                <StepRow
-                  title="Discover subaccount"
-                  text="Used for balances and active positions."
-                  buttonText={busy === "discover-sub" ? "Discovering..." : "Discover subaccount"}
-                  disabled={!isOwner || !!busy}
-                  onClick={() => void discoverSubaccount()}
-                />
-                <StepRow
-                  title="Discover productId"
-                  text="Used for market data and order placement."
-                  buttonText={busy === "discover-product" ? "Discovering..." : "Discover productId"}
-                  disabled={!isOwner || !!busy}
-                  onClick={() => void discoverProduct()}
-                />
-                <div style={{ border: "1px solid #e6e8eb", borderRadius: 12, padding: 10 }}>
-                  <div style={{ fontWeight: 700 }}>Link bot signer (recommended)</div>
-                  <div style={{ color: "#666", marginTop: 4 }}>Safer than trading with your MetaMask private key.</div>
-                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    <input
-                      style={{ ...input, minWidth: 280, flex: 1 }}
-                      placeholder="Bot signer address (0x...)"
-                      value={signerAddr}
-                      onChange={(e) => setSignerAddr(e.target.value)}
-                      disabled={!isOwner}
-                    />
-                    <button style={btnSecondary} disabled={!isOwner || !!busy} onClick={() => void createLinkSignerRequest()}>
-                      {busy === "link-signer" ? "Signing..." : "Create LINK_SIGNER request"}
-                    </button>
+          <details style={ctrlSection}>
+            <summary style={ctrlSummary}>
+              <span style={{ marginRight: 8, color: "#ef4444" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#ef4444" }}>RISK &amp; STOPS</span>
+              <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>leverage · margin · SL/TP · hold times</span>
+            </summary>
+            <div style={ctrlBody}>
+              <div style={grid4ctrl}>
+                <Field label="maxLeverage" help="Range 1.0 to 20.0." error={validation.maxLeverage}>
+                  <input style={input} type="number" min={1} max={20} step={0.1} value={edit?.maxLeverage ?? 2} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxLeverage: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxMarginUsd" help="Hard USD cap on margin used." error={undefined}>
+                  <input style={input} type="number" min={1} max={100000} step={10} value={edit?.maxMarginUsd ?? 100} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxMarginUsd: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxMarginPct (%)" help={`Portfolio ${fmtUsd(portfolio?.portfolioValueUsd)} · cap ${fmtUsd(marginCapAmount)} · used ${fmtUsd(portfolio?.usedMarginUsd)} (${fmtPct(portfolio?.usedMarginPct)})`} error={validation.maxMarginPct}>
+                  <div style={{ display: "grid", gap: 6 }}>
+                    <input type="range" min={0} max={100} step={1} value={edit?.maxMarginPct ?? 25} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxMarginPct: Number(e.target.value) } : p))} />
+                    <input style={input} type="number" min={0} max={100} step={1} value={edit?.maxMarginPct ?? 25} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxMarginPct: Number(e.target.value) } : p))} />
                   </div>
+                </Field>
+                <Field label="maxDailyLossUsd" help="Stop trading for the day if realized loss exceeds this. 0 = disabled." error={undefined}>
+                  <input style={input} type="number" min={0} max={10000000} step={1} value={edit?.maxDailyLossUsd ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxDailyLossUsd: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="minHoldSeconds" help="Minimum hold before exits are allowed." error={validation.minHoldSeconds}>
+                  <input style={input} type="number" min={5} max={259200} step={1} value={edit?.minHoldSeconds ?? 5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxHoldSeconds" help="Force-close position after this duration." error={validation.maxHoldSeconds}>
+                  <input style={input} type="number" min={5} max={259200} step={1} value={edit?.maxHoldSeconds ?? 7200} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxHoldSeconds: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="stopLossPct" help="Fixed stop loss (e.g. 0.003 = 0.3%). 0 = use ATR-based stop." error={undefined}>
+                  <input style={input} type="number" min={0} max={1} step={0.001} value={edit?.stopLossPct ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, stopLossPct: v === 0 ? null : v } : p)); }} />
+                </Field>
+                <Field label="stopLossAtrMult" help="ATR-based stop: SL = entry +/- N x ATR. Active when stopLossPct is null/0. Rec: 2.0." error={undefined}>
+                  <input style={input} type="number" min={0} max={20} step={0.1} value={edit?.stopLossAtrMult ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, stopLossAtrMult: v === 0 ? null : v } : p)); }} />
+                </Field>
+                <Field label="takeProfitPct" help="Fixed take profit (e.g. 0.006 = 0.6%). 0 = use ATR-based TP." error={undefined}>
+                  <input style={input} type="number" min={0} max={1} step={0.001} value={edit?.takeProfitPct ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, takeProfitPct: v === 0 ? null : v } : p)); }} />
+                </Field>
+                <Field label="takeProfitAtrMult" help="ATR-based TP: target = entry +/- N x ATR. Active when takeProfitPct is null/0. Rec: 4.0." error={undefined}>
+                  <input style={input} type="number" min={0} max={20} step={0.1} value={edit?.takeProfitAtrMult ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, takeProfitAtrMult: v === 0 ? null : v } : p)); }} />
+                </Field>
+                <Field label="trailingStopPct" help="Trailing stop fraction (e.g. 0.006 = 0.6%). 0 = disabled." error={undefined}>
+                  <input style={input} type="number" min={0} max={1} step={0.001} value={edit?.trailingStopPct ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, trailingStopPct: v === 0 ? null : v } : p)); }} />
+                </Field>
+              </div>
+            </div>
+          </details>
+
+          <details style={ctrlSection}>
+            <summary style={ctrlSummary}>
+              <span style={{ marginRight: 8, color: "#60a5fa" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#60a5fa" }}>EXECUTION</span>
+              <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>maker orders · spread · chase · timing</span>
+            </summary>
+            <div style={ctrlBody}>
+              <div style={grid4ctrl}>
+                <Field label="feeEstimateBps" help="Estimated round-trip cost in bps." error={undefined}>
+                  <input style={input} type="number" min={0} max={100} step={0.5} value={edit?.feeEstimateBps ?? 3} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, feeEstimateBps: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="slippageBufferBps" help="Extra buffer added to fee estimate." error={undefined}>
+                  <input style={input} type="number" min={0} max={100} step={0.5} value={edit?.slippageBufferBps ?? 4} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, slippageBufferBps: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxSpreadBpsForTrade" help="Skip entries when live spread is wider than this." error={undefined}>
+                  <input style={input} type="number" min={1} max={100} step={0.1} value={edit?.maxSpreadBpsForTrade ?? 12} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxSpreadBpsForTrade: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="exitSpreadInsaneBps" help="Force market exit if spread exceeds this at exit." error={undefined}>
+                  <input style={input} type="number" min={5} max={300} step={1} value={edit?.exitSpreadInsaneBps ?? 28} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, exitSpreadInsaneBps: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="executionRepriceMs" help="Cancel/replace cadence for active maker chases." error={undefined}>
+                  <input style={input} type="number" min={100} max={5000} step={50} value={edit?.executionRepriceMs ?? 350} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, executionRepriceMs: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="makerOrderGtdSec" help="GTD lifetime for each maker order placed." error={undefined}>
+                  <input style={input} type="number" min={1} max={30} step={1} value={edit?.makerOrderGtdSec ?? 2} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerOrderGtdSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="makerMinRestMs" help="Minimum rest before replacing a resting maker order." error={undefined}>
+                  <input style={input} type="number" min={100} max={5000} step={50} value={edit?.makerMinRestMs ?? 700} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerMinRestMs: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="entryChaseMaxSec" help="Abort unfilled maker entry after this many seconds." error={undefined}>
+                  <input style={input} type="number" min={0.5} max={30} step={0.5} value={edit?.entryChaseMaxSec ?? 10} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, entryChaseMaxSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="exitChaseMaxSec" help="After this window, market safety override is allowed on exit." error={undefined}>
+                  <input style={input} type="number" min={0.5} max={30} step={0.5} value={edit?.exitChaseMaxSec ?? 5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, exitChaseMaxSec: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="entryMinFillRatio" help="Accept partial maker fills once this share of target size is filled." error={undefined}>
+                  <input style={input} type="number" min={0.1} max={1} step={0.05} value={edit?.entryMinFillRatio ?? 0.5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, entryMinFillRatio: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="makerImproveMinSpreadTicks" help="Improve by one tick when spread is at least this wide." error={undefined}>
+                  <input style={input} type="number" min={1} max={20} step={1} value={edit?.makerImproveMinSpreadTicks ?? 3} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerImproveMinSpreadTicks: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxOrdersPerHour" help="Rate limit on order submissions per hour." error={undefined}>
+                  <input style={input} type="number" min={1} max={2000} step={1} value={edit?.maxOrdersPerHour ?? 120} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxOrdersPerHour: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="makerReplaceOnlyOnTouchMove" help="Preserve queue priority unless the touch price actually moves." error={undefined}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "#e8e8f0", fontSize: 13 }}>
+                    <input type="checkbox" checked={Boolean(edit?.makerReplaceOnlyOnTouchMove ?? true)} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerReplaceOnlyOnTouchMove: e.target.checked } : p))} />
+                    Replace only on touch move
+                  </label>
+                </Field>
+                <Field label="makerImproveOneTickOnWideSpread" help="Improve by one tick while staying post-only when spread is wide." error={undefined}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "#e8e8f0", fontSize: 13 }}>
+                    <input type="checkbox" checked={Boolean(edit?.makerImproveOneTickOnWideSpread ?? true)} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerImproveOneTickOnWideSpread: e.target.checked } : p))} />
+                    Improve one tick on wide spread
+                  </label>
+                </Field>
+                <Field label="entryMakerPreferred" help="Entry is locked to maker-only post-only chase." error={undefined}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "rgba(232,232,240,0.4)", fontSize: 13 }}>
+                    <input type="checkbox" checked disabled onChange={() => {}} />
+                    Maker-only entry (locked)
+                  </label>
+                </Field>
+                <Field label="exitMakerFirstSafety" help="Exit uses post-only chasing first, then market safety after ~5s." error={undefined}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "rgba(232,232,240,0.4)", fontSize: 13 }}>
+                    <input type="checkbox" checked disabled onChange={() => {}} />
+                    Maker-first exit + market safety (locked)
+                  </label>
+                </Field>
+              </div>
+            </div>
+          </details>
+
+          <details open style={ctrlSection}>
+            <summary style={ctrlSummary}>
+              <span style={{ marginRight: 8, color: "#22c55e" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#22c55e" }}>PROFITABILITY CONTROLS</span>
+              <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>edge gate · funding · daily limit</span>
+            </summary>
+            <div style={ctrlBody}>
+              <div style={grid4ctrl}>
+                <Field label="minExpectedMoveBps" help="Min expected price move (bps) to enter. 0 = disabled. Rec: 14." error={undefined}>
+                  <input style={input} type="number" min={0} max={500} step={1} value={edit?.minExpectedMoveBps ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="edgeCostMultiplier" help="Required edge as multiple of round-trip cost. 0 = disabled. Rec: 1.5." error={undefined}>
+                  <input style={input} type="number" min={0} max={5} step={0.1} value={edit?.edgeCostMultiplier ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, edgeCostMultiplier: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="fundingRateLimitPct" help="Max adverse hourly funding rate to allow entry. 0 = disabled. Rec: 0.0005." error={undefined}>
+                  <input style={input} type="number" min={0} max={1} step={0.0001} value={edit?.fundingRateLimitPct ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, fundingRateLimitPct: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="maxDailyTrades" help="Max completed trades per calendar day. 0 = unlimited. Rec: 6." error={undefined}>
+                  <input style={input} type="number" min={0} max={100} step={1} value={edit?.maxDailyTrades ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxDailyTrades: Number(e.target.value) } : p))} />
+                </Field>
+              </div>
+            </div>
+          </details>
+
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 12 }}>
+            <button style={saveBtnCtrl} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>
+              {busy === "save" ? "Saving..." : "Save Settings"}
+            </button>
+            {hasValidationErrors && <span style={{ fontSize: 12, color: "#ef4444" }}>Fix validation errors before saving.</span>}
+          </div>
+        </div>
+
+        {/* SETUP WIZARD */}
+        {shouldShowSetup ? (
+          <div style={{ ...darkCard, border: "1px solid rgba(245,158,11,0.25)", background: "rgba(245,158,11,0.04)" }}>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "#f59e0b", letterSpacing: "0.08em", marginBottom: 12 }}>SETUP REQUIRED</div>
+            <div style={{ fontSize: 12, color: "rgba(232,232,240,0.5)", marginBottom: 12 }}>Missing: {missingSetup.join(", ")}</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <StepRow title="Discover subaccount" text="Used for balances and active positions." buttonText={busy === "discover-sub" ? "Discovering..." : "Discover subaccount"} disabled={!isOwner || !!busy} onClick={() => void discoverSubaccount()} />
+              <StepRow title="Discover productId" text="Used for market data and order placement." buttonText={busy === "discover-product" ? "Discovering..." : "Discover productId"} disabled={!isOwner || !!busy} onClick={() => void discoverProduct()} />
+              <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 14 }}>
+                <div style={{ fontWeight: 700, color: "#e8e8f0", marginBottom: 4 }}>Link bot signer (recommended)</div>
+                <div style={{ color: "rgba(232,232,240,0.5)", marginBottom: 10, fontSize: 13 }}>Safer than trading with your MetaMask private key.</div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  <input style={{ ...input, minWidth: 280, flex: 1 }} placeholder="Bot signer address (0x...)" value={signerAddr} onChange={(e) => setSignerAddr(e.target.value)} />
+                  <button style={btnPrimary} disabled={!isOwner || !!busy || !signerAddr} onClick={() => void createLinkSignerRequest()}>{busy === "link-signer" ? "Requesting..." : "Request link"}</button>
                 </div>
               </div>
             </div>
-          </section>
-        ) : (
-          <section style={{ marginTop: 16 }}>
-            <div style={completeCard}>Setup complete ✅</div>
-          </section>
-        )}
+          </div>
+        ) : null}
+
       </div>
     </>
   );
@@ -1642,14 +1339,12 @@ export default function Uc5Page() {
 
 function StepRow(props: { title: string; text: string; buttonText: string; disabled: boolean; onClick: () => void }) {
   return (
-    <div style={{ border: "1px solid #e6e8eb", borderRadius: 12, padding: 10, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
       <div>
-        <div style={{ fontWeight: 700 }}>{props.title}</div>
-        <div style={{ color: "#666", marginTop: 4 }}>{props.text}</div>
+        <div style={{ fontWeight: 700, color: "#e8e8f0" }}>{props.title}</div>
+        <div style={{ color: "rgba(232,232,240,0.5)", marginTop: 3, fontSize: 13 }}>{props.text}</div>
       </div>
-      <button style={btnSecondary} disabled={props.disabled} onClick={props.onClick}>
-        {props.buttonText}
-      </button>
+      <button style={btnSecondary} disabled={props.disabled} onClick={props.onClick}>{props.buttonText}</button>
     </div>
   );
 }
@@ -1657,10 +1352,10 @@ function StepRow(props: { title: string; text: string; buttonText: string; disab
 function Field(props: { label: string; help?: string; error?: string; children: ReactNode }) {
   return (
     <div style={fieldCard}>
-      <div style={{ fontWeight: 800 }}>{props.label}</div>
-      {props.help ? <div style={{ color: "#666", marginTop: 4, fontSize: 13, lineHeight: 1.4 }}>{props.help}</div> : null}
-      <div style={{ marginTop: 8 }}>{props.children}</div>
-      {props.error ? <div style={{ color: "#b42318", marginTop: 6, fontSize: 12 }}>{props.error}</div> : null}
+      <div style={{ fontWeight: 700, fontSize: 12, color: "#e8e8f0", marginBottom: 4 }}>{props.label}</div>
+      {props.help ? <div style={{ color: "rgba(232,232,240,0.42)", marginBottom: 8, fontSize: 11, lineHeight: 1.5 }}>{props.help}</div> : null}
+      <div>{props.children}</div>
+      {props.error ? <div style={{ color: "#ef4444", marginTop: 6, fontSize: 11 }}>{props.error}</div> : null}
     </div>
   );
 }
@@ -1674,48 +1369,36 @@ function KV(props: { k: string; v: string }) {
   );
 }
 
-const wrap: CSSProperties = { maxWidth: 1280, margin: "0 auto", padding: "18px 16px 40px" };
-const hero: CSSProperties = {
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  borderRadius: 16,
-  padding: 18,
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  flexWrap: "wrap",
-};
-const sectionTitle: CSSProperties = { margin: "0 0 10px", fontSize: 22 };
-const grid2: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", minWidth: 0 };
-const grid3: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", minWidth: 0 };
-const grid4: CSSProperties = { display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" };
-const card: CSSProperties = { border: "1px solid #e6e8eb", borderRadius: 14, padding: 14, background: "#fff", minWidth: 0 };
-const completeCard: CSSProperties = { border: "1px solid #d1fadf", background: "#ecfdf3", color: "#067647", borderRadius: 12, padding: 12, fontWeight: 700 };
-const fieldCard: CSSProperties = { border: "1px solid #e6e8eb", borderRadius: 12, padding: 12, background: "#fff" };
-const cardTitle: CSSProperties = { fontSize: 14, fontWeight: 900, marginBottom: 8 };
-const kvRow: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "6px 0", borderBottom: "1px dashed #f0f0f0" };
-const kStyle: CSSProperties = { color: "#666", fontSize: 13 };
-const vStyle: CSSProperties = { color: "#111", fontSize: 13, fontWeight: 700, textAlign: "right", maxWidth: 260 };
-const input: CSSProperties = { width: "100%", padding: "10px", borderRadius: 10, border: "1px solid #d0d5dd", outline: "none" };
-const btnPrimary: CSSProperties = { borderRadius: 10, border: "1px solid #111", background: "#111", color: "#fff", padding: "10px 12px", fontWeight: 800, cursor: "pointer" };
-const btnSecondary: CSSProperties = { borderRadius: 10, border: "1px solid #d0d5dd", background: "#fff", color: "#111", padding: "10px 12px", fontWeight: 700, cursor: "pointer" };
-const btnWarn: CSSProperties = { borderRadius: 10, border: "1px solid #f79009", background: "#fff9f0", color: "#b54708", padding: "10px 12px", fontWeight: 800, cursor: "pointer" };
-const btnDanger: CSSProperties = { borderRadius: 10, border: "1px solid #b42318", background: "#b42318", color: "#fff", padding: "10px 12px", fontWeight: 800, cursor: "pointer" };
-const badgeOwner: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "6px 10px", border: "1px solid #a6f4c5", background: "#ecfdf3", color: "#067647", fontWeight: 800, fontSize: 12 };
-const badgeReadonly: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "6px 10px", border: "1px solid #d0d5dd", background: "#f8f9fb", color: "#344054", fontWeight: 800, fontSize: 12 };
-const tooltipBox: CSSProperties = {
-  background: "#fff",
-  border: "1px solid #d0d5dd",
-  borderRadius: 10,
-  padding: "8px 10px",
-  boxShadow: "0 4px 16px rgba(0,0,0,0.08)",
-  fontSize: 12,
-  color: "#101828",
-};
-const bannerClose: CSSProperties = { border: "1px solid #d0d5dd", borderRadius: 8, background: "#fff", fontSize: 12, padding: "4px 8px", cursor: "pointer" };
+const wrap: CSSProperties = { maxWidth: 1400, margin: "0 auto", padding: "14px 16px 48px", display: "flex", flexDirection: "column", gap: 12 };
+const heroBar: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" };
+const metricsStrip: CSSProperties = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 4px", display: "flex", overflowX: "auto", gap: 0, scrollbarWidth: "none" };
+const darkCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 18, minWidth: 0 };
+const chartCardTitle: CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "rgba(232,232,240,0.6)" };
+const sideCardLabel: CSSProperties = { fontSize: 9, fontWeight: 800, letterSpacing: "0.14em", color: "rgba(232,232,240,0.35)", display: "block", marginBottom: 6 };
+const statusRow: CSSProperties = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 14px", display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" };
+const controlCenter: CSSProperties = { background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "20px 20px 16px" };
+const ctrlSection: CSSProperties = { marginBottom: 6, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" };
+const ctrlSummary: CSSProperties = { cursor: "pointer", padding: "11px 14px", display: "flex", alignItems: "center", background: "rgba(255,255,255,0.015)", userSelect: "none" };
+const ctrlBody: CSSProperties = { padding: "14px 14px 12px", borderTop: "1px solid rgba(255,255,255,0.05)" };
+const grid4ctrl: CSSProperties = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" };
+const fieldCard: CSSProperties = { background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "11px 12px 10px" };
+const kvRow: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" };
+const kStyle: CSSProperties = { color: "rgba(232,232,240,0.48)", fontSize: 12 };
+const vStyle: CSSProperties = { color: "#e8e8f0", fontSize: 12, fontWeight: 700, textAlign: "right", maxWidth: 260 };
+const input: CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", outline: "none", background: "rgba(255,255,255,0.06)", color: "#e8e8f0", fontSize: 13 };
+const btnPrimary: CSSProperties = { borderRadius: 10, border: "1px solid #f59e0b", background: "#f59e0b", color: "#0a0a0f", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
+const btnSecondary: CSSProperties = { borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#e8e8f0", padding: "9px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 };
+const btnDanger: CSSProperties = { borderRadius: 10, border: "1px solid #ef4444", background: "#ef4444", color: "#fff", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
+const miniWarnBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "#f59e0b", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
+const miniGreenBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "#22c55e", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
+const saveBtnCtrl: CSSProperties = { borderRadius: 10, border: "1px solid #f59e0b", background: "#f59e0b", color: "#0a0a0f", padding: "11px 22px", fontWeight: 900, cursor: "pointer", fontSize: 14, letterSpacing: "0.04em" };
+const ownerBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.08)", color: "#22c55e", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
+const readonlyBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(232,232,240,0.5)", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
+const tooltipBox: CSSProperties = { background: "rgba(10,10,20,0.95)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "8px 10px", boxShadow: "0 4px 16px rgba(0,0,0,0.4)", fontSize: 12, color: "#e8e8f0" };
+const bannerClose: CSSProperties = { border: "1px solid rgba(255,255,255,0.15)", borderRadius: 7, background: "rgba(255,255,255,0.06)", color: "#e8e8f0", fontSize: 11, padding: "4px 8px", cursor: "pointer" };
 
-function bannerStyle(kind: NoticeKind): CSSProperties {
-  if (kind === "success") return { border: "1px solid #a6f4c5", background: "#ecfdf3", color: "#067647", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
-  if (kind === "error") return { border: "1px solid #fecdca", background: "#fef3f2", color: "#b42318", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
-  return { border: "1px solid #d0d5dd", background: "#f8f9fb", color: "#344054", borderRadius: 10, padding: "10px 12px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" };
+function bannerStyle(kind: "success" | "error" | "info"): CSSProperties {
+  if (kind === "success") return { border: "1px solid rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.08)", color: "#22c55e", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
+  if (kind === "error") return { border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)", color: "#ef4444", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
+  return { border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "rgba(232,232,240,0.8)", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
 }
