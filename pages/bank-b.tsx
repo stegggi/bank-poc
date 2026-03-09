@@ -1,5 +1,5 @@
 // pages/bank-b.tsx
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
 import { encodePacked, keccak256 } from "viem";
@@ -701,7 +701,7 @@ export default function BankB() {
     }
     try {
       setStatus("Scanning recent blocks for requests…");
-      
+
 const head = await publicClient.getBlockNumber();
 const zero = BigInt("0");
 const found: ReqRow[] = [];
@@ -1082,8 +1082,10 @@ for (let i = 0; i < logs.length; i += 1) {
     return (
       <>
         <NavBar active="bankB" />
-        <div style={bankAccentWrap}>
-          <div style={{ padding: 24 }}>Loading…</div>
+        <div style={pageWrap}>
+          <div style={loadingWrap}>
+            <div style={loadingDot} />
+          </div>
         </div>
       </>
     );
@@ -1091,1390 +1093,1099 @@ for (let i = 0; i < logs.length; i += 1) {
 
   return (
     <>
+      <style jsx global>{`
+        * { box-sizing: border-box; }
+        body { background: #07080f; color: #f0f0f0; }
+        .bb-input {
+          width: 100%;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 8px;
+          padding: 8px 12px;
+          color: #f0f0f0;
+          font-family: inherit;
+          font-size: 13px;
+          outline: none;
+          transition: border-color 160ms;
+        }
+        .bb-input:focus { border-color: #10b981; }
+        .bb-input::placeholder { color: rgba(255,255,255,0.25); }
+        .bb-select {
+          width: 100%;
+          background: rgba(255,255,255,0.05);
+          border: 1px solid rgba(255,255,255,0.12);
+          border-radius: 8px;
+          padding: 8px 12px;
+          color: #f0f0f0;
+          font-family: inherit;
+          font-size: 13px;
+          outline: none;
+        }
+        .bb-btn {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          padding: 7px 14px;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(255,255,255,0.07);
+          color: #f0f0f0;
+          font-family: inherit;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: background 150ms;
+          white-space: nowrap;
+        }
+        .bb-btn:hover { background: rgba(255,255,255,0.12); }
+        .bb-btn-ack {
+          background: rgba(16,185,129,0.15);
+          border-color: rgba(16,185,129,0.4);
+          color: #10b981;
+        }
+        .bb-btn-ack:hover { background: rgba(16,185,129,0.25); }
+        .bb-btn-reject {
+          background: rgba(239,68,68,0.1);
+          border-color: rgba(239,68,68,0.3);
+          color: #ef4444;
+        }
+        .bb-btn-reject:hover { background: rgba(239,68,68,0.18); }
+        .bb-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+        .bb-table th {
+          text-align: left;
+          padding: 8px 10px;
+          font-size: 11px;
+          font-weight: 700;
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          color: rgba(255,255,255,0.35);
+          border-bottom: 1px solid rgba(255,255,255,0.07);
+        }
+        .bb-table td {
+          padding: 10px;
+          font-size: 12px;
+          color: rgba(255,255,255,0.7);
+          border-bottom: 1px solid rgba(255,255,255,0.05);
+          vertical-align: top;
+          word-break: break-word;
+          overflow-wrap: break-word;
+        }
+        .bb-table tr:last-child td { border-bottom: none; }
+        .bb-checkbox { accent-color: #10b981; }
+        .wtm-tab {
+          padding: 7px 14px;
+          border-radius: 6px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: transparent;
+          color: rgba(255,255,255,0.45);
+          font-family: inherit;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 150ms;
+          white-space: nowrap;
+        }
+        .wtm-tab:hover { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.2); }
+        .wtm-tab-active {
+          background: rgba(16,185,129,0.15);
+          border-color: #10b981;
+          color: #10b981;
+        }
+        .wtm-panel { animation: wtmIn 220ms ease; }
+        @keyframes wtmIn {
+          from { opacity: 0; transform: translateY(8px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+        @keyframes spin { to { transform: rotate(360deg); } }
+      `}</style>
+
       <NavBar active="bankB" />
-      <div style={bankAccentWrap}>
-        <div style={{ padding: 24, maxWidth: 1000, margin: "0 auto" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 8 }}>Travel-rule compliant receiving (Bank B)</h2>
+      <div style={pageWrap}>
+        <div style={inner}>
 
-        {/* Receiver wallet summary (fixed beneficiary address) */}
-        <div
-          style={{
-            border: "1px solid #ddd",
-            borderRadius: 12,
-            padding: 16,
-            marginTop: 12,
-            marginBottom: 24,
-            background: "#fafafa",
-          }}
-        >
-          <h3 style={{ marginTop: 0, marginBottom: 8 }}>Receiver wallet</h3>
-          {!isAddr(DEMO_RECIPIENT) ? (
-            <p style={{ marginBottom: 0, fontSize: 12, color: "#666" }}>
-              Missing <code>NEXT_PUBLIC_DEMO_RECIPIENT</code> env var.
-            </p>
-          ) : (
-            <>
-              <p style={{ marginBottom: 4 }}>
-                <strong>Address:</strong>{" "}
-                <span style={{ fontFamily: "monospace" }}>{DEMO_RECIPIENT}</span>{" "}
-                ·{" "}
-                <a href={arbAddr(DEMO_RECIPIENT)} target="_blank" rel="noreferrer">
-                  Arbiscan
-                </a>
-              </p>
-              <p style={{ marginBottom: 4 }}>
-                <strong>xBank balance:</strong>{" "}
-                <span style={{ fontFamily: "monospace" }}>{human(recipientXbBal)}</span>
-              </p>
-              <p style={{ marginBottom: 0, fontSize: 12, color: "#666" }}>
-                Network: Arbitrum Sepolia · Fixed recipient wallet
-              </p>
-            </>
-          )}
-        </div>
-
-        {/* Section 1: Incoming requests */}
-        <section style={{ marginBottom: 32 }}>
-          <div
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 16,
-              background: "#fafafa",
-            }}
-          >
-            <h2 style={{ marginTop: 0 }}>Incoming requests (Bank B)</h2>
-            <p style={{ fontSize: 12, color: "#777" }}>
-              HUB: <code>{HUB || "(missing)"}</code> · Bank ID: {BANK_B_ID}
-              {operator && (
-                <>
-                  {" "}
-                  · Bank B operator: <code>{operator}</code>
-                </>
-              )}
-              {walletAddr && (
-                <>
-                  {" "}
-                  · Your wallet: <code>{walletAddr}</code>
-                </>
-              )}
-            </p>
-
-            <div style={{ marginBottom: 8 }}>
-              <button onClick={scanRequests}>Refresh requests</button>
+          {/* Page header */}
+          <div style={pageHeader}>
+            <div style={ucChip}>UC2</div>
+            <div>
+              <div style={pageTitle}>Travel-Rule Compliant Receiving</div>
+              <div style={pageSubtitle}>Bank B — Receiver perspective · Arbitrum Sepolia</div>
             </div>
+          </div>
+
+          {/* Receiver wallet card */}
+          <div style={card}>
+            <div style={cardLabel}>Receiver Wallet</div>
+            {!isAddr(DEMO_RECIPIENT) ? (
+              <div style={dimText}>
+                Missing <code style={inlineCode}>NEXT_PUBLIC_DEMO_RECIPIENT</code> env var.
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={metaRow}>
+                  <span style={metaLabel}>Address</span>
+                  <span style={monoVal}>{DEMO_RECIPIENT}</span>
+                  <a href={arbAddr(DEMO_RECIPIENT)} target="_blank" rel="noreferrer" style={extLink}>↗</a>
+                </div>
+                <div style={metaRow}>
+                  <span style={metaLabel}>xBank balance</span>
+                  <span style={{ ...monoVal, color: UC_ACCENT }}>{human(recipientXbBal)} XB</span>
+                </div>
+                <div style={{ ...dimText, fontSize: 11 }}>
+                  Bank B ID: {BANK_B_ID} · Network: Arbitrum Sepolia · Fixed recipient wallet
+                  {operator && <> · Operator: <span style={monoVal}>{short(operator)}</span></>}
+                  {walletAddr && <> · Your wallet: <span style={monoVal}>{short(walletAddr)}</span></>}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Section 1: Incoming requests */}
+          <div style={card}>
+            <div style={cardLabel}>Incoming Requests</div>
 
             {showReturnToBankABanner && (
-              <div
-                style={{
-                  marginBottom: 12,
-                  padding: 10,
-                  borderRadius: 8,
-                  background: "#e6f9f0",
-                  fontSize: 24,
-                }}
-              >
-                <p style={{ margin: 0, marginBottom: 4 }}>
-                  ACK sent. To complete the demo, switch back to{" "}
-                  <strong>Bank A</strong> and send the xBank token transfer.
-                </p>
+              <div style={successBanner}>
+                ACK sent. Switch back to <strong style={{ color: "#10b981" }}>Bank A</strong> and send the xBank token transfer to complete the demo.
+                <button className="bb-btn" style={{ marginLeft: 12 }} onClick={handleOpenBankATab}>Open Bank A →</button>
               </div>
             )}
 
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                tableLayout: "fixed",
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                      width: "18%",
-                    }}
-                  >
-                    txRef / tx
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                      width: "14%",
-                    }}
-                  >
-                    Purpose
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                      width: "14%",
-                    }}
-                  >
-                    Created
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                      width: "36%",
-                    }}
-                  >
-                    Payload (decoded)
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                      width: "18%",
-                    }}
-                  >
-                    Actions / status
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {visibleReqs.map((r, idx) => {
-                  const assetInfo = formatXBankAmount(r.parsed as any);
-                  return (
-                    <tr
-                      key={idx}
-                      style={{
-                        borderBottom: "1px solid #eee",
-                      }}
-                    >
-                      <td
-                        style={{
-                          padding: 8,
-                          wordBreak: "break-word",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontFamily: "monospace",
-                            fontSize: 12,
-                            wordBreak: "break-word",
-                            overflowWrap: "break-word",
-                          }}
-                        >
-                          {r.txRef}
-                        </div>
-                        <a
-                          href={arbTx(r.txHash)}
-                          target="_blank"
-                          rel="noreferrer"
-                        >
-                          tx
-                        </a>
-                      </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          wordBreak: "break-word",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        {r.purpose}
-                      </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          fontSize: 12,
-                          wordBreak: "break-word",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        {formatTs(r.createdAt)}
-                      </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          wordBreak: "break-word",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        {r.parsed ? (
-                          <div
-                            style={{
-                              display: "flex",
-                              flexDirection: "column",
-                              gap: 4,
-                              fontSize: 12,
-                            }}
-                          >
-                            <div style={{ fontSize: 11 }}>
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  padding: "2px 6px",
-                                  borderRadius: 999,
-                                  background: "#e6f9f0",
-                                  marginRight: 6,
-                                }}
-                              >
-                                Swiss minimum
-                              </span>
-                              <span style={{ color: "#555" }}>
-                                Originator &amp; beneficiary identification
-                              </span>
-                            </div>
-                            <div
-                              style={{
-                                display: "grid",
-                                gridTemplateColumns:
-                                  "minmax(0,1fr) minmax(0,1fr)",
-                                columnGap: 12,
-                                rowGap: 2,
-                              }}
-                            >
-                              <div
-                                style={{
-                                  wordBreak: "break-word",
-                                  overflowWrap: "break-word",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    fontWeight: 600,
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  Originator
-                                </div>
-                                <div>
-                                  Name:{" "}
-                                  {(r.parsed as any)?.originator?.name ?? "—"}
-                                </div>
-                                <div>
-                                  Account:{" "}
-                                  {(r.parsed as any)?.originator?.account ??
-                                    "—"}
-                                </div>
-                                <div>
-                                  Address:{" "}
-                                  {(r.parsed as any)?.originator?.address ??
-                                    "—"}
-                                </div>
-                                <div>
-                                  DOB:{" "}
-                                  {(r.parsed as any)?.originator?.dateOfBirth ??
-                                    "—"}
-                                </div>
-                                <div>
-                                  Place of birth:{" "}
-                                  {(r.parsed as any)?.originator
-                                    ?.placeOfBirth ?? "—"}
-                                </div>
-                                <div>
-                                  Client / ID:{" "}
-                                  {(r.parsed as any)?.originator?.idNumber ??
-                                    "—"}
-                                </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="bb-btn" onClick={scanRequests}>Refresh requests</button>
+              {status && <span style={statusText}>{status}</span>}
+            </div>
+
+            <div style={tableWrap}>
+              <table className="bb-table">
+                <thead>
+                  <tr>
+                    <th style={{ width: "20%" }}>txRef / tx</th>
+                    <th style={{ width: "14%" }}>Purpose</th>
+                    <th style={{ width: "14%" }}>Created</th>
+                    <th style={{ width: "34%" }}>Payload (decoded)</th>
+                    <th style={{ width: "18%" }}>Actions / status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleReqs.map((r, idx) => {
+                    const assetInfo = formatXBankAmount(r.parsed as any);
+                    return (
+                      <tr key={idx}>
+                        <td>
+                          <div style={monoSmall}>{r.txRef}</div>
+                          <a href={arbTx(r.txHash)} target="_blank" rel="noreferrer" style={extLink}>tx ↗</a>
+                        </td>
+                        <td>{r.purpose}</td>
+                        <td style={{ color: "rgba(255,255,255,0.45)", fontSize: 11 }}>{formatTs(r.createdAt)}</td>
+                        <td>
+                          {r.parsed ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                                <span style={tagGreen}>Swiss minimum</span>
+                                <span style={tagBlue}>HPKE decrypted</span>
                               </div>
-                              <div
-                                style={{
-                                  wordBreak: "break-word",
-                                  overflowWrap: "break-word",
-                                }}
-                              >
-                                <div
-                                  style={{
-                                    fontWeight: 600,
-                                    fontSize: 11,
-                                  }}
-                                >
-                                  Beneficiary
+                              <div style={payloadGrid}>
+                                <div>
+                                  <div style={payloadSectionTitle}>Originator</div>
+                                  <div style={payloadLine}>Name: {(r.parsed as any)?.originator?.name ?? "—"}</div>
+                                  <div style={payloadLine}>Account: {(r.parsed as any)?.originator?.account ?? "—"}</div>
+                                  <div style={payloadLine}>Address: {(r.parsed as any)?.originator?.address ?? "—"}</div>
+                                  <div style={payloadLine}>DOB: {(r.parsed as any)?.originator?.dateOfBirth ?? "—"}</div>
+                                  <div style={payloadLine}>Place: {(r.parsed as any)?.originator?.placeOfBirth ?? "—"}</div>
+                                  <div style={payloadLine}>ID: {(r.parsed as any)?.originator?.idNumber ?? "—"}</div>
                                 </div>
                                 <div>
-                                  Name:{" "}
-                                  {(r.parsed as any)?.beneficiary?.name ?? "—"}
+                                  <div style={payloadSectionTitle}>Beneficiary</div>
+                                  <div style={payloadLine}>Name: {(r.parsed as any)?.beneficiary?.name ?? "—"}</div>
+                                  <div style={payloadLine}>Account: {(r.parsed as any)?.beneficiary?.account ?? "—"}</div>
                                 </div>
-                                <div>
-                                  Account:{" "}
-                                  {(r.parsed as any)?.beneficiary?.account ??
-                                    "—"}
-                                </div>
-                              </div>
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                marginTop: 4,
-                                wordBreak: "break-word",
-                                overflowWrap: "break-word",
-                              }}
-                            >
-                              <span
-                                style={{
-                                  display: "inline-block",
-                                  padding: "2px 6px",
-                                  borderRadius: 999,
-                                  background: "#e6f0ff",
-                                  marginRight: 6,
-                                }}
-                              >
-                                Additional fields
-                              </span>
-                              <span style={{ color: "#555" }}>
-                                Asset, amount, purpose and technical metadata
-                              </span>
-                            </div>
-                            <div
-                              style={{
-                                fontSize: 11,
-                                wordBreak: "break-word",
-                                overflowWrap: "break-word",
-                              }}
-                            >
-                              <div>
-                                Amount (xBank):{" "}
-                                {assetInfo
-                                  ? assetInfo.amountHuman !== null
-                                    ? assetInfo.amountHuman
-                                    : assetInfo.amountRaw || "—"
-                                  : "—"}
                               </div>
                               <div>
-                                Token address:{" "}
-                                {assetInfo?.token
-                                  ? assetInfo.token
-                                  : (r.parsed as any)?.asset?.token ?? "—"}
-                              </div>
-                              <div>
-                                Purpose:{" "}
-                                {(r.parsed as any)?.purpose ??
-                                  r.purpose ??
-                                  "—"}
+                                <div style={payloadLine}>
+                                  Amount: {assetInfo ? (assetInfo.amountHuman !== null ? assetInfo.amountHuman : assetInfo.amountRaw || "—") : "—"} XB
+                                </div>
+                                <div style={payloadLine}>Purpose: {(r.parsed as any)?.purpose ?? r.purpose ?? "—"}</div>
                               </div>
                             </div>
-                          </div>
-                        ) : (
-                          <span style={{ fontSize: 12, color: "#999" }}>
-                            No payload decoded
-                          </span>
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: 8,
-                          wordBreak: "break-word",
-                          overflowWrap: "break-word",
-                        }}
-                      >
-                        {!r.requireAck ? (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 8px",
-                              borderRadius: 999,
-                              background: "#f5f5f5",
-                              fontSize: 12,
-                            }}
-                          >
-                            Processed w/o ACK
-                          </span>
-                        ) : r.status === "pending" ? (
-                          <>
-                            <button
-                              onClick={() => ack(r)}
-                              style={{ marginRight: 8 }}
-                            >
-                              ACK
-                            </button>
-                            <button onClick={() => reject(r)}>Reject</button>
-                          </>
-                        ) : r.status === "acked" ? (
-                          <div style={{ fontSize: 12 }}>
-                            <span
-                              style={{
-                                display: "inline-block",
-                                padding: "2px 8px",
-                                borderRadius: 999,
-                                background: "#e6f9f0",
-                              }}
-                            >
-                              ACKed
-                            </span>
-                            {r.ackTxHash && (
-                              <>
-                                {" "}
-                                ·{" "}
-                                <a
-                                  href={arbTx(r.ackTxHash)}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                >
-                                  ack tx
-                                </a>
-                              </>
-                            )}
-                          </div>
-                        ) : (
-                          <span
-                            style={{
-                              display: "inline-block",
-                              padding: "2px 8px",
-                              borderRadius: 999,
-                              background: "#ffecec",
-                              fontSize: 12,
-                            }}
-                          >
-                            Rejected
-                          </span>
-                        )}
+                          ) : (
+                            <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>No payload decoded</span>
+                          )}
+                        </td>
+                        <td>
+                          {!r.requireAck ? (
+                            <span style={tagNeutral}>No ACK required</span>
+                          ) : r.status === "pending" ? (
+                            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                              <button className="bb-btn bb-btn-ack" onClick={() => ack(r)}>ACK</button>
+                              <button className="bb-btn bb-btn-reject" onClick={() => reject(r)}>Reject</button>
+                            </div>
+                          ) : r.status === "acked" ? (
+                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                              <span style={tagGreen}>ACKed</span>
+                              {r.ackTxHash && (
+                                <a href={arbTx(r.ackTxHash)} target="_blank" rel="noreferrer" style={extLink}>ack tx ↗</a>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={tagRed}>Rejected</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
+                  {rows.length === 0 && (
+                    <tr>
+                      <td colSpan={5} style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 20 }}>
+                        No requests yet…
                       </td>
                     </tr>
-                  );
-                })}
-                {rows.length === 0 && (
-                  <tr>
-                    <td colSpan={5} style={{ padding: 12, color: "#777" }}>
-                      No requests yet…
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+            </div>
 
             {rows.length > 0 && (
-              <div style={{ marginTop: 8, fontSize: 12 }}>
-                Showing {Math.min(reqLimit, rows.length)} of {rows.length}{" "}
-                requests.
-                {"  "}
+              <div style={showMoreRow}>
+                <span style={dimText}>Showing {Math.min(reqLimit, rows.length)} of {rows.length}</span>
                 {rows.length > reqLimit && (
-                  <button
-                    onClick={() => setReqLimit((v) => v + 5)}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Show more
-                  </button>
+                  <button className="bb-btn" onClick={() => setReqLimit(v => v + 5)}>Show more</button>
                 )}
                 {reqLimit > 3 && (
-                  <button
-                    onClick={() => setReqLimit(3)}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Show less
-                  </button>
+                  <button className="bb-btn" onClick={() => setReqLimit(3)}>Show less</button>
                 )}
               </div>
             )}
-
-            {status && <p style={{ marginTop: 10 }}>{status}</p>}
           </div>
-        </section>
 
-        {/* Section 2: Logs */}
-        <section style={{ marginBottom: 32 }}>
-          <div
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 16,
-              background: "#fafafa",
-            }}
-          >
-            <h3 style={{ marginTop: 0 }}>Payment Hub activity</h3>
-            <div style={{ marginBottom: 8 }}>
-              <button onClick={scanLogs}>Refresh logs</button>
+          {/* Section 2: Hub activity log */}
+          <div style={card}>
+            <div style={cardLabel}>Payment Hub Activity</div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+              <button className="bb-btn" onClick={scanLogs}>Refresh logs</button>
+              {logStatus && <span style={statusText}>{logStatus}</span>}
             </div>
-            {logStatus && <p style={{ fontSize: 12 }}>{logStatus}</p>}
-            <ul style={{ listStyle: "none", padding: 0, margin: 0 }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
               {visibleLogs.map((l, i) => {
                 const descLower = (l.desc || "").toLowerCase();
                 const isAck = descLower.startsWith("paymentacknowledged");
                 const isSubmit = descLower.startsWith("paymentsubmitted");
-                const badgeLabel = isAck
-                  ? "ACK"
-                  : isSubmit
-                  ? "Payment"
-                  : "Hub tx";
-                const badgeBg = isAck
-                  ? "#e6f9f0"
-                  : isSubmit
-                  ? "#e6f0ff"
-                  : "#f5f5f5";
-
+                const badgeLabel = isAck ? "ACK" : isSubmit ? "Payment" : "Hub tx";
+                const badgeStyle = isAck ? tagGreen : isSubmit ? tagBlue : tagNeutral;
                 return (
-                  <li key={i} style={{ marginBottom: 8 }}>
-                    <div
-                      style={{
-                        border: "1px solid #eee",
-                        borderRadius: 8,
-                        padding: 8,
-                        display: "flex",
-                        flexDirection: "column",
-                        gap: 4,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: "flex",
-                          justifyContent: "space-between",
-                          alignItems: "center",
-                          fontSize: 12,
-                        }}
-                      >
-                        <span style={{ fontFamily: "monospace" }}>
-                          {formatTs(l.timestamp) || "—"}
-                        </span>
-                        <span
-                          style={{
-                            display: "inline-block",
-                            padding: "2px 8px",
-                            borderRadius: 999,
-                            background: badgeBg,
-                          }}
-                        >
-                          {badgeLabel}
-                        </span>
-                      </div>
-                      <div style={{ fontSize: 12 }}>
-                        <a
-                          href={arbTx(l.txHash)}
-                          target="_blank"
-                          rel="noreferrer"
-                          style={{ fontFamily: "monospace" }}
-                        >
-                          {short(l.txHash)}
-                        </a>
-                      </div>
-                      <div style={{ fontSize: 12 }}>{l.desc}</div>
-                      {l.details && (
-                        <pre
-                          style={{
-                            margin: 0,
-                            fontSize: 11,
-                            whiteSpace: "pre-wrap",
-                          }}
-                        >
-                          {JSON.stringify(l.details, null, 2)}
-                        </pre>
-                      )}
+                  <div key={i} style={logCard}>
+                    <div style={logCardTop}>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "rgba(255,255,255,0.38)" }}>
+                        {formatTs(l.timestamp) || "—"}
+                      </span>
+                      <span style={badgeStyle}>{badgeLabel}</span>
                     </div>
-                  </li>
+                    <a href={arbTx(l.txHash)} target="_blank" rel="noreferrer" style={extLink}>
+                      {short(l.txHash)}
+                    </a>
+                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{l.desc}</div>
+                    {l.details && (
+                      <pre style={preStyle}>{JSON.stringify(l.details, null, 2)}</pre>
+                    )}
+                  </div>
                 );
               })}
               {logEvents.length === 0 && !logStatus && (
-                <li
-                  style={{
-                    fontFamily: "monospace",
-                    marginBottom: 8,
-                    color: "#777",
-                  }}
-                >
-                  No hub transactions yet…
-                </li>
+                <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No hub transactions yet…</div>
               )}
-            </ul>
+            </div>
             {logEvents.length > 0 && (
-              <div style={{ marginTop: 4, fontSize: 12 }}>
-                Showing {Math.min(logLimit, logEvents.length)} of{" "}
-                {logEvents.length} log entries.
-                {"  "}
+              <div style={showMoreRow}>
+                <span style={dimText}>Showing {Math.min(logLimit, logEvents.length)} of {logEvents.length}</span>
                 {logEvents.length > logLimit && (
-                  <button
-                    onClick={() => setLogLimit((v) => v + 5)}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Show more
-                  </button>
+                  <button className="bb-btn" onClick={() => setLogLimit(v => v + 5)}>Show more</button>
                 )}
                 {logLimit > 3 && (
-                  <button
-                    onClick={() => setLogLimit(3)}
-                    style={{ marginLeft: 8 }}
-                  >
-                    Show less
-                  </button>
+                  <button className="bb-btn" onClick={() => setLogLimit(3)}>Show less</button>
                 )}
               </div>
             )}
           </div>
-        </section>
 
-        {/* Section 3: Directory snapshot */}
-        <section>
-          <div
-            style={{
-              border: "1px solid #ddd",
-              borderRadius: 12,
-              padding: 16,
-              background: "#fafafa",
-            }}
-          >
-            <h3 style={{ marginTop: 0 }}>Directory Registry</h3>
-            <p style={{ fontSize: 12, color: "#777", marginTop: 6 }}>
-              This table reads the on-chain DirectoryRegistry. For HPKE to work,
-              the receiving must have a non-empty HPKE public key stored on-chain.
-            </p>
-
-            <div style={{ marginBottom: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <div>
-                <div style={{ fontSize: 12, color: "#555" }}>Show bank IDs (comma-separated)</div>
-                <input
-                  value={dirIdsCsv}
-                  onChange={(e) => setDirIdsCsv(e.target.value)}
-                  style={{ width: 220 }}
-                  placeholder="1,2,3"
-                />
-              </div>
-              <div style={{ display: "flex", alignItems: "flex-end" }}>
-                <button onClick={loadDirectory}>Refresh Directory</button>
-              </div>
+          {/* Section 3: Directory Registry */}
+          <div style={card}>
+            <div style={cardLabel}>Directory Registry</div>
+            <div style={formNote}>
+              This reads the on-chain DirectoryRegistry. For HPKE to work, the receiving bank must have a non-empty HPKE public key stored on-chain.
             </div>
 
-            <div
-              style={{
-                border: "1px dashed #bbb",
-                borderRadius: 10,
-                padding: 12,
-                marginBottom: 12,
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent: "space-between",
-                  gap: 10,
-                  flexWrap: "wrap",
-                }}
-              >
+            {/* Controls */}
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <label style={formLabel}>
+                Bank IDs (comma-separated)
+                <input
+                  className="bb-input"
+                  value={dirIdsCsv}
+                  onChange={e => setDirIdsCsv(e.target.value)}
+                  placeholder="1,2,3"
+                  style={{ width: 200 }}
+                />
+              </label>
+              <button className="bb-btn" onClick={loadDirectory}>Refresh Directory</button>
+            </div>
+
+            {/* Directory table */}
+            <div style={tableWrap}>
+              <table className="bb-table">
+                <thead>
+                  <tr>
+                    <th>Bank ID</th>
+                    <th>Status</th>
+                    <th>LEI Hash</th>
+                    <th>Domain Hash</th>
+                    <th>Operator</th>
+                    <th>HPKE PubKey</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {directoryRows.map(r => (
+                    <tr key={r.id}>
+                      <td style={{ fontWeight: 600 }}>{r.id}</td>
+                      <td>
+                        <span style={r.active ? tagGreen : tagRed}>
+                          {r.active ? "active" : "paused"}
+                        </span>
+                      </td>
+                      <td style={{ ...monoSmall, maxWidth: 160 }}>{r.leiHash}</td>
+                      <td style={{ ...monoSmall, maxWidth: 160 }}>{r.domainHash}</td>
+                      <td style={{ ...monoSmall, maxWidth: 180 }}>{r.operator}</td>
+                      <td style={{ ...monoSmall, maxWidth: 180 }}>{r.hpke ? r.hpke : "—"}</td>
+                    </tr>
+                  ))}
+                  {directoryRows.length === 0 && !dirStatus && (
+                    <tr>
+                      <td colSpan={6} style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 16 }}>
+                        No banks loaded yet…
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+            {dirStatus && <div style={statusText}>{dirStatus}</div>}
+
+            {/* Admin upsert */}
+            <div style={adminPanel}>
+              <div style={adminPanelHeader}>
                 <div>
-                  <div style={{ fontWeight: 600, marginBottom: 6 }}>
-                    Directory admin (upsertBank)
+                  <div style={{ fontWeight: 700, color: "#fff", fontSize: 13, marginBottom: 3 }}>
+                    Directory Admin — upsertBank
                   </div>
-                  <div style={{ fontSize: 12, color: "#666", marginBottom: 8 }}>
-                    Works only if your connected wallet is the Directory owner.
-                    Use this to set Bank B&apos;s HPKE pubkey (or add Bank C).
+                  <div style={formNote}>
+                    Works only if your connected wallet is the Directory owner. Use this to set Bank B&apos;s HPKE pubkey.
                   </div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
                     {!metaMaskAddr ? (
-                      <button onClick={connectMetaMask}>Connect MetaMask</button>
+                      <button className="bb-btn" onClick={connectMetaMask}>Connect MetaMask</button>
                     ) : (
-                      <button onClick={disconnectMetaMask}>Disconnect MetaMask</button>
+                      <button className="bb-btn" onClick={disconnectMetaMask}>Disconnect MetaMask</button>
                     )}
-
-                    <label style={{ fontSize: 12, display: "flex", alignItems: "center", gap: 6 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>
                       <input
                         type="checkbox"
+                        className="bb-checkbox"
                         checked={useMetaMaskForDir}
-                        onChange={(e) => setUseMetaMaskForDir(e.target.checked)}
+                        onChange={e => setUseMetaMaskForDir(e.target.checked)}
                         disabled={!metaMaskAddr}
                       />
                       Use MetaMask for Directory
                     </label>
-
-                    <button onClick={upsertBank}>Upsert bank</button>
+                    <button className="bb-btn" onClick={upsertBank}>Upsert bank</button>
                   </div>
-
-                  <div style={{ fontSize: 12, color: "#666", textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textAlign: "right" }}>
+                    <div>Owner: <span style={monoSmall}>{dirOwnerAddr || "—"}</span></div>
                     <div>
-                      Directory owner:{" "}
-                      <code>{dirOwnerAddr ? dirOwnerAddr : "—"}</code>
+                      MetaMask: <span style={monoSmall}>{metaMaskAddr || "not connected"}</span>
+                      {metaMaskAddr && dirOwnerAddr && metaMaskAddr.toLowerCase() === dirOwnerAddr.toLowerCase() && (
+                        <span style={{ marginLeft: 6, color: UC_ACCENT }}>✓ owner</span>
+                      )}
                     </div>
-                    <div>
-                      MetaMask:{" "}
-                      <code>{metaMaskAddr ? metaMaskAddr : "not connected"}</code>
-                      {metaMaskAddr && dirOwnerAddr && metaMaskAddr.toLowerCase() === dirOwnerAddr.toLowerCase() ? (
-                        <span style={{ marginLeft: 6, color: "#0a7" }}>✓ owner</span>
-                      ) : null}
-                    </div>
-                    {metaMaskStatus ? <div style={{ color: "#b00" }}>{metaMaskStatus}</div> : null}
+                    {metaMaskStatus && <div style={{ color: "#ef4444" }}>{metaMaskStatus}</div>}
                   </div>
                 </div>
               </div>
 
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                  gap: 10,
-                }}
-              >
-                <label style={{ fontSize: 12 }}>
+              <div style={upsertGrid}>
+                <label style={formLabel}>
                   Bank ID
-                  <input
-                    type="number"
-                    value={upsertBankId}
-                    onChange={(e) => setUpsertBankId(Number(e.target.value))}
-                    style={{ width: "100%" }}
-                  />
+                  <input type="number" className="bb-input" value={upsertBankId} onChange={e => setUpsertBankId(Number(e.target.value))} />
                 </label>
-
-                <label style={{ fontSize: 12 }}>
+                <label style={formLabel}>
                   Active
-                  <select
-                    value={upsertActive ? "true" : "false"}
-                    onChange={(e) => setUpsertActive(e.target.value === "true")}
-                    style={{ width: "100%" }}
-                  >
+                  <select className="bb-select" value={upsertActive ? "true" : "false"} onChange={e => setUpsertActive(e.target.value === "true")}>
                     <option value="true">true</option>
                     <option value="false">false</option>
                   </select>
                 </label>
-
-                <label style={{ fontSize: 12 }}>
-                  LEI (plain text or 0x…bytes32)
-                  <input
-                    value={upsertLei}
-                    onChange={(e) => setUpsertLei(e.target.value)}
-                    placeholder="Example LEI"
-                    style={{ width: "100%" }}
-                  />
+                <label style={formLabel}>
+                  LEI (plain or 0x…bytes32)
+                  <input className="bb-input" value={upsertLei} onChange={e => setUpsertLei(e.target.value)} placeholder="Example LEI" />
                 </label>
-
-                <label style={{ fontSize: 12 }}>
-                  Domain (plain text or 0x…bytes32)
-                  <input
-                    value={upsertDomain}
-                    onChange={(e) => setUpsertDomain(e.target.value)}
-                    placeholder="bank.example"
-                    style={{ width: "100%" }}
-                  />
+                <label style={formLabel}>
+                  Domain (plain or 0x…bytes32)
+                  <input className="bb-input" value={upsertDomain} onChange={e => setUpsertDomain(e.target.value)} placeholder="bank.example" />
                 </label>
-
-                <label style={{ fontSize: 12 }}>
+                <label style={formLabel}>
                   Operator address
-                  <input
-                    value={upsertOperatorAddr}
-                    onChange={(e) => setUpsertOperatorAddr(e.target.value)}
-                    placeholder={dirWalletAddr || metaMaskAddr || walletAddr || "0x…"}
-                    style={{ width: "100%" }}
-                  />
+                  <input className="bb-input" value={upsertOperatorAddr} onChange={e => setUpsertOperatorAddr(e.target.value)} placeholder={dirWalletAddr || metaMaskAddr || walletAddr || "0x…"} />
                 </label>
-
-                <label style={{ fontSize: 12 }}>
-                  HPKE public key (hex bytes)
-                  <input
-                    value={upsertHpkePubKeyHex}
-                    onChange={(e) => setUpsertHpkePubKeyHex(e.target.value)}
-                    placeholder="0x… (32 bytes for X25519)"
-                    style={{ width: "100%", fontFamily: "monospace" }}
-                  />
+                <label style={formLabel}>
+                  HPKE public key (hex)
+                  <input className="bb-input" value={upsertHpkePubKeyHex} onChange={e => setUpsertHpkePubKeyHex(e.target.value)} placeholder="0x… (32 bytes for X25519)" style={{ fontFamily: "monospace" }} />
                 </label>
               </div>
-
-              {upsertStatus && (
-                <div style={{ marginTop: 10, fontSize: 12, color: "#444" }}>
-                  {upsertStatus}
-                </div>
-              )}
+              {upsertStatus && <div style={statusText}>{upsertStatus}</div>}
             </div>
 
-            <p style={{ fontSize: 12, color: "#777" }}>
-              Registry entries for Bank A and Bank B used by this demo.
-            </p>
-            <p style={{ fontSize: 12, color: "#777" }}>
-              Directory address: <code>{DIR || "(missing)"}</code>
-            </p>
-
-            <table
-              style={{
-                width: "100%",
-                borderCollapse: "collapse",
-                tableLayout: "fixed",
-              }}
-            >
-              <thead>
-                <tr>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    Bank ID
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    Status
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    LEI Hash
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    Domain Hash
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    Operator
-                  </th>
-                  <th
-                    style={{
-                      textAlign: "left",
-                      borderBottom: "1px solid #ddd",
-                      padding: 8,
-                    }}
-                  >
-                    HPKE PubKey
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {directoryRows.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ padding: 8 }}>{r.id}</td>
-                    <td style={{ padding: 8 }}>
-                      <span
-                        style={{
-                          display: "inline-block",
-                          padding: "2px 8px",
-                          borderRadius: 999,
-                          background: r.active ? "#e6f9f0" : "#ffecec",
-                          fontSize: 12,
-                        }}
-                      >
-                        {r.active ? "active" : "paused"}
-                      </span>
-                    </td>
-                    <td
-                      style={{
-                        padding: 8,
-                        fontFamily: "monospace",
-                        wordBreak: "break-all",
-                        maxWidth: 160,
-                      }}
-                    >
-                      {r.leiHash}
-                    </td>
-                    <td
-                      style={{
-                        padding: 8,
-                        fontFamily: "monospace",
-                        wordBreak: "break-all",
-                        maxWidth: 160,
-                      }}
-                    >
-                      {r.domainHash}
-                    </td>
-                    <td
-                      style={{
-                        padding: 8,
-                        fontFamily: "monospace",
-                        wordBreak: "break-all",
-                        maxWidth: 220,
-                      }}
-                    >
-                      {r.operator}
-                    </td>
-                    <td
-                      style={{
-                        padding: 8,
-                        fontFamily: "monospace",
-                        wordBreak: "break-all",
-                        maxWidth: 220,
-                      }}
-                    >
-                      {r.hpke ? r.hpke : "—"}
-                    </td>
-                  </tr>
-                ))}
-                {directoryRows.length === 0 && !dirStatus && (
-                  <tr>
-                    <td colSpan={6} style={{ padding: 12, color: "#777" }}>
-                      No banks loaded yet…
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-
-            {dirStatus && <p style={{ marginTop: 8 }}>{dirStatus}</p>}
-            <div style={{ marginTop: 8 }}>
-              <button onClick={loadDirectory}>Reload directory</button>
+            <div style={{ ...dimText, fontSize: 11 }}>
+              Directory address: <span style={monoSmall}>{DIR || "(missing)"}</span> · Data persists only in your browser (local storage).
             </div>
           </div>
-        </section>
 
-        {/* Reset information at the bottom */}
-        <p
-          style={{
-            marginTop: 24,
-            fontSize: 12,
-            color: "#999",
-            textAlign: "center",
-          }}
-        >
-          Note: this demo keeps incoming requests and hub logs only in your
-          browser (local storage). If you reload the page or navigate away, the
-          view may reset or need to rescan recent blocks.
-        </p>
-
-        {/* ✅ Premium sticky accordion: Why this matters */}
-        <WhyThisMatters pendingCount={pendingCount} ackedCount={ackedCount} />
-
+          <WhyThisMatters pendingCount={pendingCount} ackedCount={ackedCount} />
         </div>
       </div>
     </>
   );
 }
 
-/* ---------- Premium “Why this matters” (same component style as Bank A) ---------- */
+/* ── WhyThisMatters ──────────────────────────────────────────────────────────── */
 
 function WhyThisMatters({ pendingCount, ackedCount }: { pendingCount: number; ackedCount: number }) {
-  const [open, setOpen] = useState(false);
-  const innerRef = useRef<HTMLDivElement | null>(null);
-  const [maxH, setMaxH] = useState(0);
+  const [tab, setTab] = useState(0);
 
-  useEffect(() => {
-    const update = () => {
-      if (!innerRef.current) return;
-      setMaxH(open ? innerRef.current.scrollHeight : 0);
-    };
-    update();
-    if (typeof window !== "undefined") window.addEventListener("resize", update);
-    return () => {
-      if (typeof window !== "undefined") window.removeEventListener("resize", update);
-    };
-  }, [open]);
+  const inboxLabel = pendingCount > 0
+    ? `Inbox: ${pendingCount} pending`
+    : ackedCount > 0 ? `ACKs sent: ${ackedCount}` : "";
 
-  const inboxLabel =
-    pendingCount > 0 ? `Inbox: ${pendingCount} pending` : ackedCount > 0 ? `ACKs sent: ${ackedCount}` : "";
-
-  return (
-    <div style={whyStickyWrap}>
-      <div style={whyShell}>
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} style={whyHeaderBtn}>
-          <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <span style={whyBadge}>Why this matters</span>
-            <span style={whyTitle}>Receiving bank controls: decrypt, review, and ACK before settlement</span>
-          </span>
-
-          <span style={whyRight}>
-            <span style={whyHint}>{inboxLabel}</span>
-            <span style={{ ...chevWrap, transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
-              <Chevron />
-            </span>
-          </span>
-        </button>
-
-        <div
-          style={{
-            ...whyBodyOuter,
-            maxHeight: open ? maxH : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? "translateY(0px)" : "translateY(-4px)",
-          }}
-        >
-          <div ref={innerRef} style={whyBodyInner}>
-            <Section
-              k="1"
-              title="What you’re doing on this page"
-              subtitle="You’re acting as the receiving bank: you verify the incoming request, then ACK it so settlement can proceed."
-            >
-              <ul style={whyList}>
-                <li>
-                  You monitor the Payment Hub for <strong>outbound payment messages</strong> addressed to Bank B.
-                </li>
-                <li>
-                  You open the <strong>encrypted Travel Rule envelope</strong> and review the originator + beneficiary data.
-                </li>
-                <li>
-                  If everything checks out, you send an on-chain <strong>ACK</strong> — a simple but powerful safety gate.
-                </li>
-              </ul>
-
-              <div style={bannerNote}>
-                <strong>Key idea:</strong> Bank B can “see and verify” compliance data without exposing it publicly —
-                and without having to trust Bank A’s database.
-              </div>
-            </Section>
-
-            <Section
-              k="2"
-              title="How you find and open the envelope (grandma-friendly)"
-              subtitle="Think: you receive a sealed envelope with a tracking number. You can verify it arrived, then open it privately."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Finding the message</div>
-                  <div style={whyText}>
-                    The Payment Hub emits an <strong>OutboundPayment</strong> event with a <strong>txRef</strong> (reference) and a{" "}
-                    <strong>payloadHash</strong>. Your UI scans recent blocks and filters messages where{" "}
-                    <strong>toBankId = Bank B</strong>.
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>Event logs</span>
-                    <span style={pill}>txRef</span>
-                    <span style={pill}>Routing by bankId</span>
-                  </div>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Opening it safely</div>
-                  <div style={whyText}>
-                    The encrypted payload is created with <strong>HPKE</strong> to Bank B’s on-chain public key (read from Directory).{" "}
-                    Bank B holds the matching private key. In this demo, decryption happens via{" "}
-                    <code style={whyCode}>/api/hpke-open</code> so the browser never exposes the private key.
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>HPKE</span>
-                    <span style={pill}>Private key</span>
-                    <span style={pill}>No plaintext PII on-chain</span>
-                  </div>
-                </div>
-              </div>
-            </Section>
-
-            <Section
-              k="3"
-              title="What goes on-chain (and what doesn’t)"
-              subtitle="The chain is the shared audit rail — but the sensitive content stays sealed."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>On-chain</div>
-                  <ul style={whyList}>
-                    <li>
-                      Bank A calls the Payment Hub:{" "}
-                      <code style={whyCode}>submitPayment(toBankId, requireAck, payload, txRef)</code>
-                    </li>
-                    <li>
-                      You send: <code style={whyCode}>acknowledge(txRef)</code> (as Bank B operator)
-                    </li>
-                    <li>
-                      Both actions are timestamped and discoverable via events — useful for audit and dispute resolution.
-                    </li>
-                  </ul>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Not on-chain</div>
-                  <ul style={whyList}>
-                    <li>No plaintext names, addresses, DOB, or other Travel Rule PII</li>
-                    <li>No internal bank case notes or screening results</li>
-                    <li>
-                      The envelope is bound to <strong>txRef</strong> (AAD) to prevent swapping messages between references
-                    </li>
-                  </ul>
-                </div>
-              </div>
-
-              <div style={nextStep}>
-                <div style={{ fontWeight: 950, marginBottom: 4 }}>Two-window tip</div>
-                <div style={{ color: "#333", lineHeight: 1.5 }}>
-                  For the best “interbank” feel: keep <strong>Bank A</strong> open in one window, then open{" "}
-                  <strong>Bank B</strong> in a second window. Bank A submits; Bank B reviews + ACKs; then settlement proceeds.
-                </div>
-              </div>
-            </Section>
-
-            <Section
-              k="4"
-              title="Why banks (and regulators) should care"
-              subtitle="This is a compact model of Travel Rule messaging & controlled settlement."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Regulatory lens</div>
-                  <ul style={whyList}>
-                    <li>
-                      Travel Rule requires originator/beneficiary information to accompany certain crypto transfers (Swiss minimum fields).
-                    </li>
-                    <li>
-                      Data minimization: prove a message was delivered (txRef + events) without publishing PII on a public chain.
-                    </li>
-                    <li>
-                      A receiving bank can enforce an operational control: “review → ACK → release”.
-                    </li>
-                  </ul>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Technical & operational lens</div>
-                  <ul style={whyList}>
-                    <li>
-                      <strong>Directory registry:</strong> bank keys and operator roles are discoverable on-chain (governance via MetaMask in this demo).
-                    </li>
-                    <li>
-                      <strong>Separation of concerns:</strong> settlement (token transfer) can be decoupled from messaging and gated by ACK.
-                    </li>
-                  </ul>
-                </div>
-              </div>
-            </Section>
+  const tabs = [
+    {
+      n: "01", label: "What you're doing",
+      title: "Receiving bank controls: verify, decrypt, ACK",
+      subtitle: "You're acting as the receiving bank — you verify the incoming request, then ACK it so settlement can proceed.",
+      body: (
+        <div style={wtmBody}>
+          {[
+            "You monitor the Payment Hub for outbound payment messages addressed to Bank B.",
+            "You open the encrypted Travel Rule envelope and review the originator + beneficiary data.",
+            "If everything checks out, you send an on-chain ACK — a simple but powerful safety gate.",
+          ].map((t, i) => (
+            <div key={i} style={wtmListItem}>
+              <span style={wtmArrow}>▸</span>
+              <span style={wtmListText}>{t}</span>
+            </div>
+          ))}
+          <div style={wtmCallout}>
+            <strong style={{ color: UC_ACCENT }}>Key idea:</strong> Bank B can verify compliance data without exposing it publicly — and without trusting Bank A&apos;s database.
           </div>
         </div>
-      </div>
-    </div>
-  );
-}
-
-function Section({
-  k,
-  title,
-  subtitle,
-  children,
-}: {
-  k: string;
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={secWrap}>
-      <div style={secHead}>
-        <div style={secK}>{k}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={secTitle}>{title}</div>
-          <div style={secSub}>{subtitle}</div>
+      ),
+    },
+    {
+      n: "02", label: "Finding & opening",
+      title: "Sealed envelope with a tracking number",
+      subtitle: "You can verify it arrived, then open it privately — nobody else can read it.",
+      body: (
+        <div style={wtmBody}>
+          <div style={wtmGrid2}>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>Finding the message</div>
+              <div style={wtmCardText}>The Payment Hub emits an OutboundPayment event with a txRef and payloadHash. Your UI scans recent blocks and filters messages where toBankId = Bank B.</div>
+              <div style={pillRow}>
+                {["Event logs", "txRef", "Routing by bankId"].map(p => <span key={p} style={pill}>{p}</span>)}
+              </div>
+            </div>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>Opening it safely</div>
+              <div style={wtmCardText}>The payload is HPKE-encrypted to Bank B&apos;s on-chain public key (from Directory). Decryption happens via /api/hpke-open so the browser never exposes the private key.</div>
+              <div style={pillRow}>
+                {["HPKE", "Private key", "No plaintext PII on-chain"].map(p => <span key={p} style={pill}>{p}</span>)}
+              </div>
+            </div>
+          </div>
         </div>
+      ),
+    },
+    {
+      n: "03", label: "On-Chain",
+      title: "The chain is the shared audit rail",
+      subtitle: "Sensitive content stays sealed — only metadata and ACKs go on-chain.",
+      body: (
+        <div style={wtmBody}>
+          <div style={wtmGrid2}>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>On-chain</div>
+              {[
+                "Bank A calls submitPayment(toBankId, requireAck, payload, txRef)",
+                "You send acknowledge(txRef) as Bank B operator",
+                "Both actions are timestamped and discoverable — useful for audit and disputes",
+              ].map((t, i) => (
+                <div key={i} style={wtmListItem}>
+                  <span style={wtmArrow}>▸</span>
+                  <span style={wtmListText}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>Not on-chain</div>
+              {[
+                "No plaintext names, addresses, DOB, or other Travel Rule PII",
+                "No internal bank case notes or screening results",
+                "Envelope is bound to txRef (AAD) to prevent swapping messages between references",
+              ].map((t, i) => (
+                <div key={i} style={wtmListItem}>
+                  <span style={wtmArrow}>▸</span>
+                  <span style={wtmListText}>{t}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={wtmCallout}>
+            <strong style={{ color: UC_ACCENT }}>Two-window tip:</strong> Keep Bank A open in one window, then open Bank B in a second. Bank A submits; Bank B reviews + ACKs; then settlement proceeds.
+          </div>
+        </div>
+      ),
+    },
+    {
+      n: "04", label: "For Banks",
+      title: "Why banks and regulators should care",
+      subtitle: "A compact model for Travel Rule messaging and controlled settlement.",
+      body: (
+        <div style={wtmBody}>
+          <div style={wtmGrid2}>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>Regulatory lens</div>
+              {[
+                "Travel Rule requires originator/beneficiary info to accompany crypto transfers (Swiss minimum fields).",
+                "Data minimization: prove delivery via txRef + events without publishing PII on a public chain.",
+                "Receiving bank enforces the control: review → ACK → release settlement.",
+              ].map((t, i) => (
+                <div key={i} style={wtmListItem}>
+                  <span style={wtmArrow}>▸</span>
+                  <span style={wtmListText}>{t}</span>
+                </div>
+              ))}
+            </div>
+            <div style={wtmCard}>
+              <div style={wtmCardTitle}>Technical &amp; operational lens</div>
+              {[
+                "Directory registry: bank keys and operator roles are discoverable on-chain.",
+                "Separation of concerns: settlement (token transfer) is decoupled from messaging, gated by ACK.",
+                "Interoperability: two banks coordinate over a shared rail without sharing databases.",
+              ].map((t, i) => (
+                <div key={i} style={wtmListItem}>
+                  <span style={wtmArrow}>▸</span>
+                  <span style={wtmListText}>{t}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      ),
+    },
+  ];
+
+  const active = tabs[tab];
+
+  return (
+    <div style={wtmOuter}>
+      <div style={wtmDivider}>
+        <div style={wtmDividerLine} />
+        <span style={wtmDividerLabel}>Why This Matters</span>
+        <div style={wtmDividerLine} />
       </div>
-      <div style={{ marginTop: 10 }}>{children}</div>
+      <div style={wtmIntro}>
+        Receiving bank controls: decrypt, review, and ACK before settlement.
+        {inboxLabel && <span style={wtmBadge}>{inboxLabel}</span>}
+      </div>
+      <div style={wtmTabStrip} role="tablist">
+        {tabs.map((t, i) => (
+          <button
+            key={i}
+            role="tab"
+            aria-selected={i === tab}
+            className={`wtm-tab${i === tab ? " wtm-tab-active" : ""}`}
+            onClick={() => setTab(i)}
+          >
+            <span style={{ opacity: 0.5, marginRight: 5 }}>{t.n}</span>{t.label}
+          </button>
+        ))}
+      </div>
+      <div key={tab} role="tabpanel" className="wtm-panel" style={wtmPanel}>
+        <div style={wtmPanelHead}>
+          <div style={wtmPanelTitle}>{active.title}</div>
+          <div style={wtmPanelSub}>{active.subtitle}</div>
+        </div>
+        {active.body}
+      </div>
     </div>
   );
 }
 
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
+/* ── Styles ──────────────────────────────────────────────────────────────────── */
 
-/* ---------- Component Styles (same as Bank A / eBanking) ---------- */
+const UC_ACCENT = "#10b981";
+const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
-const whyStickyWrap: React.CSSProperties = {
-  marginTop: 18,
-  position: "sticky",
-  bottom: 14,
-  zIndex: 20,
+const pageWrap: CSSProperties = {
+  minHeight: "100vh",
+  background: "#07080f",
+  fontFamily: FONT,
+  color: "#f0f0f0",
+  paddingBottom: 80,
 };
 
-const whyShell: React.CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 16,
-  overflow: "hidden",
-  background: "rgba(255,255,255,0.88)",
-  backdropFilter: "blur(10px)",
-  boxShadow: "0 10px 24px rgba(0,0,0,0.06)",
-};
-
-const whyHeaderBtn: React.CSSProperties = {
-  width: "100%",
-  border: "none",
-  background: "transparent",
-  padding: 14,
-  cursor: "pointer",
+const inner: CSSProperties = {
+  maxWidth: 1040,
+  margin: "0 auto",
+  padding: "32px 24px",
   display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
+  flexDirection: "column",
+  gap: 20,
 };
 
-const whyBadge: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "4px 10px",
-  borderRadius: 999,
-  background: "#111",
-  color: "#fff",
-  fontWeight: 900,
-  fontSize: 12,
-  flex: "0 0 auto",
-};
-
-const whyTitle: React.CSSProperties = {
-  fontWeight: 900,
-  color: "#111",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
-const whyRight: React.CSSProperties = {
+const loadingWrap: CSSProperties = {
   display: "flex",
+  justifyContent: "center",
   alignItems: "center",
-  gap: 10,
-  flex: "0 0 auto",
+  minHeight: "60vh",
 };
 
-const whyHint: React.CSSProperties = {
-  fontSize: 12,
-  color: "#666",
-  fontWeight: 800,
-};
-
-const chevWrap: React.CSSProperties = {
+const loadingDot: CSSProperties = {
   width: 32,
   height: 32,
-  borderRadius: 12,
-  border: "1px solid #e6e8eb",
-  display: "grid",
-  placeItems: "center",
-  color: "#111",
-  background: "#fff",
-  transition: "transform 180ms ease",
+  borderRadius: "50%",
+  border: "3px solid rgba(255,255,255,0.08)",
+  borderTopColor: UC_ACCENT,
+  animation: "spin 0.8s linear infinite",
 };
 
-const whyBodyOuter: React.CSSProperties = {
-  borderTop: "1px solid #e6e8eb",
-  overflow: "hidden",
-  transition: "max-height 260ms ease, opacity 200ms ease, transform 200ms ease",
-  willChange: "max-height, opacity, transform",
-};
-
-const whyBodyInner: React.CSSProperties = {
-  padding: 14,
-  background: "#fff",
-};
-
-const secWrap: React.CSSProperties = {
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #eef0f2",
-  background: "#fafafa",
-  marginBottom: 10,
-};
-
-const secHead: React.CSSProperties = {
+const pageHeader: CSSProperties = {
   display: "flex",
-  gap: 10,
-  alignItems: "flex-start",
+  alignItems: "center",
+  gap: 14,
+  marginBottom: 4,
 };
 
-const secK: React.CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: 12,
-  display: "grid",
-  placeItems: "center",
-  background: "#111",
+const ucChip: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  width: 42,
+  height: 42,
+  borderRadius: 10,
+  background: "rgba(16,185,129,0.15)",
+  border: "1px solid rgba(16,185,129,0.3)",
+  color: UC_ACCENT,
+  fontWeight: 700,
+  fontSize: 12,
+  flexShrink: 0,
+};
+
+const pageTitle: CSSProperties = {
+  fontSize: 20,
+  fontWeight: 700,
   color: "#fff",
-  fontWeight: 950,
-  fontSize: 13,
-  flex: "0 0 auto",
-};
-
-const secTitle: React.CSSProperties = {
-  fontWeight: 950,
-  color: "#111",
   lineHeight: 1.2,
 };
 
-const secSub: React.CSSProperties = {
-  marginTop: 4,
-  fontSize: 12,
-  color: "#666",
-  lineHeight: 1.45,
-};
-
-const whyGrid2: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-};
-
-const whyCard: React.CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 14,
-  padding: 12,
-  background: "#fff",
-};
-
-const whyCardTitle: React.CSSProperties = {
-  fontWeight: 900,
-  marginBottom: 8,
-  color: "#111",
-};
-
-const whyText: React.CSSProperties = {
-  color: "#333",
-  lineHeight: 1.55,
+const pageSubtitle: CSSProperties = {
   fontSize: 13,
+  color: "rgba(255,255,255,0.4)",
+  marginTop: 3,
 };
 
-const whyList: React.CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-  color: "#333",
-  lineHeight: 1.55,
-};
-
-const whyCode: React.CSSProperties = {
-  fontFamily:
-    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 12,
-  background: "#f6f8fa",
-  border: "1px solid #e6e8eb",
-  padding: "1px 6px",
-  borderRadius: 8,
-};
-
-const pillRow: React.CSSProperties = {
-  marginTop: 10,
+const card: CSSProperties = {
+  background: "rgba(255,255,255,0.032)",
+  border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: 16,
+  padding: "20px 24px",
   display: "flex",
+  flexDirection: "column",
+  gap: 16,
+};
+
+const cardLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+  color: UC_ACCENT,
+};
+
+const metaRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
   gap: 8,
   flexWrap: "wrap",
 };
 
-const pill: React.CSSProperties = {
-  display: "inline-flex",
-  padding: "4px 10px",
-  borderRadius: 999,
-  border: "1px solid #e6e8eb",
-  background: "#fafafa",
+const metaLabel: CSSProperties = {
   fontSize: 12,
-  fontWeight: 800,
-  color: "#444",
+  color: "rgba(255,255,255,0.38)",
+  minWidth: 110,
+  flexShrink: 0,
 };
 
-const bankAccentWrap: React.CSSProperties = {
-  background: "linear-gradient(180deg, rgba(46, 170, 110, 0.10) 0%, rgba(255,255,255,0) 220px)",
+const monoVal: CSSProperties = {
+  fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
+  fontSize: 12,
+  color: "rgba(255,255,255,0.75)",
+  wordBreak: "break-all",
 };
 
-const bannerNote: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #e6e8eb",
-  background: "#fafafa",
-  color: "#333",
+const monoSmall: CSSProperties = {
+  fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
+  fontSize: 11,
+  color: "rgba(255,255,255,0.55)",
+  wordBreak: "break-all",
+};
+
+const dimText: CSSProperties = {
+  color: "rgba(255,255,255,0.42)",
+  fontSize: 13,
   lineHeight: 1.5,
 };
 
-const nextStep: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
+const extLink: CSSProperties = {
+  color: UC_ACCENT,
+  fontSize: 12,
+  textDecoration: "none",
+};
+
+const inlineCode: CSSProperties = {
+  fontFamily: "ui-monospace, monospace",
+  fontSize: 12,
+  background: "rgba(255,255,255,0.07)",
+  padding: "1px 6px",
+  borderRadius: 4,
+};
+
+const formNote: CSSProperties = {
+  fontSize: 12,
+  color: "rgba(255,255,255,0.4)",
+  lineHeight: 1.55,
+};
+
+const formLabel: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+  fontSize: 12,
+  color: "rgba(255,255,255,0.5)",
+};
+
+const tableWrap: CSSProperties = {
+  overflowX: "auto",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.06)",
+};
+
+const showMoreRow: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 10,
+  flexWrap: "wrap",
+};
+
+const statusText: CSSProperties = {
+  fontSize: 12,
+  color: "rgba(255,255,255,0.5)",
+  lineHeight: 1.5,
+  wordBreak: "break-all",
+};
+
+const successBanner: CSSProperties = {
+  background: "rgba(16,185,129,0.1)",
+  border: "1px solid rgba(16,185,129,0.25)",
+  borderRadius: 10,
+  padding: "12px 16px",
+  fontSize: 13,
+  color: "rgba(255,255,255,0.8)",
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
+  lineHeight: 1.5,
+};
+
+const tagGreen: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: "rgba(16,185,129,0.15)",
+  border: "1px solid rgba(16,185,129,0.3)",
+  color: "#10b981",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const tagBlue: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: "rgba(59,130,246,0.12)",
+  border: "1px solid rgba(59,130,246,0.25)",
+  color: "#60a5fa",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const tagRed: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: "rgba(239,68,68,0.12)",
+  border: "1px solid rgba(239,68,68,0.25)",
+  color: "#f87171",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const tagNeutral: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "2px 8px",
+  borderRadius: 999,
+  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(255,255,255,0.1)",
+  color: "rgba(255,255,255,0.45)",
+  fontSize: 11,
+  fontWeight: 600,
+};
+
+const payloadGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "1fr 1fr",
+  gap: 8,
+};
+
+const payloadSectionTitle: CSSProperties = {
+  fontSize: 10,
+  fontWeight: 700,
+  letterSpacing: "0.06em",
+  textTransform: "uppercase",
+  color: "rgba(255,255,255,0.35)",
+  marginBottom: 3,
+};
+
+const payloadLine: CSSProperties = {
+  fontSize: 11,
+  color: "rgba(255,255,255,0.6)",
+  lineHeight: 1.6,
+  wordBreak: "break-all",
+};
+
+const logCard: CSSProperties = {
+  background: "rgba(255,255,255,0.025)",
+  border: "1px solid rgba(255,255,255,0.06)",
+  borderRadius: 10,
+  padding: "10px 14px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 5,
+};
+
+const logCardTop: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+};
+
+const preStyle: CSSProperties = {
+  margin: 0,
+  fontSize: 10,
+  whiteSpace: "pre-wrap",
+  color: "rgba(255,255,255,0.4)",
+  fontFamily: "ui-monospace, monospace",
+};
+
+const adminPanel: CSSProperties = {
+  background: "rgba(255,255,255,0.025)",
+  border: "1px dashed rgba(255,255,255,0.1)",
+  borderRadius: 12,
+  padding: "16px 18px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const adminPanelHeader: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: 12,
+  flexWrap: "wrap",
+};
+
+const upsertGrid: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+  gap: 10,
+};
+
+// ── WhyThisMatters styles ─────────────────────────────────────────────────────
+
+const wtmOuter: CSSProperties = { marginTop: 8 };
+
+const wtmDivider: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 14,
+  marginBottom: 20,
+};
+
+const wtmDividerLine: CSSProperties = {
+  flex: 1,
+  height: 1,
+  background: "rgba(255,255,255,0.06)",
+};
+
+const wtmDividerLabel: CSSProperties = {
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+  color: "rgba(255,255,255,0.28)",
+  whiteSpace: "nowrap",
+};
+
+const wtmIntro: CSSProperties = {
+  fontSize: 14,
+  color: "rgba(255,255,255,0.5)",
+  marginBottom: 16,
+  lineHeight: 1.5,
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
+};
+
+const wtmBadge: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  padding: "3px 10px",
+  borderRadius: 999,
+  background: "rgba(16,185,129,0.15)",
+  border: "1px solid rgba(16,185,129,0.3)",
+  color: UC_ACCENT,
+  fontSize: 11,
+  fontWeight: 700,
+};
+
+const wtmTabStrip: CSSProperties = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+  marginBottom: 14,
+};
+
+const wtmPanel: CSSProperties = {
+  background: "rgba(255,255,255,0.025)",
+  border: "1px solid rgba(255,255,255,0.07)",
   borderRadius: 14,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#333",
+  padding: "20px 22px",
+};
+
+const wtmPanelHead: CSSProperties = { marginBottom: 16 };
+
+const wtmPanelTitle: CSSProperties = {
+  fontSize: 16,
+  fontWeight: 700,
+  color: "#fff",
+  marginBottom: 5,
+};
+
+const wtmPanelSub: CSSProperties = {
+  fontSize: 13,
+  color: "rgba(255,255,255,0.42)",
+  lineHeight: 1.5,
+};
+
+const wtmBody: CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 14,
+};
+
+const wtmGrid2: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
+  gap: 12,
+};
+
+const wtmCard: CSSProperties = {
+  background: "rgba(255,255,255,0.03)",
+  border: "1px solid rgba(255,255,255,0.07)",
+  borderRadius: 12,
+  padding: "14px 16px",
+  display: "flex",
+  flexDirection: "column",
+  gap: 10,
+};
+
+const wtmCardTitle: CSSProperties = {
+  fontSize: 13,
+  fontWeight: 700,
+  color: "#fff",
+};
+
+const wtmCardText: CSSProperties = {
+  fontSize: 13,
+  color: "rgba(255,255,255,0.55)",
+  lineHeight: 1.55,
+};
+
+const wtmListItem: CSSProperties = {
+  display: "flex",
+  gap: 8,
+  alignItems: "flex-start",
+};
+
+const wtmArrow: CSSProperties = {
+  color: UC_ACCENT,
+  fontSize: 12,
+  flexShrink: 0,
+  marginTop: 2,
+};
+
+const wtmListText: CSSProperties = {
+  fontSize: 13,
+  color: "rgba(255,255,255,0.58)",
+  lineHeight: 1.55,
+};
+
+const wtmCallout: CSSProperties = {
+  background: "rgba(16,185,129,0.06)",
+  border: "1px solid rgba(16,185,129,0.18)",
+  borderRadius: 10,
+  padding: "12px 14px",
+  fontSize: 13,
+  color: "rgba(255,255,255,0.6)",
+  lineHeight: 1.5,
+};
+
+const pillRow: CSSProperties = {
+  display: "flex",
+  gap: 6,
+  flexWrap: "wrap",
+};
+
+const pill: CSSProperties = {
+  display: "inline-flex",
+  padding: "3px 9px",
+  borderRadius: 999,
+  border: "1px solid rgba(255,255,255,0.1)",
+  background: "rgba(255,255,255,0.04)",
+  fontSize: 11,
+  fontWeight: 600,
+  color: "rgba(255,255,255,0.48)",
 };
