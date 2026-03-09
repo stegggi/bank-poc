@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
-import { recordUc4Write } from "../_lib/blobMetrics";
-import { saveUc4BlobRefs } from "../_lib/blobRefStore";
+import { recordUc4Write } from "../../../../shared/lib/uc4/blobMetrics";
+import { saveUc4BlobRefs } from "../../../../shared/lib/uc4/blobRefStore";
 
 export const config = { api: { bodyParser: { sizeLimit: "2mb" } } };
 

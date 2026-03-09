@@ -1,8 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { privateDecrypt, webcrypto } from "crypto";
 import { ethers } from "ethers";
-import { getUc4BlobRefs } from "../_lib/blobRefStore";
-import { recordUc4Read, type Uc4ReadSource } from "../_lib/blobMetrics";
+import { getUc4BlobRefs } from "../../../../shared/lib/uc4/blobRefStore";
+import { recordUc4Read, type Uc4ReadSource } from "../../../../shared/lib/uc4/blobMetrics";
 
 // IMPORTANT: this file is expected at: pages/api/bank/[bank]/plain.ts
 // The ABI import path assumes: /lib/ContextPassportABI.ts|json at project root.
