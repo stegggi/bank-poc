@@ -1265,557 +1265,409 @@ export default function ContextVaultPage() {
   }
 
   const moduleStatusLine = (
-    <div style={{ marginTop: 8, color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-      ModuleId: <span style={mono}>{isBytes32(customerModuleId) ? customerModuleId : "—"}</span> · Onchain: <b>{customerModuleExistsOnchain ? "yes" : "no"}</b> ·
-      Local package: <b>{localPkgForSelected ? "yes" : "no"}</b>
+    <div style={{ marginTop: 8, color: "rgba(255,255,255,0.45)", fontSize: 12, lineHeight: 1.5 }}>
+      ModuleId: <span style={mono}>{isBytes32(customerModuleId) ? customerModuleId : "—"}</span>
+      <br />Onchain: <b style={{ color: customerModuleExistsOnchain ? "#34d399" : "rgba(255,255,255,0.45)" }}>{customerModuleExistsOnchain ? "yes" : "no"}</b>
+      {" · "}Local pkg: <b style={{ color: localPkgForSelected ? "#34d399" : "rgba(255,255,255,0.45)" }}>{localPkgForSelected ? "yes" : "no"}</b>
     </div>
   );
+
+  const accent = "#f59e0b";
+
+  const page: React.CSSProperties = {
+    minHeight: "100vh",
+    background: "#0d0d0d",
+    color: "#fff",
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
+  };
+  const wrap: React.CSSProperties = { maxWidth: 1000, margin: "0 auto", padding: "24px 20px 64px" };
+  const sectionHeading: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", margin: "0 0 4px" };
+  const sectionSub: React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.5, marginBottom: 14 };
+  const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "14px 0" };
+  const statusTag = (connected: boolean, right?: boolean) => ({
+    fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
+    color: connected ? (right ? "rgba(52,211,153,0.9)" : "rgba(52,211,153,0.9)") : "rgba(255,255,255,0.40)",
+    padding: "2px 8px",
+    border: `1px solid ${connected ? (right ? "rgba(52,211,153,0.28)" : "rgba(52,211,153,0.28)") : "rgba(255,255,255,0.08)"}`,
+    borderRadius: 999,
+  } as React.CSSProperties);
 
   return (
     <>
       <NavBar active="context-vault" />
-      <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 8 }}>AI Context Passport</h2>
-        <p style={{ marginTop: 0, color: "#555", lineHeight: 1.55 }}>
-          Customer-owned encrypted context modules with onchain consent and <b>per-bank storage</b>. Banks can store ciphertext, but only decrypt after explicit consent.
-        </p>
+      <div style={page}>
+        <div style={wrap}>
 
-        <div style={card}>
-          <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))" }}>
-            <div style={miniCard}>
-              <h3 style={{ margin: 0 }}>Customer session (Privy)</h3>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                Contract: <span style={mono}>{uiContract}</span> · ChainId: <span style={mono}>{uiChainId}</span>
-              </div>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                Wallet: <span style={mono}>{uiCustomerWallet}</span>
-              </div>
-
-              <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {!authenticated ? (
-                  <button style={btn} disabled={!ready || !mounted} onClick={login}>
-                    Login
-                  </button>
-                ) : (
-                  <button style={btnSecondary} onClick={logout}>
-                    Logout
-                  </button>
-                )}
-
-                <button style={btnSecondary} disabled={!canUseCustomer} onClick={loadModules}>
-                  Refresh
-                </button>
-
-                {lastTx && (
-                  <a style={linkBtn} href={`${EXPLORER_TX}${lastTx}`} target="_blank" rel="noreferrer">
-                    Tx ↗
-                  </a>
-                )}
-              </div>
-
-             
+          {/* ── Page header ── */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: accent, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
+              UC 04
             </div>
-
-            <div style={miniCard}>
-              <h3 style={{ margin: 0 }}>Bank wallet (MetaMask)</h3>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                Connected: <span style={mono}>{mounted ? (bankConnected ? "yes" : "no") : "…"}</span>
-              </div>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                Address: <span style={mono}>{mounted ? (bankAddress || "—") : "…"}</span>
-              </div>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                ChainId: <span style={mono}>{mounted ? (bankChainId === null ? "—" : String(bankChainId)) : "…"}</span>
-                {mounted && bankConnected && bankChainId !== null && bankChainId !== CHAIN_ID ? (
-                  <span style={{ marginLeft: 8, color: "#b00020", fontWeight: 800 }}>(wrong network)</span>
-                ) : null}
-              </div>
-
-              <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                {!bankConnected ? (
-                  <button style={btn} disabled={!mounted || bankBusy} onClick={connectBankWallet}>
-                    {bankBusy ? "Connecting…" : "Connect MetaMask"}
-                  </button>
-                ) : (
-                  <button style={btnSecondary} onClick={disconnectBankWallet}>
-                    Disconnect
-                  </button>
-                )}
-
-                <button style={btnSecondary} disabled={!mounted || !bankConnected || bankOnRightChain} onClick={switchBankChain}>
-                  Switch chain
-                </button>
-              </div>
-
-              {bankErr && <div style={{ ...note, marginTop: 10, borderColor: "#ffd0d0", background: "#ffecec", color: "#b00020" }}>{bankErr}</div>}
-
-              <div style={{ ...note, marginTop: 10 }}>
-              Switching MetaMask accounts is how you act as Bank A vs Bank B.
-              </div>
-            </div>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>Context Passport</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 580 }}>
+              Customer-owned encrypted context modules with onchain consent and per-bank storage. Banks can store ciphertext, but only decrypt after explicit consent.
+            </p>
           </div>
 
-          {(status || err) && (
-            <div style={{ ...note, marginTop: 12 }}>
-              {status && <div style={{ color: "#111", fontWeight: 800 }}>{status}</div>}
-              {err && <div style={{ color: "#b00020", marginTop: status ? 6 : 0 }}>{err}</div>}
-            </div>
-          )}
-        </div>
-
-        <div style={grid2}>
+          {/* ── Sessions ── */}
           <div style={card}>
-            <h3 style={{ marginTop: 0 }}>Customer panel — Create / update module</h3>
-            <div style={{ color: "#666", fontSize: 14, lineHeight: 1.5, marginTop: 6 }}>
-              Select a module template. The fields are encrypted locally. Only hashes + pointers go onchain. “Last reviewed” is set automatically on save.
-            </div>
+            <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
 
-            <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
+              {/* Customer (Privy) */}
               <div style={miniCard}>
-                <div style={miniTitle}>Module</div>
-                {renderModuleSelector(!canUseCustomer)}
-                {moduleStatusLine}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Customer session (Privy)</div>
+                  <div style={statusTag(authenticated)}>{mounted ? (authenticated ? "connected" : "disconnected") : "…"}</div>
+                </div>
+                <div style={hint}>Contract: <span style={mono}>{uiContract}</span></div>
+                <div style={hint}>Wallet: <span style={mono}>{uiCustomerWallet}</span></div>
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {!authenticated
+                    ? <button style={btn} disabled={!ready || !mounted} onClick={login}>Login</button>
+                    : <button style={btnSecondary} onClick={logout}>Logout</button>
+                  }
+                  <button style={btnSecondary} disabled={!canUseCustomer} onClick={loadModules}>Refresh</button>
+                  {lastTx && <a style={linkBtn} href={`${EXPLORER_TX}${lastTx}`} target="_blank" rel="noreferrer">Tx ↗</a>}
+                </div>
               </div>
 
+              {/* Bank wallet (MetaMask) */}
               <div style={miniCard}>
-                <div style={miniTitle}>Sharing policy text (hashed onchain)</div>
-                <input style={input} value={policyByKey[selectedKey]} onChange={(e) => setPolicyByKey({ ...policyByKey, [selectedKey]: e.target.value })} />
-                <div style={hint}>This is hashed onchain. Keep it non-sensitive and short.</div>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Bank wallet (MetaMask)</div>
+                  <div style={{
+                    fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", padding: "2px 8px", borderRadius: 999,
+                    color: bankConnected ? (bankOnRightChain ? "rgba(52,211,153,0.9)" : "#fbbf24") : "rgba(255,255,255,0.40)",
+                    border: `1px solid ${bankConnected ? (bankOnRightChain ? "rgba(52,211,153,0.28)" : "rgba(251,191,36,0.28)") : "rgba(255,255,255,0.08)"}`,
+                  }}>
+                    {mounted ? (bankConnected ? (bankOnRightChain ? "ready" : "wrong network") : "disconnected") : "…"}
+                  </div>
+                </div>
+                <div style={hint}>Address: <span style={mono}>{mounted ? (bankAddress || "—") : "…"}</span></div>
+                <div style={hint}>ChainId: <span style={mono}>{mounted ? (bankChainId === null ? "—" : String(bankChainId)) : "…"}</span></div>
+                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {!bankConnected
+                    ? <button style={btn} disabled={!mounted || bankBusy} onClick={connectBankWallet}>{bankBusy ? "Connecting…" : "Connect MetaMask"}</button>
+                    : <button style={btnSecondary} onClick={disconnectBankWallet}>Disconnect</button>
+                  }
+                  <button style={btnSecondary} disabled={!mounted || !bankConnected || bankOnRightChain} onClick={switchBankChain}>Switch chain</button>
+                </div>
+                {bankErr && <div style={{ ...note, marginTop: 10, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>{bankErr}</div>}
+                <div style={{ ...note, marginTop: 10, fontSize: 12 }}>Switch MetaMask accounts to act as Bank A vs Bank B.</div>
               </div>
             </div>
 
-            <div style={{ ...miniCard, marginTop: 10 }}>
-              <div style={miniTitle}>Module fields</div>
-              {renderFieldsForSelected()}
-            </div>
-
-            <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button style={btn} disabled={!canUseCustomer} onClick={saveSelectedModule}>
-                Save module (create/update)
-              </button>
-              <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={exportSelected}>
-                Export
-              </button>
-              <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={previewDecryptLocal}>
-                Decrypt locally
-              </button>
-              <label style={{ ...btnSecondary, display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                Import
-                <input
-                  type="file"
-                  accept="application/json"
-                  style={{ display: "none" }}
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) void importUserPackage(f);
-                  }}
-                />
-              </label>
-            </div>
-
-            {!localPkgForSelected && customerModuleExistsOnchain && (
-              <div style={{ ...note, marginTop: 10 }}>
-                This module exists onchain, but you don’t have the local DEK package on this device. Import the exported JSON to edit or grant it.
+            {(status || err) && (
+              <div style={{ ...note, marginTop: 14 }}>
+                {status && <div style={{ fontWeight: 700, color: "#fff" }}>{status}</div>}
+                {err && <div style={{ color: "#f87171", marginTop: status ? 6 : 0 }}>{err}</div>}
               </div>
             )}
           </div>
 
-          <div style={card}>
-            <h3 style={{ marginTop: 0 }}>Customer panel — Modules & consent</h3>
-            <div style={{ color: "#666", fontSize: 14, lineHeight: 1.5, marginTop: 6 }}>
-              Consent controls who can decrypt. Grant uploads ciphertext + wrapped DEK to the bank’s storage and writes onchain consent.
-            </div>
+          {/* ── Customer: Module editor + Consent ── */}
+          <div style={grid2}>
 
-            <div style={{ marginTop: 12, ...miniCard }}>
-              <div style={miniTitle}>Select module</div>
-              {renderModuleSelector(!canUseCustomer)}
-              {moduleStatusLine}
-            </div>
+            {/* Create / update */}
+            <div style={card}>
+              <div style={sectionHeading}>Create / update module</div>
+              <div style={sectionSub}>Fields are encrypted locally. Only hashes + pointers go onchain.</div>
 
-            <div style={{ ...miniCard, marginTop: 10 }}>
-              <div style={miniTitle}>Consent settings</div>
-
-              <div style={labelStyle}>Expiry in days (0 = no expiry)</div>
-              <input style={input} value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
-
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Purpose (hashed onchain for requests)</div>
-                <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-              </div>
-
-              <div style={{ marginTop: 10, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
+              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
                 <div style={miniCard}>
-                  <div style={miniTitle}>Bank A</div>
-                  <div style={hint}>
-                    Grantee: <span style={mono}>{uiBankAAddr}</span>
-                  </div>
-                  <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank("bank-a")}>
-                      Grant
-                    </button>
-                    <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank("bank-a")}>
-                      Revoke
-                    </button>
-                  </div>
-                  <div style={{ marginTop: 10 }}>
-                    <div style={labelStyle}>Access request status</div>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {accessStatusModules.map((m) => {
-                        const status = moduleAccessStatus(m, "bank-a");
-                        const color = status === "granted" ? "#0b7a3e" : status === "pending" ? "#a86a00" : "#666";
-                        const text = status === "granted" ? "granted" : status === "pending" ? "pending request" : "no request/no grant";
-                        return (
-                          <div key={`bank-a-${m.label}`} style={{ fontSize: 13, color }}>
-                            <b>{m.label}</b>: {text}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <div style={miniTitle}>Module template</div>
+                  {renderModuleSelector(!canUseCustomer)}
+                  {moduleStatusLine}
                 </div>
-
                 <div style={miniCard}>
-                  <div style={miniTitle}>Bank B</div>
-                  <div style={hint}>
-                    Grantee: <span style={mono}>{uiBankBAddr}</span>
-                  </div>
-                  <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                    <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank("bank-b")}>
-                      Grant
-                    </button>
-                    <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank("bank-b")}>
-                      Revoke
-                    </button>
-                  </div>
-                  <div style={{ marginTop: 10 }}>
-                    <div style={labelStyle}>Access request status</div>
-                    <div style={{ display: "grid", gap: 6 }}>
-                      {accessStatusModules.map((m) => {
-                        const status = moduleAccessStatus(m, "bank-b");
-                        const color = status === "granted" ? "#0b7a3e" : status === "pending" ? "#a86a00" : "#666";
-                        const text = status === "granted" ? "granted" : status === "pending" ? "pending request" : "no request/no grant";
-                        return (
-                          <div key={`bank-b-${m.label}`} style={{ fontSize: 13, color }}>
-                            <b>{m.label}</b>: {text}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
+                  <div style={miniTitle}>Sharing policy (hashed onchain)</div>
+                  <input style={input} value={policyByKey[selectedKey]} onChange={(e) => setPolicyByKey({ ...policyByKey, [selectedKey]: e.target.value })} />
+                  <div style={hint}>Non-sensitive. Will be hashed and stored onchain.</div>
                 </div>
               </div>
 
-              <div style={{ ...note, marginTop: 10 }}>
-                <b>Grant</b> does 2 actions: (1) upload one encrypted bundle (ciphertext + wrapped DEK) to that bank’s Blob storage, (2) write onchain consent.
+              <div style={{ ...miniCard, marginTop: 12 }}>
+                <div style={miniTitle}>Module fields</div>
+                {renderFieldsForSelected()}
+              </div>
+
+              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <button style={btn} disabled={!canUseCustomer} onClick={saveSelectedModule}>Save (create / update)</button>
+                <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={exportSelected}>Export</button>
+                <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={previewDecryptLocal}>Decrypt locally</button>
+                <label style={{ ...btnSecondary, display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
+                  Import
+                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importUserPackage(f); }} />
+                </label>
+              </div>
+
+              {!localPkgForSelected && customerModuleExistsOnchain && (
+                <div style={{ ...note, marginTop: 10, fontSize: 12 }}>
+                  Module exists onchain but no local DEK package found on this device. Import the exported JSON to edit or grant it.
+                </div>
+              )}
+            </div>
+
+            {/* Consent */}
+            <div style={card}>
+              <div style={sectionHeading}>Modules & consent</div>
+              <div style={sectionSub}>Grant uploads ciphertext + wrapped DEK to the bank&apos;s storage and writes onchain consent.</div>
+
+              <div style={miniCard}>
+                <div style={miniTitle}>Select module</div>
+                {renderModuleSelector(!canUseCustomer)}
+                {moduleStatusLine}
+              </div>
+
+              <div style={{ ...miniCard, marginTop: 12 }}>
+                <div style={miniTitle}>Consent settings</div>
+                <div style={labelStyle}>Expiry in days (0 = no expiry)</div>
+                <input style={input} value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
+                <div style={{ marginTop: 12 }}>
+                  <div style={labelStyle}>Purpose (hashed onchain)</div>
+                  <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+                </div>
+
+                <hr style={divider} />
+
+                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
+                  {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
+                    const uiAddr = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
+                    return (
+                      <div key={bank} style={miniCard}>
+                        <div style={miniTitle}>{bankLabel(bank)}</div>
+                        <div style={hint}>Grantee: <span style={mono}>{uiAddr}</span></div>
+                        <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
+                          <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank(bank)}>Grant</button>
+                          <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank(bank)}>Revoke</button>
+                        </div>
+                        <div style={{ marginTop: 10 }}>
+                          <div style={labelStyle}>Access status</div>
+                          <div style={{ display: "grid", gap: 5 }}>
+                            {accessStatusModules.map((m) => {
+                              const st = moduleAccessStatus(m, bank);
+                              const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.35)";
+                              return (
+                                <div key={`${bank}-${m.label}`} style={{ fontSize: 12, color: col }}>
+                                  <b style={{ color: "rgba(255,255,255,0.60)" }}>{m.label}</b>: {st === "granted" ? "granted" : st === "pending" ? "pending" : "no grant"}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div style={{ ...note, marginTop: 12, fontSize: 12 }}>
+                  <strong style={{ color: "#fff" }}>Grant</strong> does 2 actions: (1) upload encrypted bundle (ciphertext + wrapped DEK) to that bank&apos;s Blob storage, (2) write onchain consent.
+                </div>
               </div>
             </div>
           </div>
+
+          {/* ── Bank panels ── */}
+          <div style={grid2}>
+            {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
+              const bankCardStyle = bank === "bank-a" ? bankACard : bankBCard;
+              const plain        = bank === "bank-a" ? bankAPlain : bankBPlain;
+              const setPlain     = bank === "bank-a" ? setBankAPlain : setBankBPlain;
+              const bankErrMsg   = bank === "bank-a" ? bankAErr : bankBErr;
+              const uiAddr       = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
+              return (
+                <div key={bank} style={bankCardStyle}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 14 }}>{bankLabel(bank)} — Request & load context</div>
+
+                  <div style={miniCard}>
+                    <div style={miniTitle}>Module (select)</div>
+                    {renderModuleSelector(false)}
+                    <div style={hint}>ModuleId: <span style={mono}>{isBytes32(derivedBankModuleId) ? derivedBankModuleId : "—"}</span></div>
+                    <div style={{ marginTop: 10 }}>
+                      <div style={labelStyle}>Purpose</div>
+                      <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+                    </div>
+                    <div style={{ ...note, marginTop: 10, fontSize: 12 }}>
+                      MetaMask must be connected as <span style={mono}>{uiAddr}</span> to request access.
+                    </div>
+                    <div style={{ marginTop: 10 }}>
+                      <button style={btnSecondary} disabled={!canUseBank || !isBankAddressSelected(bank)} onClick={() => requestAccessAsMetaMask(bank)}>
+                        Request access via MetaMask
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ ...miniCard, marginTop: 12 }}>
+                    <div style={miniTitle}>Load & decrypt (server)</div>
+                    <div style={labelStyle}>Customer owner address</div>
+                    <input style={input} value={bankOwner} disabled placeholder="Connect customer wallet…" />
+                    <div style={{ marginTop: 10 }}>
+                      <button style={btn} disabled={!ethers.isAddress(bankOwner) || !isBytes32(bankModuleId)} onClick={() => bankLoadPlain(bank)}>
+                        Load & decrypt
+                      </button>
+                    </div>
+                    {bankErrMsg && <div style={{ ...note, marginTop: 10, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>{bankErrMsg}</div>}
+                    <textarea style={{ ...input, height: 180, fontSize: 12, marginTop: 10, resize: "vertical" }} value={plain} onChange={(e) => setPlain(e.target.value)} placeholder="Decrypted context appears here after consent…" />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <WhyThisMatters />
+
         </div>
-
-        <div style={grid2}>
-          <div style={bankACard}>
-            <h3 style={{ marginTop: 0 }}>Bank A — Request & load context</h3>
-
-            <div style={miniCard}>
-              <div style={miniTitle}>Module (select)</div>
-              {renderModuleSelector(false)}
-              <div style={{ marginTop: 8, color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-                ModuleId (for owner below): <span style={mono}>{isBytes32(derivedBankModuleId) ? derivedBankModuleId : "—"}</span>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Purpose</div>
-                <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-              </div>
-
-              <div style={{ ...note, marginTop: 10 }}>
-                MetaMask must be connected as <span style={mono}>{uiBankAAddr}</span> to request access as Bank A.
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <button style={btnSecondary} disabled={!canUseBank || !isBankAddressSelected("bank-a")} onClick={() => requestAccessAsMetaMask("bank-a")}>
-                  Request access via MetaMask
-                </button>
-              </div>
-            </div>
-
-            <div style={{ ...miniCard, marginTop: 10 }}>
-              <div style={miniTitle}>Load & decrypt (server)</div>
-
-              <div style={labelStyle}>Customer owner address (from session)</div>
-              <input style={input} value={bankOwner} disabled placeholder="Connect customer wallet…" />
-
-              <div style={{ marginTop: 10 }}>
-                <button style={btn} disabled={!ethers.isAddress(bankOwner) || !isBytes32(bankModuleId)} onClick={() => bankLoadPlain("bank-a")}>
-                  Load & decrypt
-                </button>
-              </div>
-              {bankAErr && <div style={{ ...note, marginTop: 10, borderColor: "#ffd0d0", background: "#ffecec", color: "#b00020" }}>{bankAErr}</div>}
-
-              <textarea style={{ ...input, height: 180, fontSize: 12, marginTop: 10 }} value={bankAPlain} onChange={(e) => setBankAPlain(e.target.value)} placeholder="Decrypted context appears here after consent…" />
-            </div>
-          </div>
-
-          <div style={bankBCard}>
-            <h3 style={{ marginTop: 0 }}>Bank B — Request & load context</h3>
-
-            <div style={miniCard}>
-              <div style={miniTitle}>Module (select)</div>
-              {renderModuleSelector(false)}
-              <div style={{ marginTop: 8, color: "#666", fontSize: 13, lineHeight: 1.5 }}>
-                ModuleId (for owner below): <span style={mono}>{isBytes32(derivedBankModuleId) ? derivedBankModuleId : "—"}</span>
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <div style={labelStyle}>Purpose</div>
-                <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-              </div>
-
-              <div style={{ ...note, marginTop: 10 }}>
-                MetaMask must be connected as <span style={mono}>{uiBankBAddr}</span> to request access as Bank B.
-              </div>
-
-              <div style={{ marginTop: 10 }}>
-                <button style={btnSecondary} disabled={!canUseBank || !isBankAddressSelected("bank-b")} onClick={() => requestAccessAsMetaMask("bank-b")}>
-                  Request access via MetaMask
-                </button>
-              </div>
-            </div>
-
-            <div style={{ ...miniCard, marginTop: 10 }}>
-              <div style={miniTitle}>Load & decrypt (server)</div>
-
-              <div style={labelStyle}>Customer owner address (from session)</div>
-              <input style={input} value={bankOwner} disabled placeholder="Connect customer wallet…" />
-
-              <div style={{ marginTop: 10 }}>
-                <button style={btn} disabled={!ethers.isAddress(bankOwner) || !isBytes32(bankModuleId)} onClick={() => bankLoadPlain("bank-b")}>
-                  Load & decrypt
-                </button>
-              </div>
-              {bankBErr && <div style={{ ...note, marginTop: 10, borderColor: "#ffd0d0", background: "#ffecec", color: "#b00020" }}>{bankBErr}</div>}
-
-              <textarea style={{ ...input, height: 180, fontSize: 12, marginTop: 10 }} value={bankBPlain} onChange={(e) => setBankBPlain(e.target.value)} placeholder="Decrypted context appears here after consent…" />
-            </div>
-          </div>
-        </div>
-
-        <WhyThisMatters />
       </div>
+
+      <style jsx global>{`
+        input, select, textarea { transition: border-color 150ms; font-family: inherit; }
+        input:focus, select:focus, textarea:focus { border-color: rgba(245,158,11,0.50) !important; outline: none; }
+        input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.22); }
+        select option { background: #1a1a1a; color: #fff; }
+        input[type="checkbox"] { accent-color: #f59e0b; cursor: pointer; width: 15px; height: 15px; }
+        input:disabled, select:disabled, textarea:disabled { opacity: 0.42; cursor: not-allowed; }
+        .wtm-tab {
+          padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
+          background: transparent; color: rgba(255,255,255,0.42); font-size: 12px; font-weight: 600;
+          cursor: pointer; transition: all 150ms; font-family: inherit;
+        }
+        .wtm-tab:hover { color: rgba(255,255,255,0.68); border-color: rgba(255,255,255,0.14); }
+        .wtm-tab-active { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.30); color: #fbbf24; }
+        @keyframes wtmIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
+      `}</style>
     </>
   );
 }
 
-/* ---------- “Why this matters” ---------- */
+/* ---------- "Why this matters" (dark inline tabs) ---------- */
 
 function WhyThisMatters() {
-  const [open, setOpen] = useState(false);
-  const innerRef = useRef<HTMLDivElement | null>(null);
-  const [maxH, setMaxH] = useState(0);
+  const [tab, setTab] = useState(0);
+  const TABS = ["What you do here", "Encryption", "On-Chain", "For Banks"];
 
-  useEffect(() => {
-    const update = () => {
-      if (!innerRef.current) return;
-      setMaxH(open ? innerRef.current.scrollHeight : 0);
-    };
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, [open]);
+  const outer:      React.CSSProperties = { marginTop: 32 };
+  const heading:    React.CSSProperties = { fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
+  const intro:      React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55, margin: "0 0 16px" };
+  const tabBar:     React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 };
+  const panel:      React.CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 };
+  const pTitle:     React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 };
+  const pSub:       React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.55, marginBottom: 14 };
+  const g2:         React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 };
+  const wCard:      React.CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
+  const wCardTitle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
+  const wCardText:  React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
+  const wNote:      React.CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 };
+  const wPillRow:   React.CSSProperties = { marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" };
+  const wPill:      React.CSSProperties = { display: "inline-flex", padding: "3px 9px", borderRadius: 999, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", fontSize: 12, fontWeight: 700, color: "#fbbf24" };
+  const wList:      React.CSSProperties = { margin: "0 0 0 16px", padding: 0, color: "rgba(255,255,255,0.68)", fontSize: 13, lineHeight: 1.7 };
 
-  return (
-    <div style={whyStickyWrap}>
-      <div style={whyShell}>
-        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open} style={whyHeaderBtn}>
-          <span style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
-            <span style={whyBadge}>Why this matters</span>
-            <span style={whyTitle}>Customer-owned context that moves between banks — with enforceable consent</span>
-          </span>
+  const content = [
+    /* 0 — What you do here */
+    <div key="what" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={pTitle}>What you do here</div>
+      <div style={pSub}>You create portable context modules and control who can decrypt them — with onchain-enforced consent.</div>
+      <ul style={wList}>
+        <li>Create or update three modules: <strong style={{ color: "#fff" }}>Suitability</strong>, <strong style={{ color: "#fff" }}>Sustainability</strong>, and <strong style={{ color: "#fff" }}>Service Scope</strong>.</li>
+        <li>Each module is <strong style={{ color: "#fff" }}>encrypted locally</strong> and stored as a reusable package you can export.</li>
+        <li>Grant access per bank with a <strong style={{ color: "#fff" }}>purpose</strong> and <strong style={{ color: "#fff" }}>expiry</strong> — revoke anytime, instantly.</li>
+      </ul>
+      <div style={wNote}><strong style={{ color: "#fff" }}>Key idea:</strong> the customer controls the data. Each bank only gets access when consent is explicit.</div>
+    </div>,
 
-          <span style={whyRight}>
-            <span style={whyHint}>{open ? "Hide" : "Show"}</span>
-            <span style={{ ...chevWrap, transform: open ? "rotate(180deg)" : "rotate(0deg)" }}>
-              <Chevron />
-            </span>
-          </span>
-        </button>
-
-        <div
-          style={{
-            ...whyBodyOuter,
-            maxHeight: open ? maxH : 0,
-            opacity: open ? 1 : 0,
-            transform: open ? "translateY(0px)" : "translateY(-4px)",
-          }}
-        >
-          <div ref={innerRef} style={whyBodyInner}>
-            <Section
-              k="1"
-              title="What you do here"
-              subtitle="You create portable context modules and control who can decrypt them."
-            >
-              <ul style={whyList}>
-                <li>
-                  You create or update three modules: <strong>Suitability</strong>, <strong>Sustainability</strong>, and <strong>Service Scope</strong>.
-                </li>
-                <li>
-                  Each module is <strong>encrypted locally</strong> and stored as a reusable package you can export.
-                </li>
-                <li>
-                  You grant access per bank with a <strong>purpose</strong> and <strong>expiry</strong> — and can revoke any time.
-                </li>
-              </ul>
-
-              <div style={bannerNote}>
-                <strong>Key idea:</strong> the customer controls the data, and each bank only gets access when consent is explicit.
-              </div>
-            </Section>
-
-            <Section
-              k="2"
-              title="Encryption + key sharing"
-              subtitle="Same ciphertext, different keys per bank."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Content encryption (AES-GCM)</div>
-                  <div style={whyText}>
-                    Each module is encrypted using a unique <strong>data encryption key (DEK)</strong>. The plaintext never leaves the customer’s device.
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>AES-GCM</span>
-                    <span style={pill}>Per-module DEK</span>
-                  </div>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Bank-specific access (RSA-OAEP)</div>
-                  <div style={whyText}>
-                    When you grant access, the DEK is wrapped to that bank’s <strong>public key</strong> and stored in that bank’s own storage.
-                  </div>
-                  <div style={pillRow}>
-                    <span style={pill}>RSA-OAEP</span>
-                    <span style={pill}>Per-bank keys</span>
-                  </div>
-                </div>
-              </div>
-            </Section>
-
-            <Section
-              k="3"
-              title="What goes on-chain (and what doesn’t)"
-              subtitle="Shared consent signal, private data."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>On-chain</div>
-                  <ul style={whyList}>
-                    <li>
-                      <strong>Module commitments</strong> (content hash + policy hash + URI + label)
-                    </li>
-                    <li>
-                      <strong>Access requests</strong>, <strong>grants</strong>, and <strong>revocations</strong> with expiry
-                    </li>
-                  </ul>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Off-chain</div>
-                  <ul style={whyList}>
-                    <li>The encrypted module payload (ciphertext)</li>
-                    <li>The wrapped DEK stored per bank</li>
-                    <li>All plaintext preferences and PII</li>
-                  </ul>
-                </div>
-              </div>
-            </Section>
-
-            <Section
-              k="4"
-              title="Why banks should care"
-              subtitle="Portable onboarding + enforceable consent without data sprawl."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Portability with control</div>
-                  <div style={whyText}>
-                    Customers can reuse a trusted context package across banks without re‑entering data, while each bank only gets access when granted.
-                  </div>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Operationally realistic</div>
-                  <div style={whyText}>
-                    Banks store ciphertext in their own systems; the chain only carries consent. Revocation immediately blocks future decryptions.
-                  </div>
-                </div>
-              </div>
-
-              <div style={nextStep}>
-                <div style={{ fontWeight: 950, marginBottom: 4 }}>What this unlocks</div>
-                <div style={{ color: "#333", lineHeight: 1.5 }}>
-                  Once consent exists, banks can personalize onboarding, advice, and support — without ever storing raw customer data by default.
-                </div>
-              </div>
-            </Section>
-          </div>
+    /* 1 — Encryption */
+    <div key="enc" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={pTitle}>Encryption + key sharing</div>
+      <div style={pSub}>Same ciphertext, different keys per bank — the plaintext never leaves the customer&apos;s device.</div>
+      <div style={g2}>
+        <div style={wCard}>
+          <div style={wCardTitle}>Content encryption (AES-GCM)</div>
+          <div style={wCardText}>Each module is encrypted using a unique data encryption key (DEK). Only ciphertext and hashes are transmitted.</div>
+          <div style={wPillRow}><span style={wPill}>AES-GCM</span><span style={wPill}>Per-module DEK</span></div>
+        </div>
+        <div style={wCard}>
+          <div style={wCardTitle}>Bank-specific access (RSA-OAEP)</div>
+          <div style={wCardText}>When you grant access, the DEK is wrapped to that bank&apos;s public key and stored in that bank&apos;s own storage only.</div>
+          <div style={wPillRow}><span style={wPill}>RSA-OAEP</span><span style={wPill}>Per-bank keys</span></div>
         </div>
       </div>
+    </div>,
+
+    /* 2 — On-Chain */
+    <div key="chain" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={pTitle}>What goes on-chain (and what doesn&apos;t)</div>
+      <div style={pSub}>The chain is the shared consent audit rail — not the data store.</div>
+      <div style={g2}>
+        <div style={wCard}>
+          <div style={wCardTitle}>On-chain</div>
+          <ul style={wList}>
+            <li>Module commitments (content hash + policy hash + URI + label)</li>
+            <li>Access requests, grants, and revocations with expiry</li>
+          </ul>
+        </div>
+        <div style={wCard}>
+          <div style={wCardTitle}>Off-chain</div>
+          <ul style={wList}>
+            <li>Encrypted module payload (ciphertext)</li>
+            <li>Wrapped DEK stored per bank</li>
+            <li>All plaintext preferences and PII</li>
+          </ul>
+        </div>
+      </div>
+    </div>,
+
+    /* 3 — For Banks */
+    <div key="banks" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={pTitle}>Why banks should care</div>
+      <div style={pSub}>Portable onboarding + enforceable consent without data sprawl.</div>
+      <div style={g2}>
+        <div style={wCard}>
+          <div style={wCardTitle}>Portability with control</div>
+          <div style={wCardText}>Customers reuse a trusted context package across banks without re-entering data. Each bank only gets access when explicitly granted.</div>
+        </div>
+        <div style={wCard}>
+          <div style={wCardTitle}>Operationally realistic</div>
+          <div style={wCardText}>Banks store ciphertext in their own systems; the chain only carries consent. Revocation immediately blocks future decryptions.</div>
+        </div>
+      </div>
+      <div style={wNote}>Once consent exists, banks can personalize onboarding, advice, and support — without ever storing raw customer data by default.</div>
+    </div>,
+  ];
+
+  return (
+    <div style={outer}>
+      <h3 style={heading}>Why this matters</h3>
+      <p style={intro}>Customer-owned context that moves between banks — with enforceable onchain consent and zero PII on the ledger.</p>
+      <div style={tabBar}>
+        {TABS.map((t, i) => (
+          <button key={t} className={`wtm-tab${tab === i ? " wtm-tab-active" : ""}`} onClick={() => setTab(i)}>{t}</button>
+        ))}
+      </div>
+      <div style={panel}>{content[tab]}</div>
     </div>
   );
 }
 
-function Section({
-  k,
-  title,
-  subtitle,
-  children,
-}: {
-  k: string;
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={secWrap}>
-      <div style={secHead}>
-        <div style={secK}>{k}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={secTitle}>{title}</div>
-          <div style={secSub}>{subtitle}</div>
-        </div>
-      </div>
-      <div style={{ marginTop: 10 }}>{children}</div>
-    </div>
-  );
-}
-
-function Chevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/* ---------- Styles ---------- */
+/* ---------- Dark theme style constants ---------- */
 
 const card: React.CSSProperties = {
-  border: "1px solid #e8e8e8",
+  background: "rgba(255,255,255,0.032)",
+  border: "1px solid rgba(255,255,255,0.08)",
   borderRadius: 16,
-  background: "#fff",
   padding: 16,
-  boxShadow: "0 1px 10px rgba(0,0,0,0.04)",
 };
 
 const bankACard: React.CSSProperties = {
-  ...card,
-  background: "linear-gradient(180deg, rgba(64, 118, 255, 0.10) 0%, rgba(255,255,255,1) 180px)",
+  background: "rgba(59,130,246,0.07)",
+  border: "1px solid rgba(59,130,246,0.18)",
+  borderRadius: 16,
+  padding: 16,
 };
 
 const bankBCard: React.CSSProperties = {
-  ...card,
-  background: "linear-gradient(180deg, rgba(46, 170, 110, 0.10) 0%, rgba(255,255,255,1) 180px)",
+  background: "rgba(16,185,129,0.07)",
+  border: "1px solid rgba(16,185,129,0.18)",
+  borderRadius: 16,
+  padding: 16,
 };
 
 const grid2: React.CSSProperties = {
@@ -1826,39 +1678,41 @@ const grid2: React.CSSProperties = {
 };
 
 const miniCard: React.CSSProperties = {
-  border: "1px solid #ededed",
-  borderRadius: 14,
+  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(255,255,255,0.07)",
+  borderRadius: 12,
   padding: 12,
-  background: "#fafafa",
 };
 
 const miniTitle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#666",
+  fontSize: 11,
+  color: "rgba(255,255,255,0.42)",
   fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
   marginBottom: 8,
 };
 
 const btn: React.CSSProperties = {
-  appearance: "none",
-  border: "1px solid #0A4B5C",
-  background: "#0A4B5C",
-  color: "white",
-  padding: "10px 12px",
-  borderRadius: 12,
-  cursor: "pointer",
+  padding: "9px 14px",
+  borderRadius: 10,
+  border: "1px solid #f59e0b",
+  background: "#f59e0b",
+  color: "#000",
   fontWeight: 700,
+  cursor: "pointer",
+  fontSize: 13,
 };
 
 const btnSecondary: React.CSSProperties = {
-  appearance: "none",
-  border: "1px solid #d7d7d7",
-  background: "white",
-  color: "#111",
-  padding: "10px 12px",
-  borderRadius: 12,
-  cursor: "pointer",
+  padding: "9px 14px",
+  borderRadius: 10,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.06)",
+  color: "rgba(255,255,255,0.78)",
   fontWeight: 700,
+  cursor: "pointer",
+  fontSize: 13,
 };
 
 const linkBtn: React.CSSProperties = {
@@ -1871,25 +1725,28 @@ const linkBtn: React.CSSProperties = {
 const input: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  border: "1px solid #dcdcdc",
-  borderRadius: 12,
-  padding: "10px 12px",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: 10,
+  padding: "9px 12px",
   outline: "none",
-  background: "white",
-  color: "#111",
+  background: "rgba(255,255,255,0.05)",
+  color: "#fff",
+  fontSize: 13,
 };
 
 const labelStyle: React.CSSProperties = {
-  fontSize: 13,
-  color: "#444",
+  fontSize: 11,
+  color: "rgba(255,255,255,0.50)",
   fontWeight: 700,
+  letterSpacing: "0.05em",
+  textTransform: "uppercase",
   marginBottom: 6,
 };
 
 const hint: React.CSSProperties = {
   marginTop: 8,
   fontSize: 12,
-  color: "#777",
+  color: "rgba(255,255,255,0.42)",
   lineHeight: 1.5,
 };
 
@@ -1897,226 +1754,24 @@ const mono: React.CSSProperties = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   fontSize: 13,
   wordBreak: "break-all",
+  color: "rgba(255,255,255,0.80)",
 };
 
 const note: React.CSSProperties = {
-  border: "1px solid #e6e6e6",
-  background: "#fbfbfb",
+  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(255,255,255,0.04)",
   padding: 12,
   borderRadius: 12,
-  color: "#333",
+  color: "rgba(255,255,255,0.68)",
   lineHeight: 1.55,
+  fontSize: 13,
 };
 
 const checkWrap: React.CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: 8,
-  fontSize: 14,
-  color: "#333",
-};
-
-/* ---------- “Why this matters” premium styles ---------- */
-
-const whyStickyWrap: React.CSSProperties = {
-  marginTop: 18,
-  position: "sticky",
-  bottom: 14,
-  zIndex: 20,
-};
-
-const whyShell: React.CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 16,
-  overflow: "hidden",
-  background: "rgba(255,255,255,0.88)",
-  backdropFilter: "blur(10px)",
-  boxShadow: "0 10px 24px rgba(0,0,0,0.06)",
-};
-
-const whyHeaderBtn: React.CSSProperties = {
-  width: "100%",
-  border: "none",
-  background: "transparent",
-  padding: 14,
+  fontSize: 13,
+  color: "rgba(255,255,255,0.70)",
   cursor: "pointer",
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: 12,
-};
-
-const whyBadge: React.CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  padding: "4px 10px",
-  borderRadius: 999,
-  background: "#111",
-  color: "#fff",
-  fontWeight: 900,
-  fontSize: 12,
-  flex: "0 0 auto",
-};
-
-const whyTitle: React.CSSProperties = {
-  fontWeight: 900,
-  color: "#111",
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
-const whyRight: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 10,
-  flex: "0 0 auto",
-};
-
-const whyHint: React.CSSProperties = {
-  fontSize: 12,
-  color: "#666",
-  fontWeight: 800,
-};
-
-const chevWrap: React.CSSProperties = {
-  width: 32,
-  height: 32,
-  borderRadius: 12,
-  border: "1px solid #e6e8eb",
-  display: "grid",
-  placeItems: "center",
-  color: "#111",
-  background: "#fff",
-  transition: "transform 180ms ease",
-};
-
-const whyBodyOuter: React.CSSProperties = {
-  borderTop: "1px solid #e6e8eb",
-  overflow: "hidden",
-  transition: "max-height 260ms ease, opacity 200ms ease, transform 200ms ease",
-  willChange: "max-height, opacity, transform",
-};
-
-const whyBodyInner: React.CSSProperties = {
-  padding: 14,
-  background: "#fff",
-};
-
-const secWrap: React.CSSProperties = {
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #eef0f2",
-  background: "#fafafa",
-  marginBottom: 10,
-};
-
-const secHead: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "flex-start",
-};
-
-const secK: React.CSSProperties = {
-  width: 30,
-  height: 30,
-  borderRadius: 12,
-  display: "grid",
-  placeItems: "center",
-  background: "#111",
-  color: "#fff",
-  fontWeight: 950,
-  fontSize: 13,
-  flex: "0 0 auto",
-};
-
-const secTitle: React.CSSProperties = {
-  fontWeight: 950,
-  color: "#111",
-  lineHeight: 1.2,
-};
-
-const secSub: React.CSSProperties = {
-  marginTop: 4,
-  fontSize: 12,
-  color: "#666",
-  lineHeight: 1.45,
-};
-
-const whyGrid2: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-};
-
-const whyCard: React.CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 14,
-  padding: 12,
-  background: "#fff",
-};
-
-const whyCardTitle: React.CSSProperties = {
-  fontWeight: 900,
-  marginBottom: 8,
-  color: "#111",
-};
-
-const whyText: React.CSSProperties = {
-  color: "#333",
-  lineHeight: 1.55,
-  fontSize: 13,
-};
-
-const whyList: React.CSSProperties = {
-  margin: 0,
-  paddingLeft: 18,
-  color: "#333",
-  lineHeight: 1.55,
-};
-
-const whyCode: React.CSSProperties = {
-  fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 12,
-  background: "#f6f8fa",
-  border: "1px solid #e6e8eb",
-  padding: "1px 6px",
-  borderRadius: 8,
-};
-
-const pillRow: React.CSSProperties = {
-  marginTop: 10,
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const pill: React.CSSProperties = {
-  display: "inline-flex",
-  padding: "4px 10px",
-  borderRadius: 999,
-  border: "1px solid #e6e8eb",
-  background: "#fafafa",
-  fontSize: 12,
-  fontWeight: 800,
-  color: "#444",
-};
-
-const bannerNote: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #e6e8eb",
-  background: "#fafafa",
-  color: "#333",
-  lineHeight: 1.5,
-};
-
-const nextStep: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#333",
 };
