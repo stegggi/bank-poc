@@ -1,5 +1,5 @@
 // pages/kyc-badge.tsx
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
@@ -8,57 +8,36 @@ import { publicClient } from "../shared/lib/aa";
 
 const BADGE = (process.env.NEXT_PUBLIC_KYC_BADGE_ADDRESS || "") as `0x${string}`;
 
-// Arbitrum Sepolia: 421614 = 0x66eee
 const ARB_SEPOLIA_HEX = "0x66eee";
 
-const arbTx = (h: string) => `https://sepolia.arbiscan.io/tx/${h}`;
+const arbTx  = (h: string) => `https://sepolia.arbiscan.io/tx/${h}`;
 const arbAddr = (a: string) => `https://sepolia.arbiscan.io/address/${a}`;
-const isAddr = (a?: string) => /^0x[0-9a-fA-F]{40}$/.test(String(a || ""));
+const isAddr  = (a?: string) => /^0x[0-9a-fA-F]{40}$/.test(String(a || ""));
 const fmtDate = (unixSec?: number) => {
   if (!unixSec) return "—";
-  try {
-    return new Date(unixSec * 1000).toLocaleString();
-  } catch {
-    return "—";
-  }
+  try { return new Date(unixSec * 1000).toLocaleString(); } catch { return "—"; }
 };
 
-// Claims bitmask for the MVP trio
-const CLAIM_KYC_STRONG = 1; // bit0
-const CLAIM_CH = 2; // bit1
-const CLAIM_OVER18 = 4; // bit2
+const CLAIM_KYC_STRONG = 1;
+const CLAIM_CH         = 2;
+const CLAIM_OVER18     = 4;
 
 const BADGE_ABI = [
-  { type: "function", name: "owner", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
-  { type: "function", name: "operator", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
-
-  { type: "function", name: "claimOperatorRole", stateMutability: "nonpayable", inputs: [], outputs: [] },
-
+  { type: "function", name: "owner",             stateMutability: "view",        inputs: [],                                                                                           outputs: [{ name: "", type: "address" }] },
+  { type: "function", name: "operator",          stateMutability: "view",        inputs: [],                                                                                           outputs: [{ name: "", type: "address" }] },
+  { type: "function", name: "claimOperatorRole", stateMutability: "nonpayable",  inputs: [],                                                                                           outputs: [] },
+  { type: "function", name: "issue",             stateMutability: "nonpayable",  inputs: [{ name: "wallet", type: "address" }, { name: "validUntil", type: "uint64" }, { name: "claims", type: "uint8" }], outputs: [] },
+  { type: "function", name: "revoke",            stateMutability: "nonpayable",  inputs: [{ name: "wallet", type: "address" }],                                                        outputs: [] },
   {
-    type: "function",
-    name: "issue",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "wallet", type: "address" },
-      { name: "validUntil", type: "uint64" },
-      { name: "claims", type: "uint8" },
-    ],
-    outputs: [],
-  },
-  { type: "function", name: "revoke", stateMutability: "nonpayable", inputs: [{ name: "wallet", type: "address" }], outputs: [] },
-
-  {
-    type: "function",
-    name: "isValid",
-    stateMutability: "view",
+    type: "function", name: "isValid", stateMutability: "view",
     inputs: [{ name: "wallet", type: "address" }],
     outputs: [
-      { name: "valid", type: "bool" },
-      { name: "validUntil", type: "uint64" },
-      { name: "revoked", type: "bool" },
-      { name: "issuer", type: "address" },
+      { name: "valid",        type: "bool"    },
+      { name: "validUntil",   type: "uint64"  },
+      { name: "revoked",      type: "bool"    },
+      { name: "issuer",       type: "address" },
       { name: "operatorAddr", type: "address" },
-      { name: "claims", type: "uint8" },
+      { name: "claims",       type: "uint8"   },
     ],
   },
 ] as const;
@@ -70,50 +49,25 @@ export default function KYCBadge() {
   const { ready, authenticated, login } = usePrivy();
   const { wallets } = useWallets();
 
-  // ✅ Hydration fix: compute origin only after mount
-  const [origin, setOrigin] = useState<string>("");
-
-  // Verifier section
+  const [origin, setOrigin]                 = useState<string>("");
   const [walletToVerify, setWalletToVerify] = useState("");
-  const [verifyStatus, setVerifyStatus] = useState<
-    | ""
-    | "missing"
-    | "invalid_input"
-    | "checking"
-    | "valid"
-    | "expired"
-    | "revoked"
-    | "not_found"
-    | "error"
-  >("");
-  const [verifyResult, setVerifyResult] = useState<{
-    valid: boolean;
-    validUntil: number;
-    revoked: boolean;
-    issuer: string;
-    operator: string;
-    claims: number;
-  } | null>(null);
+  const [verifyStatus, setVerifyStatus]     = useState<"" | "missing" | "invalid_input" | "checking" | "valid" | "expired" | "revoked" | "not_found" | "error">("");
+  const [verifyResult, setVerifyResult]     = useState<{ valid: boolean; validUntil: number; revoked: boolean; issuer: string; operator: string; claims: number } | null>(null);
 
-  // Issuer panel state (Privy EOA as operator)
-  const [issuerStatus, setIssuerStatus] = useState("");
-      const [contractOperator, setContractOperator] = useState<string>("");
+  const [issuerStatus, setIssuerStatus]         = useState("");
+  const [contractOperator, setContractOperator] = useState<string>("");
+  const [issueTarget, setIssueTarget]           = useState<string>("");
+  const [issueDays, setIssueDays]               = useState<number>(90);
+  const [claimStrong, setClaimStrong]           = useState(true);
+  const [claimCH, setClaimCH]                   = useState(true);
+  const [claimOver18, setClaimOver18]           = useState(true);
 
-  const [issueTarget, setIssueTarget] = useState<string>("");
-  const [issueDays, setIssueDays] = useState<number>(90);
-
-  const [claimStrong, setClaimStrong] = useState(true);
-  const [claimCH, setClaimCH] = useState(true);
-  const [claimOver18, setClaimOver18] = useState(true);
+  const [wtmTab, setWtmTab] = useState(0);
 
   const pollingRef = useRef(false);
 
-  // ✅ Hydration fix: set origin client-side only
-  useEffect(() => {
-    setOrigin(window.location.origin);
-  }, []);
+  useEffect(() => { setOrigin(window.location.origin); }, []);
 
-  // Prefill verifier from query /kyc-badge?addr=0x...
   useEffect(() => {
     if (!router.isReady) return;
     const q = router.query?.addr;
@@ -124,7 +78,6 @@ export default function KYCBadge() {
   }, [router.isReady]);
 
   const shareUrl = useMemo(() => {
-    // origin is "" on SSR and first client render → renders "—" consistently → no hydration mismatch
     if (!origin) return "";
     if (!isAddr(walletToVerify)) return origin + "/kyc-badge";
     return origin + "/kyc-badge?addr=" + walletToVerify;
@@ -133,34 +86,20 @@ export default function KYCBadge() {
   const getEmbeddedProvider = async () => {
     const list = (wallets as any[]) || [];
     const embedded =
-      list.find(
-        (w: any) =>
-          typeof w?.getEthereumProvider === "function" &&
-          (w?.chainId === "eip155:421614" || w?.meta?.chainId === "eip155:421614")
-      ) || list.find((w: any) => typeof w?.getEthereumProvider === "function");
+      list.find((w: any) => typeof w?.getEthereumProvider === "function" && (w?.chainId === "eip155:421614" || w?.meta?.chainId === "eip155:421614")) ||
+      list.find((w: any) => typeof w?.getEthereumProvider === "function");
     if (!embedded) throw new Error("No embedded Privy wallet found");
     return embedded.getEthereumProvider();
   };
 
   const ensureChain = async (prov: any) => {
     try {
-      await prov.request({
-        method: "wallet_switchEthereumChain",
-        params: [{ chainId: ARB_SEPOLIA_HEX }],
-      });
+      await prov.request({ method: "wallet_switchEthereumChain", params: [{ chainId: ARB_SEPOLIA_HEX }] });
     } catch (e: any) {
       if (e?.code === 4902) {
         await prov.request({
           method: "wallet_addEthereumChain",
-          params: [
-            {
-              chainId: ARB_SEPOLIA_HEX,
-              chainName: "Arbitrum Sepolia",
-              nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
-              rpcUrls: [process.env.NEXT_PUBLIC_RPC_URL as string],
-              blockExplorerUrls: ["https://sepolia.arbiscan.io"],
-            },
-          ],
+          params: [{ chainId: ARB_SEPOLIA_HEX, chainName: "Arbitrum Sepolia", nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 }, rpcUrls: [process.env.NEXT_PUBLIC_RPC_URL as string], blockExplorerUrls: ["https://sepolia.arbiscan.io"] }],
         });
       }
     }
@@ -168,22 +107,14 @@ export default function KYCBadge() {
 
   const grantIfLow = async (addr: `0x${string}`) => {
     const bal = await publicClient.getBalance({ address: addr });
-    const threshold = BigInt("200000000000000"); // 0.0002 ETH-ish
-    if (bal >= threshold) return;
-
+    if (bal >= BigInt("200000000000000")) return;
     setIssuerStatus("Bank sponsoring gas…");
     try {
-      const r = await fetch("/api/grant", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ to: addr }),
-      });
+      const r = await fetch("/api/grant", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ to: addr }) });
       const j = await r.json();
       if (!r.ok) throw new Error(j?.error || "grant failed");
       setIssuerStatus("Gas sponsored ✅");
-    } catch {
-      setIssuerStatus("Gas sponsor attempt finished.");
-    }
+    } catch { setIssuerStatus("Gas sponsor attempt finished."); }
   };
 
   const refreshContractInfo = async () => {
@@ -191,78 +122,43 @@ export default function KYCBadge() {
     try {
       const op = (await publicClient.readContract({ address: BADGE, abi: BADGE_ABI, functionName: "operator" })) as string;
       setContractOperator(op);
-    } catch {
-      // ignore
-    }
+    } catch { /* ignore */ }
   };
 
-  useEffect(() => {
-    refreshContractInfo();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  useEffect(() => { refreshContractInfo(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, []);
 
   useEffect(() => {
-    if (!BADGE) return;
-    if (pollingRef.current) return;
+    if (!BADGE || pollingRef.current) return;
     pollingRef.current = true;
-
-    const t = setInterval(() => {
-      refreshContractInfo();
-    }, 3500);
-
+    const t = setInterval(refreshContractInfo, 3500);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [BADGE]);
 
-  const decodeClaims = (claims: number) => {
-    const hasStrong = (claims & CLAIM_KYC_STRONG) !== 0;
-    const hasCH = (claims & CLAIM_CH) !== 0;
-    const hasOver18 = (claims & CLAIM_OVER18) !== 0;
-    return { hasStrong, hasCH, hasOver18 };
-  };
+  const decodeClaims = (claims: number) => ({
+    hasStrong: (claims & CLAIM_KYC_STRONG) !== 0,
+    hasCH:     (claims & CLAIM_CH)         !== 0,
+    hasOver18: (claims & CLAIM_OVER18)     !== 0,
+  });
 
   const verify = async () => {
     try {
       setVerifyResult(null);
-
-      if (!BADGE) {
-        setVerifyStatus("missing");
-        return;
-      }
-      if (!isAddr(walletToVerify)) {
-        setVerifyStatus("invalid_input");
-        return;
-      }
-
+      if (!BADGE)               { setVerifyStatus("missing");       return; }
+      if (!isAddr(walletToVerify)) { setVerifyStatus("invalid_input"); return; }
       setVerifyStatus("checking");
 
-      const out = (await publicClient.readContract({
-        address: BADGE,
-        abi: BADGE_ABI,
-        functionName: "isValid",
-        args: [walletToVerify as `0x${string}`],
-      })) as any;
+      const out = (await publicClient.readContract({ address: BADGE, abi: BADGE_ABI, functionName: "isValid", args: [walletToVerify as `0x${string}`] })) as any;
 
-      const valid = Boolean(out?.[0]);
-      const validUntilBig = (out?.[1] ?? BigInt("0")) as bigint;
-      const revoked = Boolean(out?.[2]);
-      const issuer = String(out?.[3] ?? "");
-      const operator = String(out?.[4] ?? "");
-      const claimsBig = (out?.[5] ?? BigInt("0")) as bigint;
+      const valid      = Boolean(out?.[0]);
+      const validUntil = Number((out?.[1] ?? BigInt("0")) as bigint);
+      const revoked    = Boolean(out?.[2]);
+      const issuer     = String(out?.[3] ?? "");
+      const operator   = String(out?.[4] ?? "");
+      const claims     = Number((out?.[5] ?? BigInt("0")) as bigint);
 
-      const validUntil = Number(validUntilBig);
-      const claims = Number(claimsBig);
-
-      const now = Math.floor(Date.now() / 1000);
-      const expired = validUntil > 0 && validUntil < now;
-
-      const nextStatus = revoked
-        ? "revoked"
-        : valid
-        ? expired
-          ? "expired"
-          : "valid"
-        : "not_found";
+      const expired    = validUntil > 0 && validUntil < Math.floor(Date.now() / 1000);
+      const nextStatus = revoked ? "revoked" : valid ? (expired ? "expired" : "valid") : "not_found";
 
       setVerifyResult({ valid, validUntil, revoked, issuer, operator, claims });
       setVerifyStatus(nextStatus as any);
@@ -275,49 +171,32 @@ export default function KYCBadge() {
   const getClaimsMaskFromUI = () => {
     let m = 0;
     if (claimStrong) m |= CLAIM_KYC_STRONG;
-    if (claimCH) m |= CLAIM_CH;
+    if (claimCH)     m |= CLAIM_CH;
     if (claimOver18) m |= CLAIM_OVER18;
     return m;
   };
 
   const ensureIssuerReady = async () => {
     if (!ready) throw new Error("Privy not ready yet");
-    if (!authenticated) {
-      await login();
-      throw new Error("Please retry after login.");
-    }
+    if (!authenticated) { await login(); throw new Error("Please retry after login."); }
     if (!BADGE) throw new Error("Missing NEXT_PUBLIC_KYC_BADGE_ADDRESS");
-
     const eip1193 = await getEmbeddedProvider();
     await ensureChain(eip1193);
-
-    const ethersProvider = new BrowserProvider(eip1193);
-    const signer = await ethersProvider.getSigner();
-    const addr = (await signer.getAddress()) as `0x${string}`;
-
+    const signer = await new BrowserProvider(eip1193).getSigner();
+    const addr   = (await signer.getAddress()) as `0x${string}`;
     await grantIfLow(addr);
-
     return { signer, addr };
   };
 
   const claimOperatorIfNeeded = async (signer: any, addr: `0x${string}`) => {
-    const op = (await publicClient.readContract({
-      address: BADGE,
-      abi: BADGE_ABI,
-      functionName: "operator",
-    })) as string;
-
+    const op = (await publicClient.readContract({ address: BADGE, abi: BADGE_ABI, functionName: "operator" })) as string;
     setContractOperator(op);
-
     if (op?.toLowerCase() === addr.toLowerCase()) return;
-
     setIssuerStatus("Claiming operator role (demo)…");
     const data = BADGE_IFACE.encodeFunctionData("claimOperatorRole", []);
-    const tx = await signer.sendTransaction({ to: BADGE, data });
-
+    const tx   = await signer.sendTransaction({ to: BADGE, data });
     setIssuerStatus(`Operator claim pending… ${arbTx(tx.hash)}`);
     await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
-
     setIssuerStatus(`Operator claimed ✅ ${arbTx(tx.hash)}`);
     await refreshContractInfo();
   };
@@ -325,719 +204,415 @@ export default function KYCBadge() {
   const doIssueOrRenew = async () => {
     try {
       setIssuerStatus("");
-
-      if (!isAddr(issueTarget)) {
-        setIssuerStatus("Please enter a valid target wallet address (0x…).");
-        return;
-      }
-
+      if (!isAddr(issueTarget)) { setIssuerStatus("Please enter a valid target wallet address (0x…)."); return; }
       const { signer, addr } = await ensureIssuerReady();
       await claimOperatorIfNeeded(signer, addr);
-
-      const days = Number.isFinite(issueDays) && issueDays > 0 ? issueDays : 90;
-      const now = Math.floor(Date.now() / 1000);
-      const validUntil = now + Math.floor(days * 24 * 60 * 60);
-
-      const claims = getClaimsMaskFromUI();
-
+      const days       = Number.isFinite(issueDays) && issueDays > 0 ? issueDays : 90;
+      const validUntil = Math.floor(Date.now() / 1000) + Math.floor(days * 86400);
+      const claims     = getClaimsMaskFromUI();
       setIssuerStatus("Issuing / renewing badge…");
-      const data = BADGE_IFACE.encodeFunctionData("issue", [
-        issueTarget as `0x${string}`,
-        BigInt(validUntil),
-        claims,
-      ]);
-      const tx = await signer.sendTransaction({ to: BADGE, data });
-
+      const data = BADGE_IFACE.encodeFunctionData("issue", [issueTarget as `0x${string}`, BigInt(validUntil), claims]);
+      const tx   = await signer.sendTransaction({ to: BADGE, data });
       setIssuerStatus(`Issue pending… ${arbTx(tx.hash)}`);
       await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
-
       setIssuerStatus(`Issued ✅ ${arbTx(tx.hash)}`);
-
       setWalletToVerify(issueTarget);
       await verify();
-    } catch (e: any) {
-      setIssuerStatus(`Issue failed: ${e?.message || e}`);
-    }
+    } catch (e: any) { setIssuerStatus(`Issue failed: ${e?.message || e}`); }
   };
 
   const doRevoke = async () => {
     try {
       setIssuerStatus("");
-
-      if (!isAddr(issueTarget)) {
-        setIssuerStatus("Please enter a valid target wallet address (0x…).");
-        return;
-      }
-
+      if (!isAddr(issueTarget)) { setIssuerStatus("Please enter a valid target wallet address (0x…)."); return; }
       const { signer, addr } = await ensureIssuerReady();
       await claimOperatorIfNeeded(signer, addr);
-
       setIssuerStatus("Revoking badge…");
       const data = BADGE_IFACE.encodeFunctionData("revoke", [issueTarget as `0x${string}`]);
-      const tx = await signer.sendTransaction({ to: BADGE, data });
-
+      const tx   = await signer.sendTransaction({ to: BADGE, data });
       setIssuerStatus(`Revoke pending… ${arbTx(tx.hash)}`);
       await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
-
       setIssuerStatus(`Revoked ✅ ${arbTx(tx.hash)}`);
-
       setWalletToVerify(issueTarget);
       await verify();
-    } catch (e: any) {
-      setIssuerStatus(`Revoke failed: ${e?.message || e}`);
-    }
+    } catch (e: any) { setIssuerStatus(`Revoke failed: ${e?.message || e}`); }
   };
 
+  // --- Badge status pill (dark theme) ---
   const badgePill = (() => {
-    const base: React.CSSProperties = {
-      display: "inline-flex",
-      alignItems: "center",
-      gap: 8,
-      borderRadius: 999,
-      padding: "6px 12px",
-      fontSize: 14,
-      fontWeight: 900,
-      border: "1px solid #e6e8eb",
-      background: "#fff",
-      color: "#111",
+    const base: CSSProperties = {
+      display: "inline-flex", alignItems: "center", gap: 6,
+      borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 700,
+      border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)",
     };
-
-    if (verifyStatus === "valid")
-      return <span style={{ ...base, background: "#e6f9f0", borderColor: "#bfe9d2" }}>Valid ✅</span>;
-    if (verifyStatus === "expired")
-      return <span style={{ ...base, background: "#fff3cd", borderColor: "#ffe3a3" }}>Expired ⏳</span>;
-    if (verifyStatus === "revoked")
-      return <span style={{ ...base, background: "#ffecec", borderColor: "#ffd0d0" }}>Revoked ⛔</span>;
-    if (verifyStatus === "not_found")
-      return <span style={{ ...base, background: "#f5f5f5" }}>No badge</span>;
-    if (verifyStatus === "checking")
-      return <span style={{ ...base, background: "#e6f0ff", borderColor: "#c9d8ff" }}>Checking…</span>;
-    return <span style={base}>—</span>;
+    if (verifyStatus === "valid")     return <span style={{ ...base, background: "rgba(16,185,129,0.15)",  borderColor: "rgba(16,185,129,0.35)",  color: "#34d399" }}>Valid ✅</span>;
+    if (verifyStatus === "expired")   return <span style={{ ...base, background: "rgba(245,158,11,0.15)", borderColor: "rgba(245,158,11,0.35)", color: "#fbbf24" }}>Expired ⏳</span>;
+    if (verifyStatus === "revoked")   return <span style={{ ...base, background: "rgba(239,68,68,0.15)",  borderColor: "rgba(239,68,68,0.35)",  color: "#f87171" }}>Revoked ⛔</span>;
+    if (verifyStatus === "not_found") return <span style={{ ...base }}>No badge found</span>;
+    if (verifyStatus === "checking")  return <span style={{ ...base, background: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)", color: "#a78bfa" }}>Checking…</span>;
+    return null;
   })();
 
   const claimsText = useMemo(() => {
     if (!verifyResult) return null;
-
     const c = decodeClaims(verifyResult.claims || 0);
-    const revoked = Boolean(verifyResult.revoked);
-
+    const rev = Boolean(verifyResult.revoked);
     return (
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <Pill state={revoked ? "revoked" : c.hasStrong ? "on" : "off"} label="KYC_STRONG" />
-        <Pill state={revoked ? "revoked" : c.hasCH ? "on" : "off"} label="CH" />
-        <Pill state={revoked ? "revoked" : c.hasOver18 ? "on" : "off"} label="Age > 18" />
+        <Pill state={rev ? "revoked" : c.hasStrong ? "on" : "off"} label="KYC_STRONG" />
+        <Pill state={rev ? "revoked" : c.hasCH     ? "on" : "off"} label="CH" />
+        <Pill state={rev ? "revoked" : c.hasOver18 ? "on" : "off"} label="Age > 18" />
       </div>
     );
   }, [verifyResult]);
 
+  // --- Style objects ---
+  const page:      CSSProperties = { minHeight: "100vh", background: "#0d0d0d", color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" };
+  const wrap:      CSSProperties = { maxWidth: 780, margin: "0 auto", padding: "24px 20px 64px" };
+  const glassCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20, marginTop: 16 };
+  const miniGlass: CSSProperties = { background: "rgba(255,255,255,0.04)",  border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
+
+  const stepChip:    CSSProperties = { display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 };
+  const sectionTitle: CSSProperties = { fontSize: 16, fontWeight: 700, color: "#fff", margin: 0 };
+  const sectionSub:   CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.52)", marginTop: 4, lineHeight: 1.5 };
+
+  const fieldLabel: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "rgba(255,255,255,0.52)", marginBottom: 6, textTransform: "uppercase" as const };
+  const miniLabel:  CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.42)", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 6 };
+  const monoVal:    CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12, color: "rgba(255,255,255,0.82)", wordBreak: "break-all", lineHeight: 1.5 };
+  const hintText:   CSSProperties = { marginTop: 6, fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.4 };
+
+  const statusBox: CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5, wordBreak: "break-all" };
+  const divider:   CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "18px 0" };
+
+  const contractLink: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.45)", textDecoration: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "4px 10px" };
+
+  // WTM
+  const wtmOuter:     CSSProperties = { marginTop: 32 };
+  const wtmTitle:     CSSProperties = { fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
+  const wtmIntro:     CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55, margin: "0 0 16px" };
+  const wtmTabBar:    CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap" as const, marginBottom: 16 };
+  const wtmPanel:     CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 };
+  const wtmPanelTitle: CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 };
+  const wtmPanelSub:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.55, marginBottom: 14 };
+  const wtmGrid2:     CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 };
+  const wtmCard:      CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
+  const wtmCardTitle: CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
+  const wtmCardText:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
+  const wtmNote:      CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 };
+
+  const WTM_TABS = ["Trust & Verifiers", "Safety", "No PII on-chain", "Upgrade path"];
+
+  const wtmContent = [
+    /* 0: Trust & Verifiers */
+    <div key="trust" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={wtmPanelTitle}>Trust for real-world counterparties</div>
+      <div style={wtmPanelSub}>A plain wallet address is not enough. Banks must attach verifiable identity status so other parties can act on it.</div>
+      <div style={wtmGrid2}>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Verifier-friendly</div>
+          <div style={wtmCardText}>Anyone can check status via a web page or QR link — no crypto wallet, no signatures needed.</div>
+        </div>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Instant yes/no</div>
+          <div style={wtmCardText}>The badge answers "Is this wallet currently KYC-verified?" with an expiry date — fast, deterministic, on-chain.</div>
+        </div>
+      </div>
+    </div>,
+
+    /* 1: Safety */
+    <div key="safety" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={wtmPanelTitle}>Safety: expiry + revocation</div>
+      <div style={wtmPanelSub}>Badges are not permanent. Banks retain a kill-switch if risk changes or the user exits managed custody.</div>
+      <div style={wtmGrid2}>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Expiry keeps it fresh</div>
+          <div style={wtmCardText}>Badges expire (e.g., 90 days). If the user's risk status changes, the badge times out unless renewed — reducing stale-trust risk.</div>
+        </div>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Revocation is instant</div>
+          <div style={wtmCardText}>Account closed, private key exported, or risk triggered? The bank revokes immediately — one transaction, effective globally.</div>
+        </div>
+      </div>
+      <div style={wtmNote}>Demo: seedless wallet stays managed (Privy/bank). If a user requests the private key, the bank revokes the badge first.</div>
+    </div>,
+
+    /* 2: No PII */
+    <div key="pii" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={wtmPanelTitle}>No personal data on-chain</div>
+      <div style={wtmPanelSub}>The chain is a shared audit rail — sensitive identity evidence stays off-chain in the bank's systems.</div>
+      <div style={wtmGrid2}>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>On-chain: minimal status</div>
+          <div style={wtmCardText}>Only validity date, revoked flag, and a tiny claims bitmask (KYC_STRONG, CH, Age&gt;18). No names, documents, or addresses.</div>
+        </div>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Off-chain: full evidence</div>
+          <div style={wtmCardText}>The underlying KYC evidence stays in the bank's systems. The badge is a proof-of-status pointer, not a data dump.</div>
+        </div>
+      </div>
+    </div>,
+
+    /* 3: Upgrade path */
+    <div key="upgrade" style={{ animation: "wtmIn 220ms ease both" }}>
+      <div style={wtmPanelTitle}>Upgrade path: privacy mode</div>
+      <div style={wtmPanelSub}>Today's public badge is great for demos. The next step adds selective disclosure and ZK proofs for government-grade privacy.</div>
+      <div style={wtmGrid2}>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>Public badge (today)</div>
+          <div style={wtmCardText}>Anyone can verify instantly. Useful for low-sensitivity cases where "verified wallet" is sufficient signal.</div>
+        </div>
+        <div style={wtmCard}>
+          <div style={wtmCardTitle}>User-consented proof (next)</div>
+          <div style={wtmCardText}>Verifiable credential + selective disclosure with an on-chain revocation anchor. Share only what's required — nothing more.</div>
+        </div>
+      </div>
+    </div>,
+  ];
+
   return (
     <>
       <NavBar active="kyc-badge" />
-      <div style={{ padding: 24, maxWidth: 1100, margin: "0 auto" }}>
-        <h2 style={{ marginTop: 0, marginBottom: 8 }}>KYC badge</h2>
-        <p style={{ marginTop: 0, color: "#555", lineHeight: 1.55 }}>
-        </p>
+      <div style={page}>
+        <div style={wrap}>
 
-        {/* Issuer panel */}
-        <div style={card}>
-          <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <div>
-              <h3 style={{ margin: 0 }}>Bank issuer panel</h3>
-              <div style={{ marginTop: 6, color: "#666", fontSize: 14, lineHeight: 1.5 }}>
-                This panel simulates the bank's POV when issuing/revoking a KYC badge for a customer.
+          {/* Page header */}
+          <div style={{ marginBottom: 28 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
+              UC 03
+            </div>
+            <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>KYC Badge</h1>
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 560 }}>
+              Issue and verify on-chain identity credentials. Banks mint time-limited badges with embedded claims; any counterparty can verify instantly — no wallet required.
+            </p>
+          </div>
+
+          {/* ── Step 1: Bank Issuer Panel ── */}
+          <div style={glassCard}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={stepChip}>STEP 1 · BANK ISSUER</div>
+                <h2 style={sectionTitle}>Issue or revoke a badge</h2>
+                <p style={sectionSub}>Log in as the bank operator to mint or revoke a KYC badge for a customer wallet.</p>
               </div>
+              {BADGE && (
+                <a href={arbAddr(BADGE)} target="_blank" rel="noreferrer" style={contractLink}>Contract ↗</a>
+              )}
             </div>
-            <a
-              href={BADGE ? arbAddr(BADGE) : "#"}
-              target="_blank"
-              rel="noreferrer"
-              style={{ ...linkBtn, pointerEvents: BADGE ? "auto" : "none", opacity: BADGE ? 1 : 0.5 }}
-            >
-              Contract ↗
-            </a>
-          </div>
 
-          <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-            <div style={miniCard}>
-              <div style={miniTitle}>Current operator</div>
-              <div style={mono}>{contractOperator || "—"}</div>
-              <div style={hint}>
-                This is the address allowed to issue/revoke. After the demo auto-claim, it updates to the logged-in embedded wallet.
+            <hr style={divider} />
+
+            {/* Current operator */}
+            <div style={miniGlass}>
+              <div style={miniLabel}>Current operator</div>
+              <div style={monoVal}>{contractOperator || "—"}</div>
+              <div style={hintText}>The address allowed to issue and revoke badges. Automatically claimed to your embedded wallet on first action (demo).</div>
+            </div>
+
+            {/* Form grid */}
+            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14 }}>
+              <div>
+                <div style={fieldLabel}>Target wallet</div>
+                <input value={issueTarget} onChange={(e) => setIssueTarget(e.target.value.trim())} placeholder="0x…" className="kc-input" />
               </div>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 14, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-            <div style={miniCard}>
-              <div style={miniTitle}>Target wallet</div>
-              <input value={issueTarget} onChange={(e) => setIssueTarget(e.target.value.trim())} placeholder="0x…" style={input} />
-            </div>
-
-            <div style={miniCard}>
-              <div style={miniTitle}>Validity (days)</div>
-              <input value={String(issueDays)} onChange={(e) => setIssueDays(Number(e.target.value || 0))} type="number" min={1} style={input} />
-            </div>
-
-            <div style={miniCard}>
-              <div style={miniTitle}>Claims</div>
-              <label style={checkRow}>
-                <input type="checkbox" checked={claimStrong} onChange={(e) => setClaimStrong(e.target.checked)} />
-                <span>KYC_STRONG</span>
-              </label>
-              <label style={checkRow}>
-                <input type="checkbox" checked={claimCH} onChange={(e) => setClaimCH(e.target.checked)} />
-                <span>Jurisdiction: CH</span>
-              </label>
-              <label style={checkRow}>
-                <input type="checkbox" checked={claimOver18} onChange={(e) => setClaimOver18(e.target.checked)} />
-                <span>Age &gt; 18</span>
-              </label>
-            </div>
-          </div>
-
-          <div style={{ marginTop: 12, display: "flex", gap: 10, flexWrap: "wrap" }}>
-            <button style={btn} onClick={doIssueOrRenew} disabled={!ready}>
-              Issue / renew badge
-            </button>
-            <button style={btnSecondary} onClick={doRevoke} disabled={!ready}>
-              Revoke badge
-            </button>
-          </div>
-
-          {issuerStatus && <div style={{ ...note, marginTop: 10 }}>{issuerStatus}</div>}
-        </div>
-
-        {/* Verifier UI */}
-        <div style={card}>
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-            <h3 style={{ margin: 0 }}>Verifier POV (no wallet required)</h3>
-            {badgePill}
-          </div>
-
-          <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" }}>
-            <div style={{ flex: "1 1 360px" }}>
-              <div style={label}>Wallet to verify</div>
-              <input value={walletToVerify} onChange={(e) => setWalletToVerify(e.target.value.trim())} placeholder="0x…" style={input} />
-            </div>
-            <button onClick={verify} style={btn}>
-              Verify
-            </button>
-          </div>
-
-          {verifyResult && (
-            <>
-              <div style={{ marginTop: 12, display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))" }}>
-                <div style={miniCard}>
-                  <div style={miniTitle}>Operator</div>
-                  <div style={mono}>{verifyResult.operator || "—"}</div>
-                </div>
-                <div style={miniCard}>
-                  <div style={miniTitle}>Valid until</div>
-                  <div style={{ color: "#333", fontSize: 14 }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
+              <div>
+                <div style={fieldLabel}>Validity (days)</div>
+                <input value={String(issueDays)} onChange={(e) => setIssueDays(Number(e.target.value || 0))} type="number" min={1} className="kc-input" />
+              </div>
+              <div>
+                <div style={fieldLabel}>Claims to embed</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 2 }}>
+                  <label className="kc-check"><input type="checkbox" checked={claimStrong} onChange={(e) => setClaimStrong(e.target.checked)} /><span>KYC_STRONG</span></label>
+                  <label className="kc-check"><input type="checkbox" checked={claimCH}     onChange={(e) => setClaimCH(e.target.checked)}     /><span>Jurisdiction: CH</span></label>
+                  <label className="kc-check"><input type="checkbox" checked={claimOver18} onChange={(e) => setClaimOver18(e.target.checked)}  /><span>Age &gt; 18</span></label>
                 </div>
               </div>
+            </div>
 
-              <div style={{ ...miniCard, marginTop: 10 }}>
-                <div style={miniTitle}>Claims</div>
-                {claimsText}
-              </div>
-            </>
-          )}
+            <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
+              <button className="kc-btn kc-btn-primary" onClick={doIssueOrRenew} disabled={!ready}>Issue / renew badge</button>
+              <button className="kc-btn kc-btn-danger"  onClick={doRevoke}       disabled={!ready}>Revoke badge</button>
+            </div>
 
-          {/* ✅ Hydration-safe now */}
-          <div style={{ ...note, marginTop: 12 }}>
-            <strong>Share link:</strong>{" "}
-            <span style={{ fontFamily: "monospace", fontSize: 14, wordBreak: "break-all" }}>
-              {shareUrl || "—"}
-            </span>
+            {issuerStatus && <div style={statusBox}>{issuerStatus}</div>}
           </div>
+
+          {/* ── Step 2: Verifier Panel ── */}
+          <div style={glassCard}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+              <div>
+                <div style={stepChip}>STEP 2 · ANYONE CAN VERIFY</div>
+                <h2 style={sectionTitle}>Verify a badge</h2>
+                <p style={sectionSub}>No wallet needed. Enter any address to check its current KYC status directly on-chain.</p>
+              </div>
+              {badgePill}
+            </div>
+
+            <hr style={divider} />
+
+            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div style={{ flex: "1 1 300px" }}>
+                <div style={fieldLabel}>Wallet address to verify</div>
+                <input value={walletToVerify} onChange={(e) => setWalletToVerify(e.target.value.trim())} placeholder="0x…" className="kc-input" />
+              </div>
+              <button className="kc-btn kc-btn-primary" onClick={verify}>Verify</button>
+            </div>
+
+            {verifyStatus === "invalid_input" && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "rgba(255,255,255,0.62)" }}>Please enter a valid wallet address (0x…).</div>}
+            {verifyStatus === "missing"       && <div style={{ ...statusBox, color: "rgba(255,255,255,0.50)" }}>KYC badge contract address not configured.</div>}
+            {verifyStatus === "error"         && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>Verification failed. Check the address and try again.</div>}
+
+            {verifyResult && (
+              <>
+                <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+                  <div style={miniGlass}>
+                    <div style={miniLabel}>Operator</div>
+                    <div style={monoVal}>{verifyResult.operator || "—"}</div>
+                  </div>
+                  <div style={miniGlass}>
+                    <div style={miniLabel}>Valid until</div>
+                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.82)" }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
+                  </div>
+                </div>
+                <div style={{ ...miniGlass, marginTop: 12 }}>
+                  <div style={miniLabel}>Embedded claims</div>
+                  {claimsText}
+                </div>
+              </>
+            )}
+
+            <hr style={divider} />
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Share link</div>
+            <div style={{ ...monoVal, fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{shareUrl || "—"}</div>
+          </div>
+
+          {/* ── Why This Matters ── */}
+          <div style={wtmOuter}>
+            <h3 style={wtmTitle}>Why this matters</h3>
+            <p style={wtmIntro}>
+              A simple trust layer for regulated blockchain use cases: verifiers get instant yes/no on identity status, while banks retain full control via expiry and revocation.
+            </p>
+
+            <div style={wtmTabBar}>
+              {WTM_TABS.map((tab, i) => (
+                <button
+                  key={tab}
+                  className={`wtm-tab${wtmTab === i ? " wtm-tab-active" : ""}`}
+                  onClick={() => setWtmTab(i)}
+                >
+                  {tab}
+                </button>
+              ))}
+            </div>
+
+            <div style={wtmPanel}>
+              {wtmContent[wtmTab]}
+            </div>
+          </div>
+
         </div>
-
-
-        {/* ✅ Premium sticky accordion: Why this matters */}
-        <WhyThisMatters />
       </div>
+
+      <style jsx global>{`
+        .kc-input {
+          width: 100%;
+          padding: 9px 12px;
+          border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.10);
+          background: rgba(255,255,255,0.05);
+          color: #fff;
+          font-size: 13px;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+          outline: none;
+          box-sizing: border-box;
+          transition: border-color 150ms;
+        }
+        .kc-input::placeholder { color: rgba(255,255,255,0.22); }
+        .kc-input:focus { border-color: rgba(139,92,246,0.50); }
+
+        .kc-check {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          font-size: 13px;
+          color: rgba(255,255,255,0.70);
+          cursor: pointer;
+        }
+        .kc-check input[type="checkbox"] {
+          accent-color: #8b5cf6;
+          width: 15px;
+          height: 15px;
+          cursor: pointer;
+        }
+
+        .kc-btn {
+          padding: 9px 16px;
+          border-radius: 10px;
+          border: 1px solid rgba(255,255,255,0.10);
+          background: rgba(255,255,255,0.06);
+          color: rgba(255,255,255,0.78);
+          font-size: 13px;
+          font-weight: 700;
+          cursor: pointer;
+          transition: background 150ms, border-color 150ms, opacity 150ms;
+        }
+        .kc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .kc-btn-primary {
+          background: #8b5cf6;
+          border-color: #8b5cf6;
+          color: #fff;
+        }
+        .kc-btn-primary:hover:not(:disabled) { background: #7c3aed; border-color: #7c3aed; }
+        .kc-btn-danger {
+          background: rgba(239,68,68,0.10);
+          border-color: rgba(239,68,68,0.22);
+          color: #f87171;
+        }
+        .kc-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.18); }
+
+        .wtm-tab {
+          padding: 6px 14px;
+          border-radius: 8px;
+          border: 1px solid rgba(255,255,255,0.08);
+          background: transparent;
+          color: rgba(255,255,255,0.42);
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 150ms;
+          font-family: inherit;
+        }
+        .wtm-tab:hover { color: rgba(255,255,255,0.68); border-color: rgba(255,255,255,0.14); }
+        .wtm-tab-active {
+          background: rgba(139,92,246,0.14);
+          border-color: rgba(139,92,246,0.35);
+          color: #a78bfa;
+        }
+        @keyframes wtmIn {
+          from { opacity: 0; transform: translateY(6px); }
+          to   { opacity: 1; transform: translateY(0);   }
+        }
+      `}</style>
     </>
   );
 }
 
-
-/* ---------- Premium “Why this matters” (same component style as Bank-B) ---------- */
-
-function WhyThisMatters() {
-  const [open, setOpen] = useState(false);
-  const innerRef = useRef<HTMLDivElement | null>(null);
-  const [maxH, setMaxH] = useState(0);
-
-  useEffect(() => {
-    const update = () => {
-      if (!innerRef.current) return;
-      setMaxH(open ? innerRef.current.scrollHeight : 0);
-    };
-    update();
-    if (typeof window !== "undefined") window.addEventListener("resize", update);
-    return () => {
-      if (typeof window !== "undefined") window.removeEventListener("resize", update);
-    };
-  }, [open]);
-
-  return (
-    <div style={whyStickyWrap}>
-      <div style={whyShell}>
-        <button type="button" onClick={() => setOpen((v) => !v)} style={whyHeaderBtn} aria-expanded={open}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
-            <div style={whyTitleRow}>
-              <span style={whyTitle}>Why this matters</span>
-              <span style={whyMiniTag}>KYC badge</span>
-            </div>
-            <div style={whySubtitle}>
-              A simple trust layer: verifiers can check identity status instantly, without holding a wallet. While the bank keeps control via expiry & revocation option.
-            </div>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={whyHint}>{open ? "Hide" : "Show"}</span>
-            <span style={{ display: "grid", placeItems: "center", width: 34, height: 34, borderRadius: 12, border: "1px solid #e6e8eb", background: "#fff" }}>
-              <span style={{ display: "inline-block", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 180ms ease" }}>
-                <WhyChevron />
-              </span>
-            </span>
-          </div>
-        </button>
-
-        <div style={{ maxHeight: maxH, transition: "max-height 240ms ease", overflow: "hidden" }}>
-          <div ref={innerRef} style={whyBody}>
-            <WhySection
-              k="1"
-              title="Trust for real-world counterparties"
-              subtitle="Private companies and public authorities need to identify who they deal with — a plain wallet address is not enough."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Verifier-friendly</div>
-                  <div style={whyCardText}>
-                    The verifier can check status via a simple web page (or QR link) — no crypto wallet, no signatures required.
-                  </div>
-                  <div style={whyPills}>
-                    <WhyPill>Works for “everyone”</WhyPill>
-                    <WhyPill>No wallet required</WhyPill>
-                  </div>
-                </div>
-
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Instant decision</div>
-                  <div style={whyCardText}>
-                    They only need one answer: “Is this wallet currently verified?” The badge gives a fast yes/no with an expiry date.
-                  </div>
-                  <div style={whyPills}>
-                    <WhyPill>Clear yes/no</WhyPill>
-                    <WhyPill>Expires</WhyPill>
-                  </div>
-                </div>
-              </div>
-            </WhySection>
-
-            <WhySection
-              k="2"
-              title="Safety: expiry + revocation"
-              subtitle="Badges must not be forever. Banks need a kill-switch if risk changes or a key export is requested."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Expiry keeps it fresh</div>
-                  <div style={whyCardText}>
-                    The badge expires (e.g., 90 days). If the user’s KYC or risk status changes, the badge naturally times out unless renewed.
-                  </div>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Revocation is instant</div>
-                  <div style={whyCardText}>
-                    If the user requests the private key, closes the account, or triggers risk rules, the bank revokes the badge immediately.
-                  </div>
-                </div>
-              </div>
-
-              <div style={whyNote}>
-                Demo interpretation: seedless wallet stays managed (Privy/bank). If a user wants the private key, the bank revokes the badge.
-              </div>
-            </WhySection>
-
-            <WhySection
-              k="3"
-              title="No PII on-chain"
-              subtitle="The chain is the shared audit rail — but sensitive identity data stays off-chain."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>On-chain: minimal status</div>
-                  <div style={whyCardText}>
-                    Only validity date, revoked flag, and a tiny claims section (e.g., KYC_STRONG, CH, Age&gt;18). No names, addresses, or documents.
-                  </div>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Off-chain: full evidence</div>
-                  <div style={whyCardText}>
-                    The underlying KYC evidence stays in the bank’s systems. The badge is only a proof-of-status pointer.
-                  </div>
-                </div>
-              </div>
-            </WhySection>
-
-            <WhySection
-              k="4"
-              title="Upgrade path: privacy mode"
-              subtitle="Next step: show only what’s needed (selective disclosure / ZK proofs)."
-            >
-              <div style={whyGrid2}>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>Public badge (today)</div>
-                  <div style={whyCardText}>
-                    Great for demos: anyone can verify instantly. Useful for low-sensitivity cases where “verified wallet” is enough.
-                  </div>
-                </div>
-                <div style={whyCard}>
-                  <div style={whyCardTitle}>User-consented proof (next)</div>
-                  <div style={whyCardText}>
-                    Government-grade version: verifiable credential + selective disclosure, with an on-chain revocation anchor.
-                  </div>
-                  <div style={whyPills}>
-                    <WhyPill>Selective disclosure</WhyPill>
-                    <WhyPill>ZK-friendly</WhyPill>
-                  </div>
-                </div>
-              </div>
-            </WhySection>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function WhySection({
-  k,
-  title,
-  subtitle,
-  children,
-}: {
-  k: string;
-  title: string;
-  subtitle: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={secWrap}>
-      <div style={secHead}>
-        <div style={secK}>{k}</div>
-        <div style={{ minWidth: 0 }}>
-          <div style={secTitle}>{title}</div>
-          <div style={secSub}>{subtitle}</div>
-        </div>
-      </div>
-      <div>{children}</div>
-    </div>
-  );
-}
-
-function WhyPill({ children }: { children: React.ReactNode }) {
-  return <span style={whyPill}>{children}</span>;
-}
-
-function WhyChevron() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-/* ---------- “Why this matters” styles (copied from Bank-B for consistency) ---------- */
-
-const whyStickyWrap: React.CSSProperties = {
-  marginTop: 18,
-  position: "sticky",
-  bottom: 14,
-  zIndex: 20,
-};
-
-const whyShell: React.CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 16,
-  overflow: "hidden",
-  background: "rgba(255,255,255,0.88)",
-  backdropFilter: "blur(10px)",
-  boxShadow: "0 10px 24px rgba(0,0,0,0.06)",
-};
-
-const whyHeaderBtn: React.CSSProperties = {
-  width: "100%",
-  display: "flex",
-  gap: 14,
-  alignItems: "center",
-  justifyContent: "space-between",
-  padding: "14px 14px",
-  background: "transparent",
-  border: "none",
-  cursor: "pointer",
-  textAlign: "left",
-};
-
-const whyTitleRow: React.CSSProperties = {
-  display: "flex",
-  gap: 10,
-  alignItems: "center",
-  flexWrap: "wrap",
-};
-
-const whyTitle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 950,
-  color: "#111",
-  lineHeight: 1.2,
-};
-
-const whyMiniTag: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 900,
-  padding: "4px 8px",
-  borderRadius: 999,
-  background: "#f6f8fa",
-  border: "1px solid #e6e8eb",
-  color: "#333",
-};
-
-const whySubtitle: React.CSSProperties = {
-  fontSize: 14,
-  color: "#666",
-  lineHeight: 1.45,
-  maxWidth: 720,
-};
-
-const whyHint: React.CSSProperties = {
-  fontSize: 14,
-  color: "#666",
-  fontWeight: 800,
-};
-
-const whyBody: React.CSSProperties = {
-  padding: 14,
-  borderTop: "1px solid #e6e8eb",
-  background: "rgba(250,250,250,0.6)",
-};
-
-const secWrap: React.CSSProperties = {
-  border: "1px solid #e6e8eb",
-  borderRadius: 14,
-  background: "#fff",
-  padding: 14,
-  boxShadow: "0 8px 18px rgba(0,0,0,0.05)",
-  marginBottom: 12,
-};
-
-const secHead: React.CSSProperties = {
-  display: "flex",
-  gap: 12,
-  alignItems: "flex-start",
-  marginBottom: 10,
-};
-
-const secK: React.CSSProperties = {
-  width: 28,
-  height: 28,
-  borderRadius: 10,
-  display: "grid",
-  placeItems: "center",
-  background: "#111",
-  color: "#fff",
-  fontWeight: 950,
-  fontSize: 14,
-  flex: "0 0 auto",
-};
-
-const secTitle: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 950,
-  color: "#111",
-  lineHeight: 1.25,
-};
-
-const secSub: React.CSSProperties = {
-  marginTop: 4,
-  fontSize: 14,
-  color: "#666",
-  lineHeight: 1.45,
-};
-
-const whyGrid2: React.CSSProperties = {
-  display: "grid",
-  gap: 10,
-  gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-};
-
-const whyCard: React.CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 14,
-  padding: 12,
-  background: "linear-gradient(180deg, #fff 0%, #fbfbfb 100%)",
-};
-
-const whyCardTitle: React.CSSProperties = {
-  fontWeight: 950,
-  color: "#111",
-  fontSize: 14,
-  letterSpacing: "0.01em",
-};
-
-const whyCardText: React.CSSProperties = {
-  marginTop: 6,
-  fontSize: 14,
-  color: "#444",
-  lineHeight: 1.5,
-};
-
-const whyPills: React.CSSProperties = {
-  marginTop: 10,
-  display: "flex",
-  gap: 8,
-  flexWrap: "wrap",
-};
-
-const whyPill: React.CSSProperties = {
-  fontSize: 14,
-  fontWeight: 900,
-  padding: "4px 8px",
-  borderRadius: 999,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#333",
-};
-
-const whyNote: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #e6e8eb",
-  background: "#f9fafb",
-  color: "#333",
-  fontSize: 14,
-  lineHeight: 1.5,
-};
-
 function Pill({ state, label }: { state: "on" | "off" | "revoked"; label: string }) {
-  const isOn = state === "on";
+  const isOn      = state === "on";
   const isRevoked = state === "revoked";
 
-  const bg = isRevoked ? "#ffecec" : isOn ? "#e6f9f0" : "#f5f5f5";
-  const bd = isRevoked ? "#ffd0d0" : isOn ? "#bfe9d2" : "#e6e8eb";
-  const icon = isRevoked ? "⛔" : isOn ? "✅" : "—";
+  const bg    = isRevoked ? "rgba(239,68,68,0.15)"   : isOn ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)";
+  const bd    = isRevoked ? "rgba(239,68,68,0.30)"   : isOn ? "rgba(16,185,129,0.30)" : "rgba(255,255,255,0.08)";
+  const color = isRevoked ? "#f87171"                : isOn ? "#34d399"               : "rgba(255,255,255,0.38)";
+  const icon  = isRevoked ? "⛔" : isOn ? "✅" : "—";
 
   return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 8,
-        borderRadius: 999,
-        padding: "6px 10px",
-        fontSize: 14,
-        fontWeight: 900,
-        border: "1px solid #e6e8eb",
-        background: bg,
-        borderColor: bd,
-        color: "#111",
-      }}
-    >
+    <span style={{
+      display: "inline-flex", alignItems: "center", gap: 6,
+      borderRadius: 999, padding: "5px 10px",
+      fontSize: 12, fontWeight: 700,
+      border: `1px solid ${bd}`, background: bg, color,
+    }}>
       {label} {icon}
     </span>
   );
 }
-
-/* ---------- Styles ---------- */
-
-const card: React.CSSProperties = {
-  border: "1px solid #ddd",
-  borderRadius: 12,
-  padding: 16,
-  background: "#fafafa",
-  marginTop: 14,
-};
-
-const miniCard: React.CSSProperties = {
-  border: "1px solid #eef0f2",
-  borderRadius: 12,
-  padding: 12,
-  background: "#fff",
-};
-
-const miniTitle: React.CSSProperties = { fontWeight: 900, marginBottom: 6 };
-
-const mono: React.CSSProperties = {
-  fontFamily:
-    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-  fontSize: 14,
-  wordBreak: "break-all",
-};
-
-const hint: React.CSSProperties = { marginTop: 6, fontSize: 12, color: "#666", lineHeight: 1.4 };
-
-const note: React.CSSProperties = {
-  marginTop: 10,
-  padding: 12,
-  borderRadius: 12,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#333",
-  lineHeight: 1.55,
-};
-
-const label: React.CSSProperties = { fontSize: 12, color: "#555", fontWeight: 800 };
-
-const input: React.CSSProperties = {
-  width: "100%",
-  padding: 8,
-  marginTop: 6,
-  borderRadius: 10,
-  border: "1px solid #e6e8eb",
-  fontFamily:
-    "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
-};
-
-const btn: React.CSSProperties = {
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "1px solid #e6e8eb",
-  background: "#111",
-  color: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const btnSecondary: React.CSSProperties = {
-  padding: "9px 12px",
-  borderRadius: 10,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#111",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const linkBtn: React.CSSProperties = {
-  padding: "8px 10px",
-  borderRadius: 10,
-  border: "1px solid #e6e8eb",
-  background: "#fff",
-  color: "#111",
-  fontWeight: 900,
-  textDecoration: "none",
-  fontSize: 14,
-};
-
-const checkRow: React.CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  gap: 8,
-  fontSize: 14,
-  color: "#333",
-  marginTop: 6,
-};

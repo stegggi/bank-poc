@@ -21,6 +21,7 @@ export type UserModulePackageV1 = {
       "bank-a" | "bank-b",
       {
         owner?: string;
+        bundleUrl?: string;
         contextUrl?: string;
         dekUrl?: string;
         updatedAtIso?: string;
@@ -49,6 +50,21 @@ export type BankWrappedDekV1 = {
   owner: string;
   algo: "RSA-OAEP-SHA256";
   encDekB64: string; // RSA wrapped DEK
+  wrappedAtIso: string;
+};
+
+export type BankStoredBundleV1 = {
+  version: 1;
+  moduleId: string;
+  owner: string;
+  label: string;
+  uri: string;
+  ciphertextB64: string;
+  ivB64: string;
+  ciphertextKeccak256: string;
+  encDekB64: string;
+  algo: "RSA-OAEP-SHA256";
+  storedAtIso: string;
   wrappedAtIso: string;
 };
 
@@ -200,6 +216,24 @@ export function toBankStoredPackage(user: UserModulePackageV1, owner: string): B
     ivB64: user.ivB64,
     ciphertextKeccak256: user.ciphertextKeccak256,
     storedAtIso: new Date().toISOString(),
+  };
+}
+
+export function toBankStoredBundle(user: UserModulePackageV1, owner: string, encDekB64: string): BankStoredBundleV1 {
+  const now = new Date().toISOString();
+  return {
+    version: 1,
+    moduleId: user.moduleId,
+    owner,
+    label: user.label,
+    uri: user.uri,
+    ciphertextB64: user.ciphertextB64,
+    ivB64: user.ivB64,
+    ciphertextKeccak256: user.ciphertextKeccak256,
+    encDekB64,
+    algo: "RSA-OAEP-SHA256",
+    storedAtIso: now,
+    wrappedAtIso: now,
   };
 }
 

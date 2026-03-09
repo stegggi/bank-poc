@@ -5,13 +5,12 @@ import NavBar from "../shared/components/NavBar";
 import CONTEXT_PASSPORT_ABI from "../use-cases/uc4-context-passport/lib/ContextPassportABI";
 import {
   UserModulePackageV1,
-  BankWrappedDekV1,
   decryptAesGcm,
   downloadJson,
   b64ToBytes,
   encryptAesGcm,
   sha256Hex,
-  toBankStoredPackage,
+  toBankStoredBundle,
   utf8ToBytes,
   wrapDekRsaOaepB64,
 } from "../use-cases/uc4-context-passport/lib/contextCrypto";
@@ -60,19 +59,27 @@ function getStoredBankBlobRefs(moduleId: string, bank: BankId, owner: string) {
   const refs = pkg?.bankBlobRefs?.[bank];
   if (!refs) return null;
   if (refs.owner && refs.owner.toLowerCase() !== owner.toLowerCase()) return null;
-  if (!refs.contextUrl || !refs.dekUrl) return null;
+  if (!refs.bundleUrl && (!refs.contextUrl || !refs.dekUrl)) return null;
   return refs;
 }
 
-function saveBankBlobRefs(moduleId: string, bank: BankId, owner: string, contextUrl: string, dekUrl: string) {
+function saveBankBlobRefs(
+  moduleId: string,
+  bank: BankId,
+  owner: string,
+  refs: { bundleUrl?: string; contextUrl?: string; dekUrl?: string }
+) {
   const pkg = loadUserPkg(moduleId);
   if (!pkg) return;
+  const existing = pkg.bankBlobRefs?.[bank] || {};
   pkg.bankBlobRefs = {
     ...(pkg.bankBlobRefs || {}),
     [bank]: {
+      ...existing,
       owner: owner.toLowerCase(),
-      contextUrl,
-      dekUrl,
+      bundleUrl: refs.bundleUrl ?? existing.bundleUrl,
+      contextUrl: refs.contextUrl ?? existing.contextUrl,
+      dekUrl: refs.dekUrl ?? existing.dekUrl,
       updatedAtIso: new Date().toISOString(),
     },
   };
@@ -655,6 +662,7 @@ export default function ContextVaultPage() {
         plaintextSha256: await sha256Hex(utf8ToBytes(plaintext)),
         ciphertextKeccak256: contentHash,
         createdAtIso: existing?.createdAtIso ?? new Date().toISOString(),
+        bankBlobRefs: existing?.bankBlobRefs,
       };
       saveUserPkg(pkg);
 
@@ -849,39 +857,28 @@ export default function ContextVaultPage() {
       const bankPem = bank === "bank-a" ? BANK_A_PUB_PEM : BANK_B_PUB_PEM;
       if (!bankPem) throw new Error("Missing bank public key PEM env var.");
 
-      // 1) Upload ciphertext package to bank storage
-      const bankStored = toBankStoredPackage(pkg, walletAddress);
-      const ctxResp = await fetch(`/api/bank/${bank}/context`, {
+      // 1) Upload merged bundle (ciphertext + wrapped DEK) to bank storage
+      const encDekB64 = await wrapDekRsaOaepB64(bankPem, pkg.dekB64);
+      const bundlePayload = toBankStoredBundle(pkg, walletAddress, encDekB64);
+      const bundleResp = await fetch(`/api/bank/${bank}/context`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner: walletAddress, moduleId: customerModuleId, payload: bankStored }),
+        body: JSON.stringify({ owner: walletAddress, moduleId: customerModuleId, payload: bundlePayload }),
       });
-      const ctxJson = await ctxResp.json();
-      if (!ctxResp.ok) throw new Error(ctxJson?.error ?? "Failed to store ciphertext at bank.");
+      const bundleJson = await bundleResp.json();
+      if (!bundleResp.ok) throw new Error(bundleJson?.error ?? "Failed to store encrypted bundle at bank.");
 
-      // 2) Upload wrapped DEK to bank storage
-            const encDekB64 = await wrapDekRsaOaepB64(bankPem, pkg.dekB64);
-            const dekPayload: BankWrappedDekV1 = {
-              version: 1,
-              moduleId: customerModuleId,
-              encDekB64,
-              owner: walletAddress,
-              algo: "RSA-OAEP-SHA256",
-              wrappedAtIso: new Date().toISOString(),
-            };
-            const dekResp = await fetch(`/api/bank/${bank}/dek`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ owner: walletAddress, moduleId: customerModuleId, payload: dekPayload }),
-            });
-            const dekJson = await dekResp.json();
-            if (!dekResp.ok) throw new Error(dekJson?.error ?? "Failed to store wrapped DEK at bank.");
-
-      if (typeof ctxJson?.url === "string" && typeof dekJson?.url === "string") {
-        saveBankBlobRefs(customerModuleId, bank, walletAddress, ctxJson.url, dekJson.url);
+      const bundleUrl =
+        typeof bundleJson?.bundleUrl === "string" ? bundleJson.bundleUrl : typeof bundleJson?.url === "string" ? bundleJson.url : "";
+      if (bundleUrl) {
+        saveBankBlobRefs(customerModuleId, bank, walletAddress, {
+          bundleUrl,
+          contextUrl: bundleUrl,
+          dekUrl: bundleUrl,
+        });
       }
 
-      // 3) Onchain grant
+      // 2) Onchain grant
       const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
       const data = iface.encodeFunctionData("grantAccess", [customerModuleId, bankAddress, expiry, pHash]);
       const hash = await txSendCustomer(data);
@@ -930,8 +927,12 @@ export default function ContextVaultPage() {
         moduleId: bankModuleId,
       });
       const blobRefs = getStoredBankBlobRefs(bankModuleId, bank, bankOwner);
-      if (blobRefs?.contextUrl) params.set("ctxUrl", blobRefs.contextUrl);
-      if (blobRefs?.dekUrl) params.set("dekUrl", blobRefs.dekUrl);
+      if (blobRefs?.bundleUrl) {
+        params.set("bundleUrl", blobRefs.bundleUrl);
+      } else {
+        if (blobRefs?.contextUrl) params.set("ctxUrl", blobRefs.contextUrl);
+        if (blobRefs?.dekUrl) params.set("dekUrl", blobRefs.dekUrl);
+      }
 
       const r = await fetch(`/api/bank/${bank}/plain?${params.toString()}`);
       const j = await r.json();
@@ -1505,7 +1506,7 @@ export default function ContextVaultPage() {
               </div>
 
               <div style={{ ...note, marginTop: 10 }}>
-                <b>Grant</b> does 3 actions: (1) upload ciphertext to that bank’s Blob storage, (2) upload wrapped DEK to that bank’s Blob storage, (3) write onchain consent.
+                <b>Grant</b> does 2 actions: (1) upload one encrypted bundle (ciphertext + wrapped DEK) to that bank’s Blob storage, (2) write onchain consent.
               </div>
             </div>
           </div>

@@ -1,15 +1,25 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import { put } from "@vercel/blob";
+import { recordUc4Write } from "../_lib/blobMetrics";
+import { saveUc4BlobRefs } from "../_lib/blobRefStore";
 
 export const config = { api: { bodyParser: { sizeLimit: "2mb" } } };
 
-const BANK: "bank-b" = "bank-b";
+const BANK = "bank-b" as const;
 
 function isAddress(s: unknown): s is string {
   return typeof s === "string" && /^0x[a-fA-F0-9]{40}$/.test(s);
 }
 function isBytes32(s: unknown): s is string {
   return typeof s === "string" && /^0x[a-fA-F0-9]{64}$/.test(s);
+}
+function hasRequiredBundleFields(payload: unknown): payload is { ciphertextB64: string; ivB64: string; encDekB64: string } {
+  if (!payload || typeof payload !== "object") return false;
+  const p = payload as Record<string, unknown>;
+  return typeof p.ciphertextB64 === "string" && typeof p.ivB64 === "string" && typeof p.encDekB64 === "string";
+}
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -19,12 +29,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const token = process.env.BLOB_READ_WRITE_TOKEN;
     if (!token) return res.status(500).json({ error: "Missing BLOB_READ_WRITE_TOKEN in server env (.env.local). Restart dev server." });
 
-    const { owner, moduleId, payload } = (req.body ?? {}) as any;
+    const body = (req.body ?? {}) as { owner?: unknown; moduleId?: unknown; payload?: unknown };
+    const owner = body.owner;
+    const moduleId = body.moduleId;
+    const payload = body.payload;
     if (!isAddress(owner)) return res.status(400).json({ error: "Invalid owner address." });
     if (!isBytes32(moduleId)) return res.status(400).json({ error: "Invalid moduleId (bytes32)." });
     if (!payload || typeof payload !== "object") return res.status(400).json({ error: "Missing payload object." });
+    if (!hasRequiredBundleFields(payload)) {
+      return res.status(400).json({ error: "Bundle payload missing required fields (ciphertextB64, ivB64, encDekB64)." });
+    }
 
-    const pathname = `uc4/${BANK}/context/${owner.toLowerCase()}/${moduleId.toLowerCase()}.json`;
+    const ownerLc = owner.toLowerCase();
+    const moduleIdLc = moduleId.toLowerCase();
+    const pathname = `uc4/${BANK}/bundle/${ownerLc}/${moduleIdLc}.json`;
 
     const result = await put(pathname, JSON.stringify(payload), {
       access: "public",
@@ -34,9 +52,19 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       token,
     });
 
-    return res.status(200).json({ ok: true, ...result });
-  } catch (e: any) {
+    await saveUc4BlobRefs({
+      bank: BANK,
+      owner: ownerLc,
+      moduleId: moduleIdLc,
+      bundleUrl: result.url,
+      contextUrl: result.url,
+      dekUrl: result.url,
+    });
+    recordUc4Write(BANK, "bundle_put");
+
+    return res.status(200).json({ ok: true, bundleUrl: result.url, ...result });
+  } catch (e: unknown) {
     console.error("[bank-b/context] error:", e);
-    return res.status(500).json({ error: e?.message ?? String(e) });
+    return res.status(500).json({ error: errorMessage(e) });
   }
 }

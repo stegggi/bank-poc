@@ -1,7 +1,8 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { head } from "@vercel/blob";
 import { privateDecrypt, webcrypto } from "crypto";
 import { ethers } from "ethers";
+import { getUc4BlobRefs } from "../_lib/blobRefStore";
+import { recordUc4Read, type Uc4ReadSource } from "../_lib/blobMetrics";
 
 // IMPORTANT: this file is expected at: pages/api/bank/[bank]/plain.ts
 // The ABI import path assumes: /lib/ContextPassportABI.ts|json at project root.
@@ -13,19 +14,11 @@ function isHexAddress(s: string): boolean {
 function isBytes32(s: string): boolean {
   return /^0x[a-fA-F0-9]{64}$/.test(s);
 }
-const BANK: "bank-a" | "bank-b" = "bank-b";
+const BANK = "bank-b" as const;
 function pemFromEnv(value?: string): string {
   if (!value) return "";
   const cleaned = value.replace(/^"+|"+$/g, "").replace(/\r/g, "");
   return cleaned.includes("\\n") ? cleaned.replace(/\\n/g, "\n") : cleaned;
-}
-function contextPath(bank: string, owner: string, moduleId: string): string {
-  // Must match put() path in /api/bank/<bank>/context
-  return `uc4/${bank}/context/${owner.toLowerCase()}/${moduleId.toLowerCase()}.json`;
-}
-function dekPath(bank: string, owner: string, moduleId: string): string {
-  // Must match put() path in /api/bank/<bank>/dek
-  return `uc4/${bank}/dek/${owner.toLowerCase()}/${moduleId.toLowerCase()}.json`;
 }
 function b64ToBytes(b64: string): Uint8Array {
   const buf = Buffer.from(b64, "base64");
@@ -41,20 +34,15 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
-async function fetchBlobJson(primaryUrl?: string | null, fallbackPath?: string | null) {
-  if (primaryUrl && isHttpUrl(primaryUrl)) {
-    const resp = await fetch(primaryUrl, { cache: "no-store" });
-    if (resp.ok) return await resp.json();
-  }
-  if (!fallbackPath) {
-    throw new Error("Blob URL unavailable.");
-  }
-  const meta = await head(fallbackPath);
-  const resp = await fetch(meta.url, { cache: "no-store" });
+async function fetchBlobJson(url: string) {
+  const resp = await fetch(url, { cache: "no-store" });
   if (!resp.ok) {
     throw new Error("Blob fetch failed.");
   }
-  return await resp.json();
+  return (await resp.json()) as Record<string, unknown>;
+}
+function errorMessage(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -68,11 +56,14 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const owner = String(req.query.owner || "");
     const moduleId = String(req.query.moduleId || "");
+    const bundleUrl = String(req.query.bundleUrl || "");
     const ctxUrl = String(req.query.ctxUrl || "");
     const dekUrl = String(req.query.dekUrl || "");
 
     if (!isHexAddress(owner)) return res.status(400).json({ ok: false, error: "Invalid owner address." });
     if (!isBytes32(moduleId)) return res.status(400).json({ ok: false, error: "Invalid moduleId (bytes32)." });
+    const ownerLc = owner.toLowerCase();
+    const moduleIdLc = moduleId.toLowerCase();
 
     const contractAddr = process.env.NEXT_PUBLIC_CONTEXT_PASSPORT_ADDRESS || "";
     if (!ethers.isAddress(contractAddr)) {
@@ -82,10 +73,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const rpcUrl = process.env.RPC_URL || process.env.NEXT_PUBLIC_RPC_URL || "";
     if (!rpcUrl) return res.status(500).json({ ok: false, error: "Missing RPC_URL (server-side)." });
 
-    const bankAddress =
-      bank === "bank-a"
-        ? (process.env.NEXT_PUBLIC_BANK_A_ADDRESS || "")
-        : (process.env.NEXT_PUBLIC_BANK_B_ADDRESS || "");
+    const bankAddress = process.env.NEXT_PUBLIC_BANK_B_ADDRESS || "";
 
     if (!ethers.isAddress(bankAddress)) {
       return res.status(500).json({ ok: false, error: "Missing NEXT_PUBLIC_BANK_*_ADDRESS." });
@@ -93,32 +81,54 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // 1) Verify on-chain access for this bank
     const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const contract = new ethers.Contract(contractAddr, CONTEXT_PASSPORT_ABI as any, provider);
+    const contract = new ethers.Contract(contractAddr, CONTEXT_PASSPORT_ABI as ethers.InterfaceAbi, provider);
 
     const allowed: boolean = await contract.hasAccess(moduleId, bankAddress);
     if (!allowed) {
       return res.status(403).json({ ok: false, error: "No onchain access (grant missing/expired/revoked)." });
     }
 
-    // 2) Load ciphertext package (public blob)
-    let ctxPkg;
-    try {
-      ctxPkg = await fetchBlobJson(ctxUrl, contextPath(bank, owner, moduleId));
-    } catch {
-      return res.status(404).json({ ok: false, error: "Ciphertext not found in bank storage." });
-    }
+    // 2) Resolve blob URLs from query first, then server-side refs
+    const refs = await getUc4BlobRefs(bank, ownerLc, moduleIdLc);
 
-    // 3) Load wrapped DEK package (public blob)
-    let dekPkg;
+    const hasQueryBundle = isHttpUrl(bundleUrl);
+    const hasServerBundle = !!refs?.bundleUrl && isHttpUrl(refs.bundleUrl);
+    const resolvedCtxUrl = isHttpUrl(ctxUrl) ? ctxUrl : refs?.contextUrl && isHttpUrl(refs.contextUrl) ? refs.contextUrl : "";
+    const resolvedDekUrl = isHttpUrl(dekUrl) ? dekUrl : refs?.dekUrl && isHttpUrl(refs.dekUrl) ? refs.dekUrl : "";
+
+    let source: Uc4ReadSource = "missing";
+    let ctxPkg: Record<string, unknown> | null = null;
+    let dekPkg: Record<string, unknown> | null = null;
+
     try {
-      dekPkg = await fetchBlobJson(dekUrl, dekPath(bank, owner, moduleId));
+      if (hasQueryBundle) {
+        source = "query_bundle";
+        const bundle = await fetchBlobJson(bundleUrl);
+        ctxPkg = bundle;
+        dekPkg = bundle;
+      } else if (hasServerBundle && refs?.bundleUrl) {
+        source = "server_bundle";
+        const bundle = await fetchBlobJson(refs.bundleUrl);
+        ctxPkg = bundle;
+        dekPkg = bundle;
+      } else if (resolvedCtxUrl && resolvedDekUrl) {
+        source = isHttpUrl(ctxUrl) && isHttpUrl(dekUrl) ? "query_legacy_pair" : "server_legacy_pair";
+        ctxPkg = await fetchBlobJson(resolvedCtxUrl);
+        dekPkg = resolvedCtxUrl === resolvedDekUrl ? ctxPkg : await fetchBlobJson(resolvedDekUrl);
+      }
     } catch {
-      return res.status(404).json({ ok: false, error: "Wrapped DEK not found in bank storage." });
+      recordUc4Read(bank, source === "missing" ? "missing" : source);
+      return res.status(404).json({ ok: false, error: "Blob fetch failed from resolved URL(s)." });
     }
+    if (!ctxPkg || !dekPkg) {
+      recordUc4Read(bank, "missing");
+      return res.status(404).json({ ok: false, error: "Blob URL unavailable. Re-grant access to refresh server refs." });
+    }
+    recordUc4Read(bank, source);
 
     const ciphertextB64 = String(ctxPkg.ciphertextB64 || "");
     const ivB64 = String(ctxPkg.ivB64 || "");
-    const encDekB64 = String(dekPkg.encDekB64 || "");
+    const encDekB64 = String(dekPkg.encDekB64 || ctxPkg.encDekB64 || "");
 
     if (!ciphertextB64 || !ivB64 || !encDekB64) {
       return res.status(400).json({ ok: false, error: "Stored packages missing required fields." });
@@ -134,10 +144,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // 5) Decrypt DEK using this bank's private RSA key
-    const privPem =
-      bank === "bank-a"
-        ? pemFromEnv(process.env.BANK_A_RSA_PRIVATE_KEY_PEM)
-        : pemFromEnv(process.env.BANK_B_RSA_PRIVATE_KEY_PEM);
+    const privPem = pemFromEnv(process.env.BANK_B_RSA_PRIVATE_KEY_PEM);
 
     if (!privPem) return res.status(500).json({ ok: false, error: "Missing bank private key env var." });
 
@@ -156,8 +163,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       moduleId,
       plaintext,
       verifiedHash: true,
+      blobLookupSource: source,
     });
-  } catch (e: any) {
-    return res.status(500).json({ ok: false, error: e?.message ?? String(e) });
+  } catch (e: unknown) {
+    return res.status(500).json({ ok: false, error: errorMessage(e) });
   }
 }
