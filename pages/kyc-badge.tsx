@@ -274,12 +274,12 @@ export default function KYCBadge() {
 
   const stepChip:    CSSProperties = { display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 };
   const sectionTitle: CSSProperties = { fontSize: 16, fontWeight: 700, color: "#fff", margin: 0 };
-  const sectionSub:   CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.52)", marginTop: 4, lineHeight: 1.5 };
+  const sectionSub:   CSSProperties = { fontSize: 14, color: "rgba(255,255,255,0.60)", marginTop: 4, lineHeight: 1.6 };
 
-  const fieldLabel: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "rgba(255,255,255,0.52)", marginBottom: 6, textTransform: "uppercase" as const };
-  const miniLabel:  CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.42)", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 6 };
-  const monoVal:    CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 12, color: "rgba(255,255,255,0.82)", wordBreak: "break-all", lineHeight: 1.5 };
-  const hintText:   CSSProperties = { marginTop: 6, fontSize: 11, color: "rgba(255,255,255,0.38)", lineHeight: 1.4 };
+  const fieldLabel: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "rgba(255,255,255,0.60)", marginBottom: 6, textTransform: "uppercase" as const };
+  const miniLabel:  CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.52)", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 6 };
+  const monoVal:    CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, color: "rgba(255,255,255,0.88)", wordBreak: "break-all", lineHeight: 1.55 };
+  const hintText:   CSSProperties = { marginTop: 6, fontSize: 12, color: "rgba(255,255,255,0.52)", lineHeight: 1.55 };
 
   const statusBox: CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5, wordBreak: "break-all" };
   const divider:   CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "18px 0" };
@@ -298,7 +298,7 @@ export default function KYCBadge() {
   const wtmCard:      CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
   const wtmCardTitle: CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
   const wtmCardText:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
-  const wtmNote:      CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 };
+  const wtmNote:      CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.6 };
 
   const WTM_TABS = ["Trust & Verifiers", "Safety", "No PII on-chain", "Upgrade path"];
 

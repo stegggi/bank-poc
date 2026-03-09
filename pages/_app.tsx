@@ -1,5 +1,6 @@
 import type { AppProps } from 'next/app';
 import { PrivyProvider } from '@privy-io/react-auth';
+import '../styles/globals.css';
 
 export default function App({ Component, pageProps }: AppProps) {
   return (

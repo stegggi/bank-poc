@@ -1282,7 +1282,7 @@ export default function ContextVaultPage() {
   };
   const wrap: React.CSSProperties = { maxWidth: 1000, margin: "0 auto", padding: "24px 20px 64px" };
   const sectionHeading: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", margin: "0 0 4px" };
-  const sectionSub: React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.50)", lineHeight: 1.5, marginBottom: 14 };
+  const sectionSub: React.CSSProperties = { fontSize: 14, color: "rgba(255,255,255,0.62)", lineHeight: 1.6, marginBottom: 14 };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "14px 0" };
   const statusTag = (connected: boolean, right?: boolean) => ({
     fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
@@ -1867,7 +1867,7 @@ const miniCard: React.CSSProperties = {
 
 const miniTitle: React.CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.55)",
   fontWeight: 700,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
@@ -1917,7 +1917,7 @@ const input: React.CSSProperties = {
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.50)",
+  color: "rgba(255,255,255,0.62)",
   fontWeight: 700,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
@@ -1927,8 +1927,8 @@ const labelStyle: React.CSSProperties = {
 const hint: React.CSSProperties = {
   marginTop: 8,
   fontSize: 12,
-  color: "rgba(255,255,255,0.42)",
-  lineHeight: 1.5,
+  color: "rgba(255,255,255,0.55)",
+  lineHeight: 1.55,
 };
 
 const mono: React.CSSProperties = {
@@ -1943,8 +1943,8 @@ const note: React.CSSProperties = {
   background: "rgba(255,255,255,0.04)",
   padding: 12,
   borderRadius: 12,
-  color: "rgba(255,255,255,0.68)",
-  lineHeight: 1.55,
+  color: "rgba(255,255,255,0.75)",
+  lineHeight: 1.6,
   fontSize: 13,
 };
 
