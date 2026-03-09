@@ -54,8 +54,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         cooldownAfterCloseSec: Number(cfg.flipCooldownSec || current.flipCooldownSec || current.cooldownAfterCloseSec || 15),
         entryMakerPreferred: true,
         entryMarketFallbackEnabled: false,
-        minExpectedMoveBps: 0,
-        edgeCostMultiplier: 0,
+        minExpectedMoveBps: Number(cfg.minExpectedMoveBps ?? current.minExpectedMoveBps ?? 0),
+        edgeCostMultiplier: Number(cfg.edgeCostMultiplier ?? current.edgeCostMultiplier ?? 0),
         emergencyBreakoutEnabled: false,
       };
 
