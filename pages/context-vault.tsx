@@ -1292,6 +1292,24 @@ export default function ContextVaultPage() {
     borderRadius: 999,
   } as React.CSSProperties);
 
+  const connectedBankId: BankId | null = isBankAddressSelected("bank-a") ? "bank-a" : isBankAddressSelected("bank-b") ? "bank-b" : null;
+  const custStep1Done = authenticated;
+  const custStep2Done = customerModuleExistsOnchain && !!localPkgForSelected;
+  const bankStep1Done = bankConnected && bankOnRightChain;
+
+  /* ── step circle helper ── */
+  const stepCircle = (n: number, done: boolean, locked: boolean) => (
+    <div style={{
+      width: 28, height: 28, borderRadius: "50%",
+      background: done ? "#34d399" : locked ? "rgba(255,255,255,0.06)" : accent,
+      color: done ? "#000" : locked ? "rgba(255,255,255,0.25)" : "#000",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      fontSize: 13, fontWeight: 800, flexShrink: 0,
+    }}>
+      {done ? "✓" : n}
+    </div>
+  );
+
   return (
     <>
       <NavBar active="context-vault" />
@@ -1299,219 +1317,382 @@ export default function ContextVaultPage() {
         <div style={wrap}>
 
           {/* ── Page header ── */}
-          <div style={{ marginBottom: 28 }}>
+          <div style={{ marginBottom: 36 }}>
             <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: accent, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
               UC 04
             </div>
             <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>Context Passport</h1>
-            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 580 }}>
-              Customer-owned encrypted context modules with onchain consent and per-bank storage. Banks can store ciphertext, but only decrypt after explicit consent.
+            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 600 }}>
+              Customer-owned encrypted context modules. You control who can decrypt &mdash; with onchain-enforced consent.
             </p>
           </div>
 
-          {/* ── Sessions ── */}
-          <div style={card}>
-            <div style={{ display: "grid", gap: 14, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
-
-              {/* Customer (Privy) */}
-              <div style={miniCard}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Customer session (Privy)</div>
-                  <div style={statusTag(authenticated)}>{mounted ? (authenticated ? "connected" : "disconnected") : "…"}</div>
-                </div>
-                <div style={hint}>Contract: <span style={mono}>{uiContract}</span></div>
-                <div style={hint}>Wallet: <span style={mono}>{uiCustomerWallet}</span></div>
-                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {!authenticated
-                    ? <button style={btn} disabled={!ready || !mounted} onClick={login}>Login</button>
-                    : <button style={btnSecondary} onClick={logout}>Logout</button>
-                  }
-                  <button style={btnSecondary} disabled={!canUseCustomer} onClick={loadModules}>Refresh</button>
-                  {lastTx && <a style={linkBtn} href={`${EXPLORER_TX}${lastTx}`} target="_blank" rel="noreferrer">Tx ↗</a>}
-                </div>
-              </div>
-
-              {/* Bank wallet (MetaMask) */}
-              <div style={miniCard}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>Bank wallet (MetaMask)</div>
-                  <div style={{
-                    fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", padding: "2px 8px", borderRadius: 999,
-                    color: bankConnected ? (bankOnRightChain ? "rgba(52,211,153,0.9)" : "#fbbf24") : "rgba(255,255,255,0.40)",
-                    border: `1px solid ${bankConnected ? (bankOnRightChain ? "rgba(52,211,153,0.28)" : "rgba(251,191,36,0.28)") : "rgba(255,255,255,0.08)"}`,
-                  }}>
-                    {mounted ? (bankConnected ? (bankOnRightChain ? "ready" : "wrong network") : "disconnected") : "…"}
-                  </div>
-                </div>
-                <div style={hint}>Address: <span style={mono}>{mounted ? (bankAddress || "—") : "…"}</span></div>
-                <div style={hint}>ChainId: <span style={mono}>{mounted ? (bankChainId === null ? "—" : String(bankChainId)) : "…"}</span></div>
-                <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {!bankConnected
-                    ? <button style={btn} disabled={!mounted || bankBusy} onClick={connectBankWallet}>{bankBusy ? "Connecting…" : "Connect MetaMask"}</button>
-                    : <button style={btnSecondary} onClick={disconnectBankWallet}>Disconnect</button>
-                  }
-                  <button style={btnSecondary} disabled={!mounted || !bankConnected || bankOnRightChain} onClick={switchBankChain}>Switch chain</button>
-                </div>
-                {bankErr && <div style={{ ...note, marginTop: 10, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>{bankErr}</div>}
-                <div style={{ ...note, marginTop: 10, fontSize: 12 }}>Switch MetaMask accounts to act as Bank A vs Bank B.</div>
-              </div>
-            </div>
-
-            {(status || err) && (
-              <div style={{ ...note, marginTop: 14 }}>
-                {status && <div style={{ fontWeight: 700, color: "#fff" }}>{status}</div>}
-                {err && <div style={{ color: "#f87171", marginTop: status ? 6 : 0 }}>{err}</div>}
-              </div>
-            )}
-          </div>
-
-          {/* ── Customer: Module editor + Consent ── */}
-          <div style={grid2}>
-
-            {/* Create / update */}
-            <div style={card}>
-              <div style={sectionHeading}>Create / update module</div>
-              <div style={sectionSub}>Fields are encrypted locally. Only hashes + pointers go onchain.</div>
-
-              <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" }}>
-                <div style={miniCard}>
-                  <div style={miniTitle}>Module template</div>
-                  {renderModuleSelector(!canUseCustomer)}
-                  {moduleStatusLine}
-                </div>
-                <div style={miniCard}>
-                  <div style={miniTitle}>Sharing policy (hashed onchain)</div>
-                  <input style={input} value={policyByKey[selectedKey]} onChange={(e) => setPolicyByKey({ ...policyByKey, [selectedKey]: e.target.value })} />
-                  <div style={hint}>Non-sensitive. Will be hashed and stored onchain.</div>
-                </div>
-              </div>
-
-              <div style={{ ...miniCard, marginTop: 12 }}>
-                <div style={miniTitle}>Module fields</div>
-                {renderFieldsForSelected()}
-              </div>
-
-              <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                <button style={btn} disabled={!canUseCustomer} onClick={saveSelectedModule}>Save (create / update)</button>
-                <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={exportSelected}>Export</button>
-                <button style={btnSecondary} disabled={!isBytes32(customerModuleId)} onClick={previewDecryptLocal}>Decrypt locally</button>
-                <label style={{ ...btnSecondary, display: "inline-flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                  Import
-                  <input type="file" accept="application/json" style={{ display: "none" }} onChange={(e) => { const f = e.target.files?.[0]; if (f) void importUserPackage(f); }} />
-                </label>
-              </div>
-
-              {!localPkgForSelected && customerModuleExistsOnchain && (
-                <div style={{ ...note, marginTop: 10, fontSize: 12 }}>
-                  Module exists onchain but no local DEK package found on this device. Import the exported JSON to edit or grant it.
-                </div>
+          {/* ── Global status bar ── */}
+          {(status || err) && (
+            <div style={{ ...note, marginBottom: 20, borderColor: err ? "rgba(239,68,68,0.25)" : "rgba(52,211,153,0.18)" }}>
+              {status && <div style={{ fontWeight: 700, color: "#fff" }}>{status}</div>}
+              {err && <div style={{ color: "#f87171", marginTop: status ? 6 : 0 }}>{err}</div>}
+              {lastTx && (
+                <a style={{ ...linkBtn, marginTop: 8, display: "inline-flex" }} href={`${EXPLORER_TX}${lastTx}`} target="_blank" rel="noreferrer">
+                  View transaction ↗
+                </a>
               )}
             </div>
+          )}
 
-            {/* Consent */}
-            <div style={card}>
-              <div style={sectionHeading}>Modules & consent</div>
-              <div style={sectionSub}>Grant uploads ciphertext + wrapped DEK to the bank&apos;s storage and writes onchain consent.</div>
+          {/* ── Two journeys grid ── */}
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))", gap: 28, alignItems: "start" }}>
 
-              <div style={miniCard}>
-                <div style={miniTitle}>Select module</div>
-                {renderModuleSelector(!canUseCustomer)}
-                {moduleStatusLine}
+            {/* ════ CUSTOMER JOURNEY ════ */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>Customer Journey</div>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Privy embedded wallet</div>
               </div>
 
-              <div style={{ ...miniCard, marginTop: 12 }}>
-                <div style={miniTitle}>Consent settings</div>
-                <div style={labelStyle}>Expiry in days (0 = no expiry)</div>
-                <input style={input} value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
-                <div style={{ marginTop: 12 }}>
-                  <div style={labelStyle}>Purpose (hashed onchain)</div>
-                  <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+              {/* ─ C-Step 1: Connect wallet ─ */}
+              <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(1, custStep1Done, false)}
+                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
                 </div>
+                <div style={{ flex: 1, paddingBottom: 20 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: custStep1Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                    Connect your wallet
+                  </div>
+                  {custStep1Done ? (
+                    <div style={{ ...miniCard, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+                      <div>
+                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Wallet address</div>
+                        <div style={{ ...mono, fontSize: 12 }}>{uiCustomerWallet}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8 }}>
+                        <button style={btnSecondary} disabled={!canUseCustomer} onClick={loadModules}>Refresh</button>
+                        <button style={btnSecondary} onClick={logout}>Logout</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 14, lineHeight: 1.5 }}>
+                        Sign in with your embedded wallet to create and manage context modules.
+                      </div>
+                      <button style={btn} disabled={!ready || !mounted} onClick={login}>Login with Privy</button>
+                      <div style={{ marginTop: 10 }}>
+                        <div style={hint}>Contract: <span style={mono}>{uiContract}</span></div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
 
-                <hr style={divider} />
-
-                <div style={{ display: "grid", gap: 12, gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))" }}>
-                  {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
-                    const uiAddr = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
-                    return (
-                      <div key={bank} style={miniCard}>
-                        <div style={miniTitle}>{bankLabel(bank)}</div>
-                        <div style={hint}>Grantee: <span style={mono}>{uiAddr}</span></div>
-                        <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                          <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank(bank)}>Grant</button>
-                          <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank(bank)}>Revoke</button>
+              {/* ─ C-Step 2: Build module ─ */}
+              <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(2, custStep2Done, !custStep1Done)}
+                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                </div>
+                <div style={{ flex: 1, paddingBottom: 20 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(255,255,255,0.28)" : custStep2Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                    Build your context module
+                  </div>
+                  {!custStep1Done ? (
+                    <div style={{ ...card, opacity: 0.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", marginBottom: 12 }}>
+                        <div>
+                          <div style={labelStyle}>Module type</div>
+                          {renderModuleSelector(!canUseCustomer)}
                         </div>
-                        <div style={{ marginTop: 10 }}>
-                          <div style={labelStyle}>Access status</div>
-                          <div style={{ display: "grid", gap: 5 }}>
+                        <div>
+                          <div style={labelStyle}>Sharing policy (hashed onchain)</div>
+                          <input
+                            style={input}
+                            value={policyByKey[selectedKey]}
+                            onChange={(e) => setPolicyByKey({ ...policyByKey, [selectedKey]: e.target.value })}
+                          />
+                          <div style={hint}>Non-sensitive. Hashed onchain.</div>
+                        </div>
+                      </div>
+                      {moduleStatusLine}
+                      <div style={{ ...miniCard, marginTop: 12, marginBottom: 12 }}>
+                        <div style={miniTitle}>Module fields</div>
+                        {renderFieldsForSelected()}
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button style={btn} disabled={!canUseCustomer} onClick={saveSelectedModule}>
+                          {customerModuleExistsOnchain ? "Update module" : "Create module"}
+                        </button>
+                        <button style={btnSecondary} disabled={!localPkgForSelected} onClick={previewDecryptLocal}>Preview</button>
+                        <button style={btnSecondary} disabled={!localPkgForSelected} onClick={exportSelected}>Export</button>
+                        <label style={{ ...btnSecondary, display: "inline-flex", alignItems: "center", cursor: "pointer" }}>
+                          Import
+                          <input
+                            type="file"
+                            accept="application/json"
+                            style={{ display: "none" }}
+                            onChange={(e) => { const f = e.target.files?.[0]; if (f) void importUserPackage(f); }}
+                          />
+                        </label>
+                      </div>
+                      {!localPkgForSelected && customerModuleExistsOnchain && (
+                        <div style={{ ...note, marginTop: 10, fontSize: 12 }}>
+                          Module exists onchain but no local DEK found on this device. Import the exported JSON to edit or grant.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─ C-Step 3: Grant access ─ */}
+              <div style={{ display: "flex", gap: 14 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(3, false, !custStep1Done)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                    Share with banks
+                  </div>
+                  {!custStep1Done ? (
+                    <div style={{ ...card, opacity: 0.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", marginBottom: 14 }}>
+                        <div>
+                          <div style={labelStyle}>Expiry (days, 0 = forever)</div>
+                          <input style={input} value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
+                        </div>
+                        <div>
+                          <div style={labelStyle}>Purpose (hashed onchain)</div>
+                          <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+                        </div>
+                      </div>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                        {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
+                          const uiAddr = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
+                          return (
+                            <div key={bank} style={miniCard}>
+                              <div style={miniTitle}>{bankLabel(bank)}</div>
+                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginBottom: 10, wordBreak: "break-all" }}>{uiAddr}</div>
+                              <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
+                                <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank(bank)}>Grant</button>
+                                <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank(bank)}>Revoke</button>
+                              </div>
+                              <div>
+                                {accessStatusModules.map((m) => {
+                                  const st = moduleAccessStatus(m, bank);
+                                  const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.28)";
+                                  return (
+                                    <div key={m.key} style={{ fontSize: 11, color: col, marginTop: 3 }}>
+                                      {m.label}: {st === "granted" ? "granted ✓" : st === "pending" ? "pending…" : "no grant"}
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      <div style={{ ...note, marginTop: 12, fontSize: 12 }}>
+                        <strong style={{ color: "#fff" }}>Grant</strong> uploads ciphertext + wrapped DEK to the bank&apos;s storage and records onchain consent.
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* ════ BANK JOURNEY ════ */}
+            <div>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>Bank Journey</div>
+                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>MetaMask wallet</div>
+              </div>
+
+              {/* ─ B-Step 1: Connect MetaMask ─ */}
+              <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(1, bankStep1Done, false)}
+                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                </div>
+                <div style={{ flex: 1, paddingBottom: 20 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: bankStep1Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                    Connect as bank
+                  </div>
+                  {bankStep1Done ? (
+                    <div style={miniCard}>
+                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
+                        <div>
+                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>MetaMask address</div>
+                          <div style={{ ...mono, fontSize: 12 }}>{bankAddress}</div>
+                        </div>
+                        <button style={btnSecondary} onClick={disconnectBankWallet}>Disconnect</button>
+                      </div>
+                      {connectedBankId ? (
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#34d399", background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.20)", borderRadius: 999, padding: "3px 10px" }}>
+                          Signed in as {bankLabel(connectedBankId)}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: 12, color: "#fbbf24", lineHeight: 1.5 }}>
+                          Not a recognized bank address. Switch MetaMask to Bank A ({uiBankAAddr.slice(0, 10)}…) or Bank B ({uiBankBAddr.slice(0, 10)}…).
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 14, lineHeight: 1.5 }}>
+                        Connect MetaMask with the Bank A or Bank B address to request and decrypt customer context.
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                        <button style={btn} disabled={!mounted || bankBusy} onClick={connectBankWallet}>
+                          {bankBusy ? "Connecting…" : "Connect MetaMask"}
+                        </button>
+                        {bankConnected && !bankOnRightChain && (
+                          <button style={btnSecondary} onClick={switchBankChain}>Switch to chain {uiChainId}</button>
+                        )}
+                      </div>
+                      {bankErr && (
+                        <div style={{ ...note, marginTop: 10, color: "#f87171", borderColor: "rgba(239,68,68,0.25)" }}>{bankErr}</div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─ B-Step 2: Request access ─ */}
+              <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(2, false, !bankStep1Done)}
+                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                </div>
+                <div style={{ flex: 1, paddingBottom: 20 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                    Request access
+                  </div>
+                  {!bankStep1Done ? (
+                    <div style={{ ...card, opacity: 0.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ marginBottom: 12 }}>
+                        <div style={labelStyle}>Module to request</div>
+                        {renderModuleSelector(false)}
+                        <div style={{ ...hint, marginTop: 6 }}>
+                          ModuleId: <span style={mono}>{isBytes32(derivedBankModuleId) ? fmtShort(derivedBankModuleId) : "—"}</span>
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: 14 }}>
+                        <div style={labelStyle}>Purpose</div>
+                        <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
+                      </div>
+                      {connectedBankId ? (
+                        <button
+                          style={btn}
+                          disabled={!canUseBank || !isBankAddressSelected(connectedBankId)}
+                          onClick={() => requestAccessAsMetaMask(connectedBankId)}
+                        >
+                          Request access as {bankLabel(connectedBankId)}
+                        </button>
+                      ) : (
+                        <div style={{ ...note, fontSize: 12 }}>
+                          Switch MetaMask to a recognized bank address to request access.
+                        </div>
+                      )}
+                      <div style={{ marginTop: 16 }}>
+                        <div style={labelStyle}>Access status</div>
+                        {(["bank-a", "bank-b"] as BankId[]).map((bank) => (
+                          <div key={bank} style={{ marginTop: 8 }}>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.50)", marginBottom: 3 }}>{bankLabel(bank)}</div>
                             {accessStatusModules.map((m) => {
                               const st = moduleAccessStatus(m, bank);
-                              const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.35)";
+                              const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.28)";
                               return (
-                                <div key={`${bank}-${m.label}`} style={{ fontSize: 12, color: col }}>
-                                  <b style={{ color: "rgba(255,255,255,0.60)" }}>{m.label}</b>: {st === "granted" ? "granted" : st === "pending" ? "pending" : "no grant"}
+                                <div key={m.key} style={{ fontSize: 11, color: col, marginLeft: 8, marginTop: 2 }}>
+                                  {m.label}: {st === "granted" ? "granted ✓" : st === "pending" ? "pending…" : "no grant"}
                                 </div>
                               );
                             })}
                           </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* ─ B-Step 3: Load & decrypt ─ */}
+              <div style={{ display: "flex", gap: 14 }}>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
+                  {stepCircle(3, false, !bankStep1Done)}
+                </div>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                    Load &amp; decrypt context
+                  </div>
+                  {!bankStep1Done ? (
+                    <div style={{ ...card, opacity: 0.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                    </div>
+                  ) : (
+                    <div style={card}>
+                      <div style={{ ...miniCard, marginBottom: 14 }}>
+                        <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Customer address (auto)</div>
+                            <div style={{ ...mono, fontSize: 11 }}>{bankOwner || "—"}</div>
+                          </div>
+                          <div>
+                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Module ID (auto)</div>
+                            <div style={{ ...mono, fontSize: 11 }}>{isBytes32(bankModuleId) ? fmtShort(bankModuleId) : "—"}</div>
+                          </div>
                         </div>
                       </div>
-                    );
-                  })}
-                </div>
-
-                <div style={{ ...note, marginTop: 12, fontSize: 12 }}>
-                  <strong style={{ color: "#fff" }}>Grant</strong> does 2 actions: (1) upload encrypted bundle (ciphertext + wrapped DEK) to that bank&apos;s Blob storage, (2) write onchain consent.
+                      {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
+                        const plain = bank === "bank-a" ? bankAPlain : bankBPlain;
+                        const setPlain = bank === "bank-a" ? setBankAPlain : setBankBPlain;
+                        const bankErrMsg = bank === "bank-a" ? bankAErr : bankBErr;
+                        const isActive = connectedBankId === bank;
+                        return (
+                          <div key={bank} style={{ ...miniCard, marginBottom: 10, borderColor: isActive ? "rgba(245,158,11,0.28)" : "rgba(255,255,255,0.07)" }}>
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{bankLabel(bank)}</div>
+                              {isActive && (
+                                <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700 }}>active wallet ✓</span>
+                              )}
+                            </div>
+                            <button
+                              style={btn}
+                              disabled={!ethers.isAddress(bankOwner) || !isBytes32(bankModuleId)}
+                              onClick={() => bankLoadPlain(bank)}
+                            >
+                              Decrypt as {bankLabel(bank)}
+                            </button>
+                            {bankErrMsg && (
+                              <div style={{ ...note, marginTop: 8, color: "#f87171", borderColor: "rgba(239,68,68,0.25)", fontSize: 12 }}>{bankErrMsg}</div>
+                            )}
+                            {plain && (
+                              <textarea
+                                style={{ ...input, height: 140, fontSize: 11, marginTop: 10, resize: "vertical" }}
+                                value={plain}
+                                onChange={(e) => setPlain(e.target.value)}
+                              />
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
-          </div>
-
-          {/* ── Bank panels ── */}
-          <div style={grid2}>
-            {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
-              const bankCardStyle = bank === "bank-a" ? bankACard : bankBCard;
-              const plain        = bank === "bank-a" ? bankAPlain : bankBPlain;
-              const setPlain     = bank === "bank-a" ? setBankAPlain : setBankBPlain;
-              const bankErrMsg   = bank === "bank-a" ? bankAErr : bankBErr;
-              const uiAddr       = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
-              return (
-                <div key={bank} style={bankCardStyle}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 14 }}>{bankLabel(bank)} — Request & load context</div>
-
-                  <div style={miniCard}>
-                    <div style={miniTitle}>Module (select)</div>
-                    {renderModuleSelector(false)}
-                    <div style={hint}>ModuleId: <span style={mono}>{isBytes32(derivedBankModuleId) ? derivedBankModuleId : "—"}</span></div>
-                    <div style={{ marginTop: 10 }}>
-                      <div style={labelStyle}>Purpose</div>
-                      <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
-                    </div>
-                    <div style={{ ...note, marginTop: 10, fontSize: 12 }}>
-                      MetaMask must be connected as <span style={mono}>{uiAddr}</span> to request access.
-                    </div>
-                    <div style={{ marginTop: 10 }}>
-                      <button style={btnSecondary} disabled={!canUseBank || !isBankAddressSelected(bank)} onClick={() => requestAccessAsMetaMask(bank)}>
-                        Request access via MetaMask
-                      </button>
-                    </div>
-                  </div>
-
-                  <div style={{ ...miniCard, marginTop: 12 }}>
-                    <div style={miniTitle}>Load & decrypt (server)</div>
-                    <div style={labelStyle}>Customer owner address</div>
-                    <input style={input} value={bankOwner} disabled placeholder="Connect customer wallet…" />
-                    <div style={{ marginTop: 10 }}>
-                      <button style={btn} disabled={!ethers.isAddress(bankOwner) || !isBytes32(bankModuleId)} onClick={() => bankLoadPlain(bank)}>
-                        Load & decrypt
-                      </button>
-                    </div>
-                    {bankErrMsg && <div style={{ ...note, marginTop: 10, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>{bankErrMsg}</div>}
-                    <textarea style={{ ...input, height: 180, fontSize: 12, marginTop: 10, resize: "vertical" }} value={plain} onChange={(e) => setPlain(e.target.value)} placeholder="Decrypted context appears here after consent…" />
-                  </div>
-                </div>
-              );
-            })}
           </div>
 
           <WhyThisMatters />
