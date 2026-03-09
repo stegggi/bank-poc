@@ -126,7 +126,7 @@ export default function NavBar({ active }: NavBarProps) {
           {/* UC2 – segmented Bank A / Bank B */}
           <NavSegmented
             n="02"
-            label="Interbank"
+            label="Interbank Payment"
             accent={ACCENT.uc2}
             groupActive={isUc2}
             left={{ label: "Bank A", href: "/bank-a", active: isBankA }}

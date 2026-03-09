@@ -630,10 +630,18 @@ export default function BankA() {
         }
         .ba-btn-primary:hover { background: #0ea572; border-color: #0ea572; }
         .ba-btn-send-ready {
-          background: rgba(16,185,129,0.18);
+          background: #10b981;
           border-color: #10b981;
-          color: #10b981;
+          color: #fff;
           font-weight: 700;
+          box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
+          animation: sendPulse 1.8s ease-in-out infinite;
+        }
+        .ba-btn-send-ready:hover { background: #0ea572 !important; border-color: #0ea572 !important; }
+        @keyframes sendPulse {
+          0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.55); }
+          60%  { box-shadow: 0 0 0 10px rgba(16,185,129,0); }
+          100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
         }
         .wtm-tab {
           padding: 7px 14px;
@@ -798,6 +806,17 @@ export default function BankA() {
                 Require receiving bank ACK before sending tokens
               </span>
             </label>
+
+            {/* ACK received callout */}
+            {highlightSendButton && (
+              <div style={ackReadyBanner}>
+                <span style={{ fontSize: 16 }}>✓</span>
+                <div>
+                  <div style={{ fontWeight: 700, color: "#10b981", marginBottom: 2 }}>ACK received from Bank B</div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)" }}>The receiving bank approved the request. Click <strong style={{ color: "#fff" }}>Send payment</strong> to complete the token transfer.</div>
+                </div>
+              </div>
+            )}
 
             {/* Actions */}
             <div style={actionRow}>
@@ -1139,7 +1158,7 @@ const metaRow: CSSProperties = {
 
 const metaLabel: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.38)",
+  color: "rgba(255,255,255,0.52)",
   minWidth: 110,
   flexShrink: 0,
 };
@@ -1147,19 +1166,19 @@ const metaLabel: CSSProperties = {
 const monoVal: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.75)",
+  color: "rgba(255,255,255,0.85)",
   wordBreak: "break-all",
 };
 
 const monoSmall: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.6)",
+  color: "rgba(255,255,255,0.72)",
   wordBreak: "break-all",
 };
 
 const dimText: CSSProperties = {
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.6)",
   fontSize: 13,
   lineHeight: 1.5,
 };
@@ -1172,7 +1191,7 @@ const extLink: CSSProperties = {
 
 const formNote: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.4)",
+  color: "rgba(255,255,255,0.58)",
   lineHeight: 1.55,
 };
 
@@ -1187,7 +1206,7 @@ const formSection: CSSProperties = {
 const formSectionTitle: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: "rgba(255,255,255,0.45)",
+  color: "rgba(255,255,255,0.62)",
   letterSpacing: "0.07em",
   textTransform: "uppercase",
 };
@@ -1209,7 +1228,7 @@ const formLabel: CSSProperties = {
   flexDirection: "column",
   gap: 5,
   fontSize: 12,
-  color: "rgba(255,255,255,0.5)",
+  color: "rgba(255,255,255,0.65)",
 };
 
 const ackToggle: CSSProperties = {
@@ -1251,7 +1270,7 @@ const txRefRow: CSSProperties = {
 
 const txRefLabel: CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.3)",
+  color: "rgba(255,255,255,0.45)",
   minWidth: 52,
   paddingTop: 1,
   flexShrink: 0,
@@ -1263,14 +1282,24 @@ const statusBox: CSSProperties = {
   border: "1px solid rgba(255,255,255,0.1)",
   background: "rgba(255,255,255,0.04)",
   fontSize: 12,
-  color: "rgba(255,255,255,0.65)",
+  color: "rgba(255,255,255,0.78)",
   wordBreak: "break-all",
   lineHeight: 1.5,
 };
 
+const ackReadyBanner: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: 12,
+  background: "rgba(16,185,129,0.1)",
+  border: "1px solid rgba(16,185,129,0.35)",
+  borderRadius: 10,
+  padding: "12px 16px",
+};
+
 // ── WhyThisMatters styles ─────────────────────────────────────────────────────
 
-const wtmOuter: CSSProperties = { marginTop: 8 };
+const wtmOuter: CSSProperties = { marginTop: 32 };
 
 const wtmDivider: CSSProperties = {
   display: "flex",
@@ -1296,7 +1325,7 @@ const wtmDividerLabel: CSSProperties = {
 
 const wtmIntro: CSSProperties = {
   fontSize: 14,
-  color: "rgba(255,255,255,0.5)",
+  color: "rgba(255,255,255,0.68)",
   marginBottom: 16,
   lineHeight: 1.5,
   display: "flex",
@@ -1342,7 +1371,7 @@ const wtmPanelTitle: CSSProperties = {
 
 const wtmPanelSub: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.60)",
   lineHeight: 1.5,
 };
 
@@ -1376,7 +1405,7 @@ const wtmCardTitle: CSSProperties = {
 
 const wtmCardText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(255,255,255,0.70)",
   lineHeight: 1.55,
 };
 
@@ -1395,7 +1424,7 @@ const wtmArrow: CSSProperties = {
 
 const wtmListText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.58)",
+  color: "rgba(255,255,255,0.72)",
   lineHeight: 1.55,
 };
 
@@ -1405,7 +1434,7 @@ const wtmCallout: CSSProperties = {
   borderRadius: 10,
   padding: "12px 14px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.6)",
+  color: "rgba(255,255,255,0.72)",
   lineHeight: 1.5,
 };
 

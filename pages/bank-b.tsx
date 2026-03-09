@@ -1828,7 +1828,7 @@ const metaRow: CSSProperties = {
 
 const metaLabel: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.38)",
+  color: "rgba(255,255,255,0.52)",
   minWidth: 110,
   flexShrink: 0,
 };
@@ -1836,19 +1836,19 @@ const metaLabel: CSSProperties = {
 const monoVal: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.75)",
+  color: "rgba(255,255,255,0.85)",
   wordBreak: "break-all",
 };
 
 const monoSmall: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 11,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(255,255,255,0.70)",
   wordBreak: "break-all",
 };
 
 const dimText: CSSProperties = {
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.60)",
   fontSize: 13,
   lineHeight: 1.5,
 };
@@ -1869,7 +1869,7 @@ const inlineCode: CSSProperties = {
 
 const formNote: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.4)",
+  color: "rgba(255,255,255,0.58)",
   lineHeight: 1.55,
 };
 
@@ -1878,7 +1878,7 @@ const formLabel: CSSProperties = {
   flexDirection: "column",
   gap: 5,
   fontSize: 12,
-  color: "rgba(255,255,255,0.5)",
+  color: "rgba(255,255,255,0.65)",
 };
 
 const tableWrap: CSSProperties = {
@@ -1896,7 +1896,7 @@ const showMoreRow: CSSProperties = {
 
 const statusText: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.5)",
+  color: "rgba(255,255,255,0.68)",
   lineHeight: 1.5,
   wordBreak: "break-all",
 };
@@ -1980,7 +1980,7 @@ const payloadSectionTitle: CSSProperties = {
 
 const payloadLine: CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.6)",
+  color: "rgba(255,255,255,0.72)",
   lineHeight: 1.6,
   wordBreak: "break-all",
 };
@@ -2034,7 +2034,7 @@ const upsertGrid: CSSProperties = {
 
 // ── WhyThisMatters styles ─────────────────────────────────────────────────────
 
-const wtmOuter: CSSProperties = { marginTop: 8 };
+const wtmOuter: CSSProperties = { marginTop: 32 };
 
 const wtmDivider: CSSProperties = {
   display: "flex",
@@ -2060,7 +2060,7 @@ const wtmDividerLabel: CSSProperties = {
 
 const wtmIntro: CSSProperties = {
   fontSize: 14,
-  color: "rgba(255,255,255,0.5)",
+  color: "rgba(255,255,255,0.68)",
   marginBottom: 16,
   lineHeight: 1.5,
   display: "flex",
@@ -2106,7 +2106,7 @@ const wtmPanelTitle: CSSProperties = {
 
 const wtmPanelSub: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(255,255,255,0.60)",
   lineHeight: 1.5,
 };
 
@@ -2140,7 +2140,7 @@ const wtmCardTitle: CSSProperties = {
 
 const wtmCardText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(255,255,255,0.70)",
   lineHeight: 1.55,
 };
 
@@ -2159,7 +2159,7 @@ const wtmArrow: CSSProperties = {
 
 const wtmListText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.58)",
+  color: "rgba(255,255,255,0.72)",
   lineHeight: 1.55,
 };
 
@@ -2169,7 +2169,7 @@ const wtmCallout: CSSProperties = {
   borderRadius: 10,
   padding: "12px 14px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.6)",
+  color: "rgba(255,255,255,0.72)",
   lineHeight: 1.5,
 };
 
