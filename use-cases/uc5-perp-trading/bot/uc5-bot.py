@@ -279,6 +279,8 @@ def default_runtime_config() -> Dict[str, Any]:
     "trailingStopPct": None,
     "maxDailyLossUsd": 0.0,
     "tapeCvdEnabled": False,
+    "fundingRateLimitPct": 0.0,
+    "maxDailyTrades": 0,
   }
 
 
@@ -430,6 +432,8 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["takeProfitAtrMult"] = _to_opt_float(base.get("takeProfitAtrMult"))
   base["trailingStopPct"] = _to_opt_float(base.get("trailingStopPct"))
   base["maxDailyLossUsd"] = max(0.0, _to_float(base.get("maxDailyLossUsd", 0.0), 0.0))
+  base["fundingRateLimitPct"] = clamp(_to_float(base.get("fundingRateLimitPct", 0.0), 0.0), 0.0, 1.0)
+  base["maxDailyTrades"] = max(0, int(_to_float(base.get("maxDailyTrades", 0), 0.0)))
 
   return base
 
@@ -2453,6 +2457,27 @@ async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[
     return {"status": "DONE"}
 
 
+def _funding_gate_blocked(desired: str, cfg: Dict[str, Any], metrics_cache: Dict[str, Any]) -> bool:
+  """Return True if the entry should be skipped due to an adverse funding rate."""
+  limit = float(cfg.get("fundingRateLimitPct", 0.0))
+  if limit <= 0.0:
+    return False
+  funding = float(metrics_cache.get("funding") or 0.0)
+  if desired == "LONG" and funding > limit:
+    return True
+  if desired == "SHORT" and funding < -limit:
+    return True
+  return False
+
+
+def _daily_trades_gate_blocked(cfg: Dict[str, Any], day_start_ms: int) -> bool:
+  """Return True if the daily trade cap has been reached."""
+  max_trades = int(cfg.get("maxDailyTrades", 0))
+  if max_trades <= 0:
+    return False
+  return DB_MANAGER.query_trade_count_since(day_start_ms) >= max_trades
+
+
 def _build_strategy_cfg(cfg: Dict[str, Any]) -> StrategyConfig:
   return StrategyConfig(
     trend_entry_strength=float(cfg.get("trendEntryStrength", 0.70)),
@@ -3168,6 +3193,27 @@ async def main():
               "lastRegimeExitReason": last_regime_exit_reason,
             },
           }
+        elif desired in ("LONG", "SHORT") and _funding_gate_blocked(desired, cfg, metrics_cache):
+          current_funding = float(metrics_cache.get("funding") or 0.0)
+          last_action = {
+            "type": "FUNDING_GATE",
+            "ok": False,
+            "info": {
+              "fundingRate": current_funding,
+              "fundingRateLimitPct": float(cfg.get("fundingRateLimitPct", 0.0)),
+              "desired": desired,
+            },
+          }
+        elif desired in ("LONG", "SHORT") and _daily_trades_gate_blocked(cfg, day_start_ms):
+          trades_today = DB_MANAGER.query_trade_count_since(day_start_ms)
+          last_action = {
+            "type": "MAX_DAILY_TRADES",
+            "ok": False,
+            "info": {
+              "tradesToday": trades_today,
+              "maxDailyTrades": int(cfg.get("maxDailyTrades", 0)),
+            },
+          }
         elif desired in ("LONG", "SHORT"):
           snap = fetch_portfolio_snapshot(eth_base, sub_id)
           avail = _f(snap.get("availableMarginUsd"))
@@ -3633,6 +3679,8 @@ async def main():
           "takeProfitAtrMult": _to_opt_float(cfg.get("takeProfitAtrMult")),
           "trailingStopPct": _to_opt_float(cfg.get("trailingStopPct")),
           "maxDailyLossUsd": float(cfg.get("maxDailyLossUsd", 0.0)),
+          "fundingRateLimitPct": float(cfg.get("fundingRateLimitPct", 0.0)),
+          "maxDailyTrades": int(cfg.get("maxDailyTrades", 0)),
         },
         "market": {
           "ticker": ticker,

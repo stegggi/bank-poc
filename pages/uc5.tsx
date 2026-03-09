@@ -155,8 +155,10 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
     minHoldSeconds: c.minHoldSeconds ?? 5,
     maxMarginPct: c.maxMarginPct ?? 25,
-    minExpectedMoveBps: 0,
-    edgeCostMultiplier: 0,
+    minExpectedMoveBps: c.minExpectedMoveBps ?? 0,
+    edgeCostMultiplier: c.edgeCostMultiplier ?? 0,
+    fundingRateLimitPct: c.fundingRateLimitPct ?? 0,
+    maxDailyTrades: c.maxDailyTrades ?? 0,
     entryMakerPreferred: true,
     entryMarketFallbackEnabled: false,
     entryMarketFallbackMinProb: c.entryMarketFallbackMinProb ?? 0.9,
@@ -1438,6 +1440,147 @@ export default function Uc5Page() {
                 Improve one tick on wide spread
               </label>
             </Field>
+
+
+            {/* ── Profitability Controls ─────────────────────────────── */}
+            <div style={{ gridColumn: "1 / -1", borderTop: "1px solid rgba(255,255,255,0.07)", marginTop: 4, paddingTop: 16 }}>
+              <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", textTransform: "uppercase", color: "rgba(255,255,255,0.38)", marginBottom: 12 }}>
+                Profitability Controls
+              </div>
+            </div>
+
+            <Field label="minExpectedMoveBps" help="Minimum expected price move (bps) required to enter. 0 = disabled. Recommended: 14." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={500}
+                step={1}
+                value={edit?.minExpectedMoveBps ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="edgeCostMultiplier" help="Required edge as a multiple of estimated round-trip cost. 0 = disabled. Recommended: 1.5." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={5}
+                step={0.1}
+                value={edit?.edgeCostMultiplier ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, edgeCostMultiplier: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="stopLossPct" help="Fixed stop loss as fraction of entry price (e.g. 0.003 = 0.3%). Leave blank (0) to use ATR-based stop instead." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={edit?.stopLossPct ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setEdit((p) => (p ? { ...p, stopLossPct: v === 0 ? null : v } : p));
+                }}
+              />
+            </Field>
+
+            <Field label="stopLossAtrMult" help="ATR-based stop: stop = entry ± N × ATR. Used when stopLossPct is null/0. Recommended: 2.0." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={20}
+                step={0.1}
+                value={edit?.stopLossAtrMult ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setEdit((p) => (p ? { ...p, stopLossAtrMult: v === 0 ? null : v } : p));
+                }}
+              />
+            </Field>
+
+            <Field label="takeProfitPct" help="Fixed take profit as fraction of entry price (e.g. 0.006 = 0.6%). Leave blank (0) to use ATR-based TP instead." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={edit?.takeProfitPct ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setEdit((p) => (p ? { ...p, takeProfitPct: v === 0 ? null : v } : p));
+                }}
+              />
+            </Field>
+
+            <Field label="takeProfitAtrMult" help="ATR-based TP: target = entry ± N × ATR. Used when takeProfitPct is null/0. Recommended: 4.0 (2:1 R/R vs stopLossAtrMult 2.0)." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={20}
+                step={0.1}
+                value={edit?.takeProfitAtrMult ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setEdit((p) => (p ? { ...p, takeProfitAtrMult: v === 0 ? null : v } : p));
+                }}
+              />
+            </Field>
+
+            <Field label="trailingStopPct" help="Trail the stop by this fraction once the trade moves in your favour (e.g. 0.006 = 0.6%). 0 = disabled." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.001}
+                value={edit?.trailingStopPct ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => {
+                  const v = Number(e.target.value);
+                  setEdit((p) => (p ? { ...p, trailingStopPct: v === 0 ? null : v } : p));
+                }}
+              />
+            </Field>
+
+            <Field label="fundingRateLimitPct" help="Max hourly funding rate (fraction) allowed before entry is blocked. 0 = disabled. Recommended: 0.0005 (0.05%)." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={1}
+                step={0.0001}
+                value={edit?.fundingRateLimitPct ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, fundingRateLimitPct: Number(e.target.value) } : p))}
+              />
+            </Field>
+
+            <Field label="maxDailyTrades" help="Max completed trades allowed per calendar day. 0 = unlimited. Recommended: 6." error={undefined}>
+              <input
+                style={input}
+                type="number"
+                min={0}
+                max={100}
+                step={1}
+                value={edit?.maxDailyTrades ?? 0}
+                disabled={!isOwner}
+                onChange={(e) => setEdit((p) => (p ? { ...p, maxDailyTrades: Number(e.target.value) } : p))}
+              />
+            </Field>
+
           </div>
           <div style={{ marginTop: 12, display: "flex", gap: 10 }}>
             <button style={btnPrimary} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>

@@ -892,6 +892,27 @@ class DailyDbManager:
             pass
     return pnl
 
+  def query_trade_count_since(self, from_ms: int) -> int:
+    """Count completed trades (EXIT + FLATTEN) since from_ms."""
+    count = 0
+    now_ms = int(time.time() * 1000)
+    for conn in self._connections_for_range(from_ms, now_ms):
+      cur = conn.execute(
+        """
+        SELECT COUNT(*) FROM trades
+        WHERE ts_ms >= ?
+          AND event_type IN ('EXIT', 'FLATTEN')
+        """,
+        (int(from_ms),),
+      )
+      row = cur.fetchone()
+      if row and row[0]:
+        try:
+          count += int(row[0])
+        except Exception:
+          pass
+    return count
+
   def query_last_close_ts(self) -> Optional[int]:
     latest: Optional[int] = None
     for _, conn in self._iter_all_connections():

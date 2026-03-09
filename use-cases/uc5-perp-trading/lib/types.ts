@@ -70,8 +70,8 @@ export const Uc5ConfigSchema = z.object({
   emergencyBreakoutMinAtrPercentile: z.number().min(0).max(1).default(0.85),
   entryChaseMaxSec: z.number().min(0.5).max(30).optional().default(10),
   exitChaseMaxSec: z.number().min(0.5).max(30).optional().default(5),
-  executionRepriceMs: z.number().int().min(100).max(2000).optional().default(350),
-  makerOrderGtdSec: z.number().int().min(1).max(10).optional().default(2),
+  executionRepriceMs: z.number().int().min(100).max(5000).optional().default(350),
+  makerOrderGtdSec: z.number().int().min(1).max(30).optional().default(2),
   makerMinRestMs: z.number().int().min(100).max(5000).optional().default(700),
   makerReplaceOnlyOnTouchMove: z.boolean().optional().default(true),
   makerImproveOneTickOnWideSpread: z.boolean().optional().default(true),
@@ -85,6 +85,10 @@ export const Uc5ConfigSchema = z.object({
   trailingStopPct: z.number().positive().max(1).nullable().optional().default(null),
   maxDailyLossUsd: z.number().min(0).max(10000000).default(0),
   tapeCvdEnabled: z.boolean().default(false),
+
+  // Profitability controls
+  fundingRateLimitPct: z.number().min(0).max(1).default(0),   // max hourly funding rate to allow entry (0 = disabled)
+  maxDailyTrades: z.number().int().min(0).max(100).default(0), // max trades per day (0 = unlimited)
 });
 
 export type Uc5Config = z.infer<typeof Uc5ConfigSchema>;
@@ -183,6 +187,8 @@ export type Uc5Status = {
     takeProfitAtrMult?: number | null;
     trailingStopPct?: number | null;
     maxDailyLossUsd?: number;
+    fundingRateLimitPct?: number;
+    maxDailyTrades?: number;
   };
   position?: {
     open: boolean;
