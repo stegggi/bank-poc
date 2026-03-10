@@ -4874,8 +4874,8 @@ class Uc6Bot {
         );
         effective.bandHalfBps = clamp(
           Math.round(baseThresholds.bandHalfBps + Number(advice.bandHalfBpsAdj || 0)),
-          25,
-          300
+          10,
+          5000
         );
       }
       latest.regime = {

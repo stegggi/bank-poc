@@ -299,7 +299,8 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
 
   const effectiveEdge = clamp(baseEdge + edgeAdj, 0.6, 0.98);
   const effectiveCooldown = clamp(baseCooldown + cooldownAdj, 60, 7200);
-  const effectiveBand = clamp(baseBand + bandAdjBps, 25, 300);
+  // Keep regime-adjusted band within the same user-configurable range as bot settings.
+  const effectiveBand = clamp(baseBand + bandAdjBps, 10, 5000);
 
   return {
     ok: true,
