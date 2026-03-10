@@ -154,6 +154,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     riskLoopIntervalSec: c.riskLoopIntervalSec ?? 1,
     metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
     minHoldSeconds: c.minHoldSeconds ?? 5,
+    exitOnRegimeEnd: c.exitOnRegimeEnd ?? true,
     maxMarginPct: c.maxMarginPct ?? 25,
     minExpectedMoveBps: c.minExpectedMoveBps ?? 0,
     edgeCostMultiplier: c.edgeCostMultiplier ?? 0,
@@ -343,8 +344,8 @@ export default function Uc5Page() {
     if ((edit.flipCooldownSec ?? 15) < 0 || (edit.flipCooldownSec ?? 15) > 600) {
       errors.flipCooldownSec = "Flip cooldown must be 0 to 600 sec";
     }
-    if (edit.minHoldSeconds < 5 || edit.minHoldSeconds > 259200) {
-      errors.minHoldSeconds = "Min hold must be 5 to 259200 sec";
+    if (edit.minHoldSeconds < 0 || edit.minHoldSeconds > 259200) {
+      errors.minHoldSeconds = "Min hold must be 0 to 259200 sec";
     }
     if (edit.maxHoldSeconds < 5 || edit.maxHoldSeconds > 259200) {
       errors.maxHoldSeconds = "Max hold must be 5 to 259200 sec";
@@ -1183,8 +1184,14 @@ export default function Uc5Page() {
                 <Field label="maxDailyLossUsd" help="Stop trading for the day if realized loss exceeds this. 0 = disabled." error={undefined}>
                   <input style={input} type="number" min={0} max={10000000} step={1} value={edit?.maxDailyLossUsd ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxDailyLossUsd: Number(e.target.value) } : p))} />
                 </Field>
-                <Field label="minHoldSeconds" help="Minimum hold before exits are allowed." error={validation.minHoldSeconds}>
-                  <input style={input} type="number" min={5} max={259200} step={1} value={edit?.minHoldSeconds ?? 5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))} />
+                <Field label="minHoldSeconds" help="Minimum hold before regime exits are allowed. Set 600 to hold 10 min through noisy regime oscillations." error={validation.minHoldSeconds}>
+                  <input style={input} type="number" min={0} max={259200} step={1} value={edit?.minHoldSeconds ?? 5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))} />
+                </Field>
+                <Field label="exitOnRegimeEnd" help="Exit when regime turns uncertain/flat (RANGE or UNKNOWN). Disable to only exit on active direction reversal — prevents premature exits from regime noise.">
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isOwner ? "pointer" : "default" }}>
+                    <input type="checkbox" checked={edit?.exitOnRegimeEnd ?? true} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, exitOnRegimeEnd: e.target.checked } : p))} />
+                    <span style={{ fontSize: 12, color: "rgba(232,232,240,0.7)" }}>{edit?.exitOnRegimeEnd ? "ON — exits on FLAT/UNKNOWN regime" : "OFF — only exits on direction flip"}</span>
+                  </label>
                 </Field>
                 <Field label="maxHoldSeconds" help="Force-close position after this duration." error={validation.maxHoldSeconds}>
                   <input style={input} type="number" min={5} max={259200} step={1} value={edit?.maxHoldSeconds ?? 7200} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxHoldSeconds: Number(e.target.value) } : p))} />

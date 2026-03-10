@@ -47,8 +47,9 @@ export const Uc5ConfigSchema = z.object({
   openConfidenceThreshold: z.number().min(0.5).max(0.95).default(0.65),
   closeConfidenceThreshold: z.number().min(0.45).max(0.9).default(0.55),
 
-  minHoldSeconds: z.number().int().min(5).max(259200).default(5),
+  minHoldSeconds: z.number().int().min(0).max(259200).default(5),
   maxHoldSeconds: z.number().int().min(5).max(259200).default(7200),
+  exitOnRegimeEnd: z.boolean().default(true),
 
   // Execution guardrails (simple)
   maxOrdersPerHour: z.number().int().min(1).max(2000).default(120),
@@ -154,6 +155,7 @@ export type Uc5Status = {
     predictionHorizonSeconds?: number;
     minHoldSeconds?: number;
     maxHoldSeconds?: number;
+    exitOnRegimeEnd?: boolean;
     maxLeverage?: number;
     maxMarginUsd?: number;
     maxMarginPct?: number;

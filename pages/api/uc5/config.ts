@@ -56,6 +56,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         entryMarketFallbackEnabled: false,
         minExpectedMoveBps: Number(cfg.minExpectedMoveBps ?? current.minExpectedMoveBps ?? 0),
         edgeCostMultiplier: Number(cfg.edgeCostMultiplier ?? current.edgeCostMultiplier ?? 0),
+        exitOnRegimeEnd: Boolean(cfg.exitOnRegimeEnd ?? current.exitOnRegimeEnd ?? true),
         emergencyBreakoutEnabled: false,
       };
 

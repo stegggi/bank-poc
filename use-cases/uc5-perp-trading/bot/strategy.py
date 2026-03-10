@@ -66,18 +66,25 @@ def desired_position_from_regime(regime: RegimeDecision, cfg: StrategyConfig) ->
   return "FLAT"
 
 
-def should_exit_for_regime(position_side: str, regime: RegimeDecision) -> Optional[str]:
+def should_exit_for_regime(
+  position_side: str,
+  regime: RegimeDecision,
+  exit_on_regime_end: bool = True,
+) -> Optional[str]:
   side = str(position_side or "").upper()
   state = str(regime.state or "").upper()
   direction = str(regime.direction or "").upper()
   if side not in ("LONG", "SHORT"):
     return None
-  if state != "TREND":
+  # Always exit immediately on active direction reversal.
+  if side == "LONG" and state == "TREND" and direction == "DOWN":
+    return "REGIME_FLIP"
+  if side == "SHORT" and state == "TREND" and direction == "UP":
+    return "REGIME_FLIP"
+  # Optionally exit when the regime becomes uncertain/flat.
+  # Disable this to hold through noisy regime oscillations and only exit on flips.
+  if exit_on_regime_end and state != "TREND":
     return "REGIME_END"
-  if side == "LONG" and direction == "DOWN":
-    return "REGIME_FLIP"
-  if side == "SHORT" and direction == "UP":
-    return "REGIME_FLIP"
   return None
 
 
