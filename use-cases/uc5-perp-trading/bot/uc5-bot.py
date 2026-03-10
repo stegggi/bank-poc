@@ -2723,7 +2723,7 @@ async def main():
       configured_signer_addr = str(cfg.get("botSignerAddress") or "")
       signer_active = True
       if configured_signer_addr and sub_id:
-        signer_active = is_linked_signer_active(eth_base, sub_id, configured_signer_addr)
+        signer_active = await asyncio.to_thread(is_linked_signer_active, eth_base, sub_id, configured_signer_addr)
         if bool(cfg.get("botSignerLinked", False)) != signer_active:
           cfg = set_runtime_config({**cfg, "botSignerLinked": signer_active})
 
@@ -2738,7 +2738,7 @@ async def main():
       ingest_interval = float(cfg.get("ingestIntervalSec", 0.5))
       if now_ms >= next_ingest_ms:
         ws_snap = ws_quote_cache.snapshot()
-        mp = fetch_market_price(eth_base, product_id)
+        mp = await asyncio.to_thread(fetch_market_price, eth_base, product_id)
         rest_bid = _f(mp.get("bestBidPrice") or mp.get("bestBid"))
         rest_ask = _f(mp.get("bestAskPrice") or mp.get("bestAsk"))
         best_bid = _f(ws_snap.get("bestBid")) or rest_bid
@@ -2780,7 +2780,7 @@ async def main():
 
       # Keep per-loop position snapshot fresh for risk + commands + status
       was_open = bool(position_state.open)
-      pos = fetch_active_position(eth_base, sub_id, product_id)
+      pos = await asyncio.to_thread(fetch_active_position, eth_base, sub_id, product_id)
       pos_open, pos_side, pos_size, pos_upnl, pos_entry_price, pos_entry_at_ms = parse_position(pos)
       if pos_open and pos_side:
         position_state.open = True
@@ -3217,7 +3217,7 @@ async def main():
             },
           }
         elif desired in ("LONG", "SHORT"):
-          snap = fetch_portfolio_snapshot(eth_base, sub_id)
+          snap = await asyncio.to_thread(fetch_portfolio_snapshot, eth_base, sub_id)
           avail = _f(snap.get("availableMarginUsd"))
           pv = _f(snap.get("portfolioValueUsd"))
           max_margin = float(cfg.get("maxMarginUsd", 100.0))
