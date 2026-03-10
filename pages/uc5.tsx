@@ -155,7 +155,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
     minHoldSeconds: c.minHoldSeconds ?? 5,
     exitOnRegimeEnd: c.exitOnRegimeEnd ?? true,
-    regimeExitEnabled: c.regimeExitEnabled ?? true,
+    regimeExitEnabled: c.regimeExitEnabled ?? false,
     maxMarginPct: c.maxMarginPct ?? 25,
     minExpectedMoveBps: c.minExpectedMoveBps ?? 0,
     edgeCostMultiplier: c.edgeCostMultiplier ?? 0,
@@ -1190,7 +1190,7 @@ export default function Uc5Page() {
                 </Field>
                 <Field label="regimeExitEnabled" help="Allow the regime model to close positions. Disable to use only SL/TP/trailing/max-hold for exits — the regime still controls entries.">
                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isOwner ? "pointer" : "default" }}>
-                    <input type="checkbox" checked={edit?.regimeExitEnabled ?? true} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeExitEnabled: e.target.checked } : p))} />
+                    <input type="checkbox" checked={edit?.regimeExitEnabled ?? false} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeExitEnabled: e.target.checked } : p))} />
                     <span style={{ fontSize: 12, color: "rgba(232,232,240,0.7)" }}>{edit?.regimeExitEnabled ? "ON — regime can close positions" : "OFF — only SL/TP/trailing/max-hold exits"}</span>
                   </label>
                 </Field>

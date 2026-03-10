@@ -246,7 +246,7 @@ def default_runtime_config() -> Dict[str, Any]:
     "closeConfidenceThreshold": 0.55,
     "minHoldSeconds": 5,
     "exitOnRegimeEnd": True,
-    "regimeExitEnabled": True,
+    "regimeExitEnabled": False,
     "maxHoldSeconds": 7200,
     "maxOrdersPerHour": 120,
     "smartEntryTimeoutMs": 900,
@@ -385,7 +385,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
   base["minHoldSeconds"] = clamp(_to_int(base.get("minHoldSeconds", 5), 5), 0, 259200)
   base["maxHoldSeconds"] = clamp(_to_int(base.get("maxHoldSeconds", 7200), 7200), base["minHoldSeconds"], 259200)
   base["exitOnRegimeEnd"] = bool(base.get("exitOnRegimeEnd", True))
-  base["regimeExitEnabled"] = bool(base.get("regimeExitEnabled", True))
+  base["regimeExitEnabled"] = bool(base.get("regimeExitEnabled", False))
 
   base["maxOrdersPerHour"] = clamp(_to_int(base.get("maxOrdersPerHour", 120), 120), 1, 2000)
   base["smartEntryTimeoutMs"] = clamp(_to_int(base.get("smartEntryTimeoutMs", 900), 900), 200, 5000)
@@ -3477,7 +3477,7 @@ async def main():
             regime_decision,
             exit_on_regime_end=bool(cfg.get("exitOnRegimeEnd", True)),
           )
-          if bool(cfg.get("regimeExitEnabled", True))
+          if bool(cfg.get("regimeExitEnabled", False))
           else None
         )
         if regime_exit_reason and position_state.side and position_state.qty > 0:
