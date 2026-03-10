@@ -50,6 +50,7 @@ export const Uc5ConfigSchema = z.object({
   minHoldSeconds: z.number().int().min(0).max(259200).default(5),
   maxHoldSeconds: z.number().int().min(5).max(259200).default(7200),
   exitOnRegimeEnd: z.boolean().default(true),
+  regimeExitEnabled: z.boolean().default(true),
 
   // Execution guardrails (simple)
   maxOrdersPerHour: z.number().int().min(1).max(2000).default(120),
@@ -156,6 +157,7 @@ export type Uc5Status = {
     minHoldSeconds?: number;
     maxHoldSeconds?: number;
     exitOnRegimeEnd?: boolean;
+    regimeExitEnabled?: boolean;
     maxLeverage?: number;
     maxMarginUsd?: number;
     maxMarginPct?: number;

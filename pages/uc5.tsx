@@ -155,6 +155,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     metricsLoopIntervalSec: c.metricsLoopIntervalSec ?? 45,
     minHoldSeconds: c.minHoldSeconds ?? 5,
     exitOnRegimeEnd: c.exitOnRegimeEnd ?? true,
+    regimeExitEnabled: c.regimeExitEnabled ?? true,
     maxMarginPct: c.maxMarginPct ?? 25,
     minExpectedMoveBps: c.minExpectedMoveBps ?? 0,
     edgeCostMultiplier: c.edgeCostMultiplier ?? 0,
@@ -1187,7 +1188,13 @@ export default function Uc5Page() {
                 <Field label="minHoldSeconds" help="Minimum hold before regime exits are allowed. Set 600 to hold 10 min through noisy regime oscillations." error={validation.minHoldSeconds}>
                   <input style={input} type="number" min={0} max={259200} step={1} value={edit?.minHoldSeconds ?? 5} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minHoldSeconds: Number(e.target.value) } : p))} />
                 </Field>
-                <Field label="exitOnRegimeEnd" help="Exit when regime turns uncertain/flat (RANGE or UNKNOWN). Disable to only exit on active direction reversal — prevents premature exits from regime noise.">
+                <Field label="regimeExitEnabled" help="Allow the regime model to close positions. Disable to use only SL/TP/trailing/max-hold for exits — the regime still controls entries.">
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isOwner ? "pointer" : "default" }}>
+                    <input type="checkbox" checked={edit?.regimeExitEnabled ?? true} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, regimeExitEnabled: e.target.checked } : p))} />
+                    <span style={{ fontSize: 12, color: "rgba(232,232,240,0.7)" }}>{edit?.regimeExitEnabled ? "ON — regime can close positions" : "OFF — only SL/TP/trailing/max-hold exits"}</span>
+                  </label>
+                </Field>
+                <Field label="exitOnRegimeEnd" help="Exit when regime turns uncertain/flat (RANGE or UNKNOWN). Disable to only exit on active direction reversal — prevents premature exits from regime noise. Has no effect when regimeExitEnabled is OFF.">
                   <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: isOwner ? "pointer" : "default" }}>
                     <input type="checkbox" checked={edit?.exitOnRegimeEnd ?? true} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, exitOnRegimeEnd: e.target.checked } : p))} />
                     <span style={{ fontSize: 12, color: "rgba(232,232,240,0.7)" }}>{edit?.exitOnRegimeEnd ? "ON — exits on FLAT/UNKNOWN regime" : "OFF — only exits on direction flip"}</span>
