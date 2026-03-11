@@ -731,8 +731,6 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       return self._send_json(200, DB_MANAGER.query_trades_summary())
 
     if path.startswith("/uc5/trades"):
-      from urllib.parse import parse_qs, urlparse
-      qs = parse_qs(urlparse(self.path).query)
       limit = max(1, min(100, int((qs.get("limit") or ["10"])[0])))
       offset = max(0, int((qs.get("offset") or ["0"])[0]))
       trades = DB_MANAGER.query_trades_list(limit=limit, offset=offset)
