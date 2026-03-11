@@ -2625,10 +2625,13 @@ async def main():
   current_trade_entry_ts: Optional[int] = None
   # Restore entry price from DB in case bot restarted with an open position.
   # Without this, FLATTEN/risk-exit would compute pnl=None on restart.
-  _open_entry = DB_MANAGER.query_last_open_entry()
-  if _open_entry:
-    current_trade_entry_price = _open_entry.get("entry_price")
-    current_trade_entry_ts = _open_entry.get("entry_ts")
+  try:
+    _open_entry = DB_MANAGER.query_last_open_entry()
+    if _open_entry:
+      current_trade_entry_price = _open_entry.get("entry_price")
+      current_trade_entry_ts = _open_entry.get("entry_ts")
+  except Exception as _e:
+    print(f"[startup] Could not restore entry price from DB: {_e}")
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
   last_regime_exit_ts_ms: Optional[int] = None
   last_regime_exit_reason: Optional[str] = None
