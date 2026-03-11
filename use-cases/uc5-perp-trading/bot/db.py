@@ -965,6 +965,101 @@ class DailyDbManager:
         open_leg = None
     return open_leg
 
+  def query_last_open_entry(self) -> Optional[Dict[str, Any]]:
+    """Return the most recent ENTRY row that has no following EXIT/FLATTEN (i.e. currently open position).
+    Walks all DB files in order to match the same pairing logic as query_open_leg_from_trades,
+    but returns the full row including entry_price and entry_ts."""
+    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[int]]] = []
+    for _, conn in self._iter_all_connections():
+      cur = conn.execute(
+        """
+        SELECT ts_ms, event_type, side, qty, price, entry_price, entry_ts
+        FROM trades
+        WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
+        ORDER BY ts_ms ASC
+        """
+      )
+      for r in cur.fetchall():
+        rows.append((
+          int(r[0]),
+          str(r[1] or ""),
+          str(r[2] or "") if r[2] is not None else None,
+          float(r[3]) if r[3] is not None else None,
+          float(r[4]) if r[4] is not None else None,
+          float(r[5]) if r[5] is not None else None,
+          int(r[6]) if r[6] is not None else None,
+        ))
+
+    rows.sort(key=lambda x: x[0])
+    open_row: Optional[Dict[str, Any]] = None
+    for ts_ms, et, side, qty, price, entry_price, entry_ts in rows:
+      if et == "ENTRY":
+        open_row = {
+          "ts_ms": ts_ms,
+          "side": (side or "").upper(),
+          "qty": qty,
+          "price": price,
+          "entry_price": entry_price if entry_price is not None else price,
+          "entry_ts": entry_ts if entry_ts is not None else ts_ms,
+        }
+      elif et in ("EXIT", "FLATTEN"):
+        open_row = None
+    return open_row
+
+  def query_trades_list(self, limit: int = 10, offset: int = 0) -> List[Dict[str, Any]]:
+    """Return closed trades (EXIT + FLATTEN) newest first, with full detail."""
+    rows: List[Dict[str, Any]] = []
+    for _, conn in self._iter_all_connections():
+      cur = conn.execute(
+        """
+        SELECT id, ts_ms, entry_ts, exit_ts, side, qty,
+               entry_price, exit_price, pnl, fees, slippage_bps,
+               tag, reason_json, note
+        FROM trades
+        WHERE event_type IN ('EXIT', 'FLATTEN')
+        """
+      )
+      for r in cur.fetchall():
+        entry_ts_val = int(r[2]) if r[2] is not None else None
+        exit_ts_val = int(r[3]) if r[3] is not None else int(r[1]) if r[1] is not None else None
+        duration_sec = None
+        if entry_ts_val and exit_ts_val and exit_ts_val > entry_ts_val:
+          duration_sec = int((exit_ts_val - entry_ts_val) / 1000)
+        rows.append({
+          "id": str(r[0] or ""),
+          "ts_ms": int(r[1]) if r[1] is not None else None,
+          "entry_ts": entry_ts_val,
+          "exit_ts": exit_ts_val,
+          "side": str(r[4] or "").upper() if r[4] else None,
+          "qty": float(r[5]) if r[5] is not None else None,
+          "entry_price": float(r[6]) if r[6] is not None else None,
+          "exit_price": float(r[7]) if r[7] is not None else None,
+          "pnl": float(r[8]) if r[8] is not None else None,
+          "fees": float(r[9]) if r[9] is not None else None,
+          "slippage_bps": float(r[10]) if r[10] is not None else None,
+          "tag": str(r[11] or "") if r[11] else None,
+          "close_reason": _classify_close_reason(r[11], r[12]),
+          "note": str(r[13] or "") if r[13] else None,
+          "duration_sec": duration_sec,
+        })
+
+    rows.sort(key=lambda x: x.get("ts_ms") or 0, reverse=True)
+    return rows[offset: offset + limit]
+
+  def query_trades_count(self) -> int:
+    """Total count of closed trades (EXIT + FLATTEN) across all DB files."""
+    count = 0
+    for _, conn in self._iter_all_connections():
+      try:
+        row = conn.execute(
+          "SELECT COUNT(*) FROM trades WHERE event_type IN ('EXIT', 'FLATTEN')"
+        ).fetchone()
+        if row and row[0]:
+          count += int(row[0])
+      except Exception:
+        pass
+    return count
+
   def utc_day_bounds_ms(self, now_ms: Optional[int] = None) -> Tuple[int, int]:
     if now_ms is None:
       now_ms = int(time.time() * 1000)

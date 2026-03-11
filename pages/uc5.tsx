@@ -211,6 +211,47 @@ function buildConfigPayload(edit: Uc5Config, ownerAddress: string): Record<strin
   return payload;
 }
 
+type TradeRow = {
+  id: string;
+  entry_ts?: number | null;
+  exit_ts?: number | null;
+  side?: string | null;
+  qty?: number | null;
+  entry_price?: number | null;
+  exit_price?: number | null;
+  pnl?: number | null;
+  fees?: number | null;
+  duration_sec?: number | null;
+  close_reason?: string | null;
+  note?: string | null;
+};
+
+function fmtDuration(sec?: number | null) {
+  if (sec == null || sec < 0) return "—";
+  const s = Math.round(sec);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m ${s % 60}s`;
+  const h = Math.floor(m / 60);
+  return `${h}h ${m % 60}m`;
+}
+
+function fmtDateTime(ts?: number | null) {
+  if (!ts) return "—";
+  const d = new Date(ts);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function closeReasonTag(reason?: string | null) {
+  if (!reason) return "—";
+  if (reason === "regime_end") return "REGIME END";
+  if (reason === "regime_flip") return "FLIP";
+  if (reason === "risk_loop") return "SL/TP";
+  if (reason === "confidence_change") return "CONFIDENCE";
+  return "MANUAL";
+}
+
 function parseErrorText(raw: unknown, fallback: string): string {
   if (!raw || typeof raw !== "object") return fallback;
   if ("error" in raw && typeof (raw as { error?: unknown }).error === "string") {
@@ -245,6 +286,9 @@ export default function Uc5Page() {
   const [portfolio, setPortfolio] = useState<VmPortfolio | null>(null);
   const [tradeSummary, setTradeSummary] = useState<VmTradesSummary | null>(null);
   const [setup, setSetup] = useState<VmSetupStatus | null>(null);
+
+  const [tradesPage, setTradesPage] = useState(0);
+  const [tradesData, setTradesData] = useState<{ trades: TradeRow[]; total: number } | null>(null);
 
   const [walletAddr, setWalletAddr] = useState("");
   const [busy, setBusy] = useState("");
@@ -299,11 +343,18 @@ export default function Uc5Page() {
     setChart(c);
   }, []);
 
+  const refreshTrades = useCallback(async (page: number) => {
+    const limit = 10;
+    const offset = page * limit;
+    const d = await readJson<{ trades: TradeRow[]; total: number }>(`/api/uc5/trades?limit=${limit}&offset=${offset}`);
+    setTradesData(d);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const init = async () => {
       try {
-        await Promise.all([refreshConfig(), refreshFast(), refreshChart()]);
+        await Promise.all([refreshConfig(), refreshFast(), refreshChart(), refreshTrades(0)]);
       } catch {
         if (!cancelled) addNotice("error", "Failed to load UC5 data from VM.", false);
       }
@@ -313,14 +364,17 @@ export default function Uc5Page() {
     const t1 = setInterval(() => void refreshFast().catch(() => {}), UI_REFRESH_SEC * 1000);
     const t2 = setInterval(() => void refreshChart().catch(() => {}), CHART_REFRESH_SEC * 1000);
     const t3 = setInterval(() => void refreshConfig().catch(() => {}), 20_000);
+    // Refresh trades on each fast cycle so new closes appear automatically
+    const t4 = setInterval(() => void refreshTrades(tradesPage).catch(() => {}), 15_000);
 
     return () => {
       cancelled = true;
       clearInterval(t1);
       clearInterval(t2);
       clearInterval(t3);
+      clearInterval(t4);
     };
-  }, [addNotice, refreshChart, refreshConfig, refreshFast]);
+  }, [addNotice, refreshChart, refreshConfig, refreshFast, refreshTrades, tradesPage]);
 
   const validation = useMemo(() => {
     const errors: Record<string, string> = {};
@@ -923,29 +977,68 @@ export default function Uc5Page() {
 
             <div style={darkCard}>
               <div style={sideCardLabel}>OPEN POSITION</div>
-              {status?.position?.open ? (
-                <div>
-                  <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: status.position.side === "LONG" ? "#22c55e" : "#ef4444" }}>
-                    {status.position.side === "LONG" ? "▲ LONG" : "▼ SHORT"}
-                  </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {([
-                      { label: "SIZE", val: `${status.position.size?.toFixed(6) || "—"} BTC` },
-                      { label: "ENTRY PRICE", val: fmtUsd(status.position.entryPrice) },
-                      { label: "AGE", val: status.position.ageSec != null ? `${Math.floor(status.position.ageSec / 60)}m ${Math.floor(status.position.ageSec % 60)}s` : "—" },
-                    ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
-                      <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                        <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
-                        <span style={{ fontWeight: 700, color: "#e8e8f0" }}>{val}</span>
+              {status?.position?.open ? (() => {
+                const pos = status.position!;
+                const currentPrice = status.market?.price ?? 0;
+                const entryPrice = pos.entryPrice ?? 0;
+                const atrPct = pos.atrPct ?? 0;
+                const runtimeCfg = (status as unknown as { runtimeConfig?: { stopLossPct?: number | null; stopLossAtrMult?: number | null; takeProfitPct?: number | null; takeProfitAtrMult?: number | null } }).runtimeConfig;
+                const slPct = (runtimeCfg?.stopLossAtrMult && atrPct > 0) ? runtimeCfg.stopLossAtrMult * atrPct : (runtimeCfg?.stopLossPct ?? 0);
+                const tpPct = (runtimeCfg?.takeProfitAtrMult && atrPct > 0) ? runtimeCfg.takeProfitAtrMult * atrPct : (runtimeCfg?.takeProfitPct ?? 0);
+                const isLong = pos.side === "LONG";
+                const slPrice = entryPrice > 0 && slPct > 0 ? (isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct)) : null;
+                const tpPrice = entryPrice > 0 && tpPct > 0 ? (isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct)) : null;
+                const distToSl = slPrice && currentPrice > 0 ? Math.abs(currentPrice - slPrice) / currentPrice * 100 : null;
+                const distToTp = tpPrice && currentPrice > 0 ? Math.abs(currentPrice - tpPrice) / currentPrice * 100 : null;
+                const progressPct = (slPrice && tpPrice && currentPrice > 0) ? Math.max(0, Math.min(100, ((currentPrice - slPrice) / (tpPrice - slPrice)) * 100)) : null;
+                return (
+                  <div>
+                    <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: isLong ? "#22c55e" : "#ef4444" }}>
+                      {isLong ? "▲ LONG" : "▼ SHORT"}
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {([
+                        { label: "SIZE", val: `${pos.size?.toFixed(6) || "—"} BTC` },
+                        { label: "ENTRY PRICE", val: fmtUsd(pos.entryPrice) },
+                        { label: "ENTRY TIME", val: fmtDateTime(pos.entryAt) },
+                        { label: "AGE", val: pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—" },
+                        ...(atrPct > 0 ? [{ label: "ATR", val: entryPrice > 0 ? fmtUsd(atrPct * entryPrice) : `${(atrPct * 100).toFixed(3)}%` }] : []),
+                      ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
+                        <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
+                          <span style={{ fontWeight: 700, color: "#e8e8f0" }}>{val}</span>
+                        </div>
+                      ))}
+                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                        <span style={{ color: "rgba(232,232,240,0.45)" }}>UNREAL PNL</span>
+                        <span style={{ fontWeight: 700, color: (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtUsd(pos.unrealizedPnl)}</span>
                       </div>
-                    ))}
-                    <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                      <span style={{ color: "rgba(232,232,240,0.45)" }}>UNREAL PNL</span>
-                      <span style={{ fontWeight: 700, color: (status.position.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtUsd(status.position.unrealizedPnl)}</span>
+                      {slPrice != null && (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: "#ef4444", opacity: 0.7 }}>SL {fmtUsd(slPrice)}</span>
+                          <span style={{ fontWeight: 700, color: "#ef4444" }}>{distToSl != null ? `${distToSl.toFixed(2)}% away` : "—"}</span>
+                        </div>
+                      )}
+                      {tpPrice != null && (
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                          <span style={{ color: "#22c55e", opacity: 0.7 }}>TP {fmtUsd(tpPrice)}</span>
+                          <span style={{ fontWeight: 700, color: "#22c55e" }}>{distToTp != null ? `${distToTp.toFixed(2)}% away` : "—"}</span>
+                        </div>
+                      )}
+                      {progressPct != null && (
+                        <div style={{ marginTop: 4 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(232,232,240,0.35)", marginBottom: 3 }}>
+                            <span>SL</span><span>TP</span>
+                          </div>
+                          <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", position: "relative", overflow: "hidden" }}>
+                            <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${progressPct}%`, background: progressPct > 60 ? "#22c55e" : progressPct < 25 ? "#ef4444" : "#f59e0b", borderRadius: 3, transition: "width 0.5s" }} />
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
-                </div>
-              ) : (
+                );
+              })() : (
                 <div style={{ textAlign: "center", padding: "20px 0", fontSize: 18, fontWeight: 700, color: "rgba(232,232,240,0.2)", letterSpacing: "0.1em" }}>— FLAT —</div>
               )}
             </div>
@@ -1007,6 +1100,24 @@ export default function Uc5Page() {
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>TRADING</div>
               <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{trading?.running ? "RUNNING" : "STOPPED"} · {trading?.positionOpen ? `${trading.side || "OPEN"} · ${fmtCountdown(trading?.timeSinceEntrySec)} age` : "no position"}</div>
+              {(() => {
+                const todayCount = status?.trading?.tradesToday ?? 0;
+                const maxDaily = status?.trading?.maxDailyTrades ?? 0;
+                const atLimit = maxDaily > 0 && todayCount >= maxDaily;
+                const fillPct = maxDaily > 0 ? Math.min(100, (todayCount / maxDaily) * 100) : 0;
+                return (
+                  <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
+                    <span style={{ fontSize: 10, color: atLimit ? "#ef4444" : "rgba(232,232,240,0.45)" }}>
+                      {todayCount} / {maxDaily > 0 ? maxDaily : "∞"} today
+                    </span>
+                    {maxDaily > 0 && (
+                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${fillPct}%`, background: atLimit ? "#ef4444" : "#f59e0b", borderRadius: 2, transition: "width 0.5s" }} />
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
             </div>
             <button style={trading?.enabled ? miniWarnBtn : miniGreenBtn} disabled={!isOwner || !!busy} onClick={() => void setTradingEnabled(!(trading?.enabled ?? true))}>
               {trading?.enabled ? "PAUSE" : "START"}
@@ -1049,6 +1160,34 @@ export default function Uc5Page() {
                   <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
                 </div>
               ))}
+              {portfolio?.startPortfolioValueUsd != null && portfolio.startPortfolioValueUsd > 0 && (() => {
+                const startVal = portfolio.startPortfolioValueUsd!;
+                const curVal = portfolio.portfolioValueUsd ?? 0;
+                const startAt = portfolio.startPortfolioAt ?? 0;
+                const totalReturnPct = curVal > 0 ? ((curVal - startVal) / startVal) * 100 : null;
+                const daysSince = startAt > 0 ? (Date.now() - startAt) / 86400000 : 0;
+                const annualizedPct = totalReturnPct != null && daysSince > 0
+                  ? (Math.pow(curVal / startVal, 365 / daysSince) - 1) * 100
+                  : null;
+                return (
+                  <>
+                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 4, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.28)", marginBottom: 2 }}>PERFORMANCE</div>
+                      {([
+                        { k: "Start value", v: fmtUsd(startVal), c: undefined as string | undefined },
+                        { k: "Tracking since", v: startAt > 0 ? fmtDateTime(startAt) : "—", c: undefined as string | undefined },
+                        { k: "Total return", v: totalReturnPct != null ? `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%` : "—", c: totalReturnPct != null ? (totalReturnPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
+                        { k: "Annualized", v: annualizedPct != null ? `${annualizedPct >= 0 ? "+" : ""}${annualizedPct.toFixed(1)}%` : "—", c: annualizedPct != null ? (annualizedPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
+                      ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                          <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                          <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                );
+              })()}
             </div>
           </div>
           <div style={darkCard}>
@@ -1077,6 +1216,70 @@ export default function Uc5Page() {
               ))}
             </div>
           </div>
+        </div>
+
+        {/* TRADE HISTORY */}
+        <div style={darkCard}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+            <span style={sideCardLabel}>TRADE HISTORY</span>
+            {tradesData && (
+              <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>
+                {tradesData.total === 0 ? "No closed trades" : `${tradesPage * 10 + 1}–${Math.min((tradesPage + 1) * 10, tradesData.total)} of ${tradesData.total}`}
+              </span>
+            )}
+          </div>
+          {!tradesData || tradesData.trades.length === 0 ? (
+            <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "rgba(232,232,240,0.25)" }}>No closed trades yet</div>
+          ) : (
+            <>
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+                  <thead>
+                    <tr>
+                      {(["Side", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Fees", "Duration", "Reason", "Fill"] as string[]).map((h) => (
+                        <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(232,232,240,0.3)", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tradesData.trades.map((t, i) => {
+                      const isLong = t.side === "LONG";
+                      const pnlColor = t.pnl == null ? "#e8e8f0" : t.pnl >= 0 ? "#22c55e" : "#ef4444";
+                      return (
+                        <tr key={t.id ?? i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 700, color: isLong ? "#22c55e" : "#ef4444", whiteSpace: "nowrap" }}>{t.side || "—"}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDateTime(t.entry_ts)}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDateTime(t.exit_ts)}</td>
+                          <td style={{ padding: "6px 8px", color: "#e8e8f0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.entry_price)}</td>
+                          <td style={{ padding: "6px 8px", color: "#e8e8f0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.exit_price)}</td>
+                          <td style={{ padding: "6px 8px", fontWeight: 700, color: pnlColor, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.pnl != null ? fmtUsd(t.pnl) : "—"}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.fees != null ? fmtUsd(t.fees) : "—"}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap" }}>{fmtDuration(t.duration_sec)}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.6)", whiteSpace: "nowrap", fontSize: 11 }}>{closeReasonTag(t.close_reason)}</td>
+                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.5)", whiteSpace: "nowrap", fontSize: 11 }}>{t.note || "—"}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              {tradesData.total > 10 && (
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                  <button
+                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: tradesPage === 0 ? "rgba(232,232,240,0.2)" : "#e8e8f0", cursor: tradesPage === 0 ? "default" : "pointer" }}
+                    disabled={tradesPage === 0}
+                    onClick={() => { const p = tradesPage - 1; setTradesPage(p); void refreshTrades(p); }}
+                  >Prev</button>
+                  <span style={{ fontSize: 11, color: "rgba(232,232,240,0.4)" }}>{tradesPage + 1} / {Math.ceil(tradesData.total / 10)}</span>
+                  <button
+                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: (tradesPage + 1) * 10 >= tradesData.total ? "rgba(232,232,240,0.2)" : "#e8e8f0", cursor: (tradesPage + 1) * 10 >= tradesData.total ? "default" : "pointer" }}
+                    disabled={(tradesPage + 1) * 10 >= tradesData.total}
+                    onClick={() => { const p = tradesPage + 1; setTradesPage(p); void refreshTrades(p); }}
+                  >Next</button>
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* INGESTION DETAIL */}

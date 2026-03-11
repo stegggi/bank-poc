@@ -202,6 +202,7 @@ export type Uc5Status = {
     entryAt?: number;
     ageSec?: number;
     unrealizedPnl?: number;
+    atrPct?: number;
     updatedAt?: number;
   };
   agent?: {
@@ -235,6 +236,8 @@ export type Uc5Status = {
     maxHoldEndsAt?: number | null;
     cooldownUntil?: number | null;
     nextDecisionAt?: number | null;
+    tradesToday?: number;
+    maxDailyTrades?: number;
     countdowns?: {
       initialHoldEndsInSec?: number | null;
       nextReassessInSec?: number | null;

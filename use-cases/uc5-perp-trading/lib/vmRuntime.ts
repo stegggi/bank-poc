@@ -267,6 +267,8 @@ export type VmPortfolio = {
   unrealizedPnl?: number | null;
   realizedPnlToday?: number | null;
   realizedPnlTotal?: number | null;
+  startPortfolioValueUsd?: number | null;
+  startPortfolioAt?: number | null;
   error?: string | null;
 };
 

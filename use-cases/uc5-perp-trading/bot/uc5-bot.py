@@ -707,6 +707,12 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       pv = _f(snap.get("portfolioValueUsd"))
       used_pct = ((used / pv) * 100.0) if pv and pv > 0 else (0.0 if used == 0 else None)
       unrealized = _f(s.get("position", {}).get("unrealizedPnl"))
+      # Write portfolio start value on first observation (persisted across restarts).
+      if pv and pv > 0 and not DB_MANAGER.model_get("portfolio_start_value"):
+        DB_MANAGER.model_set("portfolio_start_value", str(pv))
+        DB_MANAGER.model_set("portfolio_start_ts", str(int(time.time() * 1000)))
+      start_value_raw = DB_MANAGER.model_get("portfolio_start_value")
+      start_ts_raw = DB_MANAGER.model_get("portfolio_start_ts")
       return self._send_json(
         200,
         {
@@ -716,11 +722,22 @@ class TelemetryHandler(BaseHTTPRequestHandler):
           "unrealizedPnl": 0.0 if unrealized is None else unrealized,
           "realizedPnlToday": float(summary.get("realizedPnlToday") or 0.0),
           "realizedPnlTotal": float(summary.get("realizedPnlTotal") or 0.0),
+          "startPortfolioValueUsd": _f(start_value_raw),
+          "startPortfolioAt": int(start_ts_raw) if start_ts_raw else None,
         },
       )
 
     if path.startswith("/uc5/trades/summary"):
       return self._send_json(200, DB_MANAGER.query_trades_summary())
+
+    if path.startswith("/uc5/trades"):
+      from urllib.parse import parse_qs, urlparse
+      qs = parse_qs(urlparse(self.path).query)
+      limit = max(1, min(100, int((qs.get("limit") or ["10"])[0])))
+      offset = max(0, int((qs.get("offset") or ["0"])[0]))
+      trades = DB_MANAGER.query_trades_list(limit=limit, offset=offset)
+      total = DB_MANAGER.query_trades_count()
+      return self._send_json(200, {"trades": trades, "total": total, "limit": limit, "offset": offset})
 
     if path.startswith("/uc5/setup"):
       cfg = get_runtime_config()
@@ -2606,6 +2623,12 @@ async def main():
 
   current_trade_entry_price: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
+  # Restore entry price from DB in case bot restarted with an open position.
+  # Without this, FLATTEN/risk-exit would compute pnl=None on restart.
+  _open_entry = DB_MANAGER.query_last_open_entry()
+  if _open_entry:
+    current_trade_entry_price = _open_entry.get("entry_price")
+    current_trade_entry_ts = _open_entry.get("entry_ts")
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
   last_regime_exit_ts_ms: Optional[int] = None
   last_regime_exit_reason: Optional[str] = None
@@ -3349,6 +3372,9 @@ async def main():
                 entry_px = float(epf if epf and epf > 0 else last_mid)
                 entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
 
+                _entry_maker_pct = float(
+                  (last_entry_fill_audit or {}).get("summary", {}).get("makerRatePct") or 0.0
+                ) if last_entry_fill_audit else 0.0
                 DB_MANAGER.insert_trade_event(
                   trade_id=str(uuid.uuid4()),
                   ts_ms=now_ms,
@@ -3374,6 +3400,7 @@ async def main():
                   ),
                   entry_ts=etsf or now_ms,
                   entry_price=entry_px,
+                  note=f"maker:{round(_entry_maker_pct)}%" if _entry_maker_pct > 0 else "taker",
                 )
 
                 current_trade_entry_price = entry_px
@@ -3718,6 +3745,7 @@ async def main():
             else None
           ),
           "unrealizedPnl": pos_upnl,
+          "atrPct": float(metrics_cache.get("atrPct") or 0.0),
           "updatedAt": int(time.time() * 1000),
         },
         "agent": {
@@ -3751,6 +3779,8 @@ async def main():
           "maxHoldEndsAt": max_hold_until,
           "cooldownUntil": cooldown_until,
           "nextDecisionAt": None if position_state.open else next_decision_ms,
+          "tradesToday": DB_MANAGER.query_trade_count_since(DB_MANAGER.utc_day_bounds_ms(now_ms)[0]),
+          "maxDailyTrades": int(cfg.get("maxDailyTrades", 0)),
           "countdowns": {
             "initialHoldEndsInSec": to_countdown_sec(min_hold_until, now_ms),
             "nextReassessInSec": to_countdown_sec(next_reassess_ms if position_state.open else None, now_ms),
