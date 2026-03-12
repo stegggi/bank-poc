@@ -2209,7 +2209,7 @@ function DarkTable({ headers, rows, onRowClick }: { headers: string[]; rows: Arr
 
 const darkInputStyle: CSSProperties = { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"4px 8px", color:"#e8e8f0", fontSize:12, width:"100%", boxSizing:"border-box" };
 const darkLabelStyle: CSSProperties = { display:"grid", gap:4, fontSize:12 };
-const darkLabelSpanStyle: CSSProperties = { fontSize:10, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:0.6 };
+const darkLabelSpanStyle: CSSProperties = { fontSize:10, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:0, lineHeight:1.3, wordBreak:"break-word", overflowWrap:"break-word" };
 
 function NumberField({ label, value, onChange, step = "1" }: { label: string; value: number; onChange: (next: string) => void; step?: string }) {
   return (
