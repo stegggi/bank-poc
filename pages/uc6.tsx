@@ -1519,18 +1519,17 @@ export default function Uc6Page() {
         ? `${Math.round(Number(regimeHalfLifeSec) / 3600)}h`
         : fmtDurationCompact(regimeHalfLifeSec);
   const regimeConfidencePct = regimeStatus?.confidence == null ? null : n(regimeStatus?.confidence, 0) * 100;
-  const regimeBaseEdgePct = n(regimeDecisionView?.baseThresholds?.edgeRebalancePct, n(status?.settings?.edgeRebalancePct, 0)) * 100;
+  // Always derive "base" from live settings — the cached regimeDecision.baseThresholds can be
+  // stale after a settings change and will disagree with status.settings until the next bot cycle.
+  const regimeBaseEdgePct = n(status?.settings?.edgeRebalancePct, 0) * 100;
   const regimeEffectiveEdgePct =
     n(regimeDecisionView?.effectiveThresholds?.edgeRebalancePct, n(status?.settings?.edgeRebalancePct, 0)) * 100;
-  const regimeBaseCooldown = n(
-    regimeDecisionView?.baseThresholds?.minRebalanceIntervalSec,
-    n(status?.settings?.minRebalanceIntervalSec, 0)
-  );
+  const regimeBaseCooldown = n(status?.settings?.minRebalanceIntervalSec, 0);
   const regimeEffectiveCooldown = n(
     regimeDecisionView?.effectiveThresholds?.minRebalanceIntervalSec,
     n(status?.settings?.minRebalanceIntervalSec, 0)
   );
-  const regimeBaseBandBps = n(regimeDecisionView?.baseThresholds?.bandHalfBps, n(status?.settings?.bandHalfBps, 0));
+  const regimeBaseBandBps = n(status?.settings?.bandHalfBps, 0);
   const regimeEffectiveBandBps = n(
     regimeDecisionView?.effectiveThresholds?.bandHalfBps,
     n(status?.settings?.bandHalfBps, 0)
