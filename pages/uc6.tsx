@@ -2512,8 +2512,61 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPric
         {theta != null && <Uc6Metric label="Mean-Revert Speed" value={theta.toFixed(4)} />}
         {sigma != null && <Uc6Metric label="Volatility" value={sigma.toFixed(4)} />}
         {muPrice != null && <Uc6Metric label="Mean Price" value={fmtUsd(muPrice)} />}
-        <Uc6Metric label="Edge" value={`${baseEdgePct.toFixed(2)}%\u2192${effectiveEdgePct.toFixed(2)}%`} />
-        <Uc6Metric label="Band" value={`\u00b1${baseBandBps}\u2192\u00b1${effectiveBandBps}bps`} />
+      </div>
+
+      {/* Threshold adjustments — show configured vs what regime is actually using */}
+      <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:10, display:"grid", gap:6 }}>
+        <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.3)", textTransform:"uppercase", letterSpacing:1, marginBottom:2 }}>Regime threshold adjustments</div>
+
+        {/* Band */}
+        {(() => {
+          const adjBps = effectiveBandBps - baseBandBps;
+          const basePct = (baseBandBps / 100).toFixed(2);
+          const effPct  = (effectiveBandBps / 100).toFixed(2);
+          const sameVal = Math.abs(adjBps) < 1;
+          return (
+            <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", fontSize:12 }}>
+              <span style={{ color:"rgba(232,232,240,0.45)" }}>Band half-width</span>
+              <span style={{ fontFamily:"monospace" }}>
+                <span style={{ color:"rgba(232,232,240,0.55)" }}>\u00b1{basePct}%</span>
+                {!sameVal && (
+                  <>
+                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>\u2192</span>
+                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#ef4444", fontWeight:700 }}>\u00b1{effPct}%</span>
+                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#ef4444" }}>
+                      ({adjBps > 0 ? "+" : ""}{adjBps} bps)
+                    </span>
+                  </>
+                )}
+                {sameVal && <span style={{ color:"rgba(232,232,240,0.3)", marginLeft:6, fontSize:11 }}>no adj</span>}
+              </span>
+            </div>
+          );
+        })()}
+
+        {/* Edge */}
+        {(() => {
+          const adjPct = effectiveEdgePct - baseEdgePct;
+          const sameVal = Math.abs(adjPct) < 0.001;
+          return (
+            <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", fontSize:12 }}>
+              <span style={{ color:"rgba(232,232,240,0.45)" }}>Edge threshold</span>
+              <span style={{ fontFamily:"monospace" }}>
+                <span style={{ color:"rgba(232,232,240,0.55)" }}>{baseEdgePct.toFixed(2)}%</span>
+                {!sameVal && (
+                  <>
+                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>\u2192</span>
+                    <span style={{ color: adjPct > 0 ? "#22c55e" : "#f59e0b", fontWeight:700 }}>{effectiveEdgePct.toFixed(2)}%</span>
+                    <span style={{ fontSize:10, marginLeft:4, color:"rgba(232,232,240,0.45)" }}>
+                      ({adjPct > 0 ? "+" : ""}{adjPct.toFixed(3)})
+                    </span>
+                  </>
+                )}
+                {sameVal && <span style={{ color:"rgba(232,232,240,0.3)", marginLeft:6, fontSize:11 }}>no adj</span>}
+              </span>
+            </div>
+          );
+        })()}
       </div>
     </div>
   );
