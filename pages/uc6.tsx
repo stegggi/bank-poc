@@ -2528,11 +2528,11 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPric
             <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", fontSize:12 }}>
               <span style={{ color:"rgba(232,232,240,0.45)" }}>Band half-width</span>
               <span style={{ fontFamily:"monospace" }}>
-                <span style={{ color:"rgba(232,232,240,0.55)" }}>\u00b1{basePct}%</span>
+                <span style={{ color:"rgba(232,232,240,0.55)" }}>{"±"}{basePct}%</span>
                 {!sameVal && (
                   <>
-                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>\u2192</span>
-                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#ef4444", fontWeight:700 }}>\u00b1{effPct}%</span>
+                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"→"}</span>
+                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#ef4444", fontWeight:700 }}>{"±"}{effPct}%</span>
                     <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#ef4444" }}>
                       ({adjBps > 0 ? "+" : ""}{adjBps} bps)
                     </span>
@@ -2555,10 +2555,10 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPric
                 <span style={{ color:"rgba(232,232,240,0.55)" }}>{baseEdgePct.toFixed(2)}%</span>
                 {!sameVal && (
                   <>
-                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>\u2192</span>
+                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"→"}</span>
                     <span style={{ color: adjPct > 0 ? "#22c55e" : "#f59e0b", fontWeight:700 }}>{effectiveEdgePct.toFixed(2)}%</span>
                     <span style={{ fontSize:10, marginLeft:4, color:"rgba(232,232,240,0.45)" }}>
-                      ({adjPct > 0 ? "+" : ""}{adjPct.toFixed(3)})
+                      ({adjPct > 0 ? "+" : ""}{adjPct.toFixed(2)} pp)
                     </span>
                   </>
                 )}
