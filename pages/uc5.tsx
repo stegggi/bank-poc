@@ -1017,52 +1017,57 @@ export default function Uc5Page() {
                       {row("AGE", pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—")}
                       {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444")}
 
-                      {/* ATR block */}
-                      {atrUsd != null && (
-                        <div style={{ margin: "4px 0 2px", padding: "8px 10px", background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 8 }}>
-                          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(6,182,212,0.7)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
-                            ATR · {isAtrBasedSl || isAtrBasedTp ? "ATR-based exits" : "fixed exits"}
-                          </div>
-                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                            <span style={{ color: "rgba(232,232,240,0.5)" }}>1 ATR</span>
-                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#06b6d4" }}>
-                              {fmtUsd(atrUsd)} <span style={{ color: "rgba(232,232,240,0.4)", fontSize: 11 }}>({(atrPct * 100).toFixed(3)}%)</span>
+                      {/* ATR / exits block — always shown when position open */}
+                      <div style={{ margin: "4px 0 2px", padding: "8px 10px", background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 8 }}>
+                        <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(6,182,212,0.7)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                          ATR · {isAtrBasedSl || isAtrBasedTp ? "ATR-based exits" : "fixed exits"}
+                        </div>
+                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                          <span style={{ color: "rgba(232,232,240,0.5)" }}>1 ATR</span>
+                          <span style={{ fontFamily: "monospace", fontWeight: 700, color: atrUsd != null ? "#06b6d4" : "rgba(232,232,240,0.3)" }}>
+                            {atrUsd != null
+                              ? <>{fmtUsd(atrUsd)} <span style={{ color: "rgba(232,232,240,0.4)", fontSize: 11 }}>({(atrPct * 100).toFixed(3)}%)</span></>
+                              : "not computed"}
+                          </span>
+                        </div>
+
+                        {/* SL distance */}
+                        {slPrice != null && (
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
+                            <span style={{ color: "#ef4444", opacity: 0.8 }}>
+                              SL {fmtUsd(slPrice)}
+                              {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.stopLossAtrMult}× ATR)</span>}
+                            </span>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>
+                              {distToSlAtr != null ? `${distToSlAtr.toFixed(2)}× ATR` : distToSlPct != null ? `${distToSlPct.toFixed(2)}%` : "—"}
+                              {distToSlPct != null && distToSlAtr == null && (
+                                <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)", marginLeft: 4 }}>({distToSlPct.toFixed(2)}%)</span>
+                              )}
                             </span>
                           </div>
+                        )}
 
-                          {/* SL distance */}
-                          {slPrice != null && (
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
-                              <span style={{ color: "#ef4444", opacity: 0.8 }}>
-                                SL {fmtUsd(slPrice)}
-                                {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.stopLossAtrMult}× ATR)</span>}
-                              </span>
-                              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>
-                                {distToSlAtr != null ? `${distToSlAtr.toFixed(2)}× ATR` : distToSlPct != null ? `${distToSlPct.toFixed(2)}%` : "—"}
-                                {distToSlPct != null && distToSlAtr != null && (
-                                  <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)", marginLeft: 4 }}>({distToSlPct.toFixed(2)}%)</span>
-                                )}
-                              </span>
-                            </div>
-                          )}
+                        {/* TP distance */}
+                        {tpPrice != null && (
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                            <span style={{ color: "#22c55e", opacity: 0.8 }}>
+                              TP {fmtUsd(tpPrice)}
+                              {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.takeProfitAtrMult}× ATR)</span>}
+                            </span>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#22c55e" }}>
+                              {distToTpAtr != null ? `${distToTpAtr.toFixed(2)}× ATR` : distToTpPct != null ? `${distToTpPct.toFixed(2)}%` : "—"}
+                              {distToTpPct != null && distToTpAtr == null && (
+                                <span style={{ fontSize: 10, color: "rgba(34,197,94,0.6)", marginLeft: 4 }}>({distToTpPct.toFixed(2)}%)</span>
+                              )}
+                            </span>
+                          </div>
+                        )}
 
-                          {/* TP distance */}
-                          {tpPrice != null && (
-                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
-                              <span style={{ color: "#22c55e", opacity: 0.8 }}>
-                                TP {fmtUsd(tpPrice)}
-                                {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.takeProfitAtrMult}× ATR)</span>}
-                              </span>
-                              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#22c55e" }}>
-                                {distToTpAtr != null ? `${distToTpAtr.toFixed(2)}× ATR` : distToTpPct != null ? `${distToTpPct.toFixed(2)}%` : "—"}
-                                {distToTpPct != null && distToTpAtr != null && (
-                                  <span style={{ fontSize: 10, color: "rgba(34,197,94,0.6)", marginLeft: 4 }}>({distToTpPct.toFixed(2)}%)</span>
-                                )}
-                              </span>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                        {/* Fallback when no SL/TP configured */}
+                        {slPrice == null && tpPrice == null && (
+                          <div style={{ fontSize: 11, color: "rgba(232,232,240,0.3)" }}>No SL/TP configured</div>
+                        )}
+                      </div>
 
                       {/* Progress bar SL → TP */}
                       {progressPct != null && (
