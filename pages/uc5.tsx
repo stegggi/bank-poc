@@ -982,53 +982,95 @@ export default function Uc5Page() {
                 const currentPrice = status.market?.price ?? 0;
                 const entryPrice = pos.entryPrice ?? 0;
                 const atrPct = pos.atrPct ?? 0;
+                const atrUsd = atrPct > 0 && entryPrice > 0 ? atrPct * entryPrice : null;
                 const runtimeCfg = (status as unknown as { runtimeConfig?: { stopLossPct?: number | null; stopLossAtrMult?: number | null; takeProfitPct?: number | null; takeProfitAtrMult?: number | null } }).runtimeConfig;
-                const slPct = (runtimeCfg?.stopLossAtrMult && atrPct > 0) ? runtimeCfg.stopLossAtrMult * atrPct : (runtimeCfg?.stopLossPct ?? 0);
-                const tpPct = (runtimeCfg?.takeProfitAtrMult && atrPct > 0) ? runtimeCfg.takeProfitAtrMult * atrPct : (runtimeCfg?.takeProfitPct ?? 0);
+                const isAtrBasedSl = Boolean(runtimeCfg?.stopLossAtrMult && atrPct > 0);
+                const isAtrBasedTp = Boolean(runtimeCfg?.takeProfitAtrMult && atrPct > 0);
+                const slPct = isAtrBasedSl ? runtimeCfg!.stopLossAtrMult! * atrPct : (runtimeCfg?.stopLossPct ?? 0);
+                const tpPct = isAtrBasedTp ? runtimeCfg!.takeProfitAtrMult! * atrPct : (runtimeCfg?.takeProfitPct ?? 0);
                 const isLong = pos.side === "LONG";
                 const slPrice = entryPrice > 0 && slPct > 0 ? (isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct)) : null;
                 const tpPrice = entryPrice > 0 && tpPct > 0 ? (isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct)) : null;
-                const distToSl = slPrice && currentPrice > 0 ? Math.abs(currentPrice - slPrice) / currentPrice * 100 : null;
-                const distToTp = tpPrice && currentPrice > 0 ? Math.abs(currentPrice - tpPrice) / currentPrice * 100 : null;
-                const progressPct = (slPrice && tpPrice && currentPrice > 0) ? Math.max(0, Math.min(100, ((currentPrice - slPrice) / (tpPrice - slPrice)) * 100)) : null;
+                const distToSlUsd = slPrice != null && currentPrice > 0 ? Math.abs(currentPrice - slPrice) : null;
+                const distToTpUsd = tpPrice != null && currentPrice > 0 ? Math.abs(currentPrice - tpPrice) : null;
+                const distToSlPct = distToSlUsd != null && currentPrice > 0 ? (distToSlUsd / currentPrice) * 100 : null;
+                const distToTpPct = distToTpUsd != null && currentPrice > 0 ? (distToTpUsd / currentPrice) * 100 : null;
+                const distToSlAtr = distToSlUsd != null && atrUsd && atrUsd > 0 ? distToSlUsd / atrUsd : null;
+                const distToTpAtr = distToTpUsd != null && atrUsd && atrUsd > 0 ? distToTpUsd / atrUsd : null;
+                const progressPct = (slPrice != null && tpPrice != null && currentPrice > 0)
+                  ? Math.max(0, Math.min(100, ((currentPrice - slPrice) / (tpPrice - slPrice)) * 100))
+                  : null;
+                const row = (label: string, val: React.ReactNode, valColor = "#e8e8f0") => (
+                  <div key={String(label)} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12 }}>
+                    <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
+                    <span style={{ fontWeight: 700, color: valColor, fontFamily: "monospace" }}>{val}</span>
+                  </div>
+                );
                 return (
                   <div>
                     <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: isLong ? "#22c55e" : "#ef4444" }}>
                       {isLong ? "▲ LONG" : "▼ SHORT"}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      {([
-                        { label: "SIZE", val: `${pos.size?.toFixed(6) || "—"} BTC` },
-                        { label: "ENTRY PRICE", val: fmtUsd(pos.entryPrice) },
-                        { label: "ENTRY TIME", val: fmtDateTime(pos.entryAt) },
-                        { label: "AGE", val: pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—" },
-                        ...(atrPct > 0 ? [{ label: "ATR", val: entryPrice > 0 ? fmtUsd(atrPct * entryPrice) : `${(atrPct * 100).toFixed(3)}%` }] : []),
-                      ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
-                        <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                          <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
-                          <span style={{ fontWeight: 700, color: "#e8e8f0" }}>{val}</span>
-                        </div>
-                      ))}
-                      <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                        <span style={{ color: "rgba(232,232,240,0.45)" }}>UNREAL PNL</span>
-                        <span style={{ fontWeight: 700, color: (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtUsd(pos.unrealizedPnl)}</span>
-                      </div>
-                      {slPrice != null && (
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                          <span style={{ color: "#ef4444", opacity: 0.7 }}>SL {fmtUsd(slPrice)}</span>
-                          <span style={{ fontWeight: 700, color: "#ef4444" }}>{distToSl != null ? `${distToSl.toFixed(2)}% away` : "—"}</span>
+                      {row("SIZE", `${pos.size?.toFixed(6) || "—"} BTC`)}
+                      {row("ENTRY", fmtUsd(pos.entryPrice))}
+                      {row("AGE", pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—")}
+                      {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444")}
+
+                      {/* ATR block */}
+                      {atrUsd != null && (
+                        <div style={{ margin: "4px 0 2px", padding: "8px 10px", background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 8 }}>
+                          <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(6,182,212,0.7)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
+                            ATR · {isAtrBasedSl || isAtrBasedTp ? "ATR-based exits" : "fixed exits"}
+                          </div>
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
+                            <span style={{ color: "rgba(232,232,240,0.5)" }}>1 ATR</span>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#06b6d4" }}>
+                              {fmtUsd(atrUsd)} <span style={{ color: "rgba(232,232,240,0.4)", fontSize: 11 }}>({(atrPct * 100).toFixed(3)}%)</span>
+                            </span>
+                          </div>
+
+                          {/* SL distance */}
+                          {slPrice != null && (
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
+                              <span style={{ color: "#ef4444", opacity: 0.8 }}>
+                                SL {fmtUsd(slPrice)}
+                                {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.stopLossAtrMult}× ATR)</span>}
+                              </span>
+                              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>
+                                {distToSlAtr != null ? `${distToSlAtr.toFixed(2)}× ATR` : distToSlPct != null ? `${distToSlPct.toFixed(2)}%` : "—"}
+                                {distToSlPct != null && distToSlAtr != null && (
+                                  <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)", marginLeft: 4 }}>({distToSlPct.toFixed(2)}%)</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
+
+                          {/* TP distance */}
+                          {tpPrice != null && (
+                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
+                              <span style={{ color: "#22c55e", opacity: 0.8 }}>
+                                TP {fmtUsd(tpPrice)}
+                                {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.takeProfitAtrMult}× ATR)</span>}
+                              </span>
+                              <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#22c55e" }}>
+                                {distToTpAtr != null ? `${distToTpAtr.toFixed(2)}× ATR` : distToTpPct != null ? `${distToTpPct.toFixed(2)}%` : "—"}
+                                {distToTpPct != null && distToTpAtr != null && (
+                                  <span style={{ fontSize: 10, color: "rgba(34,197,94,0.6)", marginLeft: 4 }}>({distToTpPct.toFixed(2)}%)</span>
+                                )}
+                              </span>
+                            </div>
+                          )}
                         </div>
                       )}
-                      {tpPrice != null && (
-                        <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
-                          <span style={{ color: "#22c55e", opacity: 0.7 }}>TP {fmtUsd(tpPrice)}</span>
-                          <span style={{ fontWeight: 700, color: "#22c55e" }}>{distToTp != null ? `${distToTp.toFixed(2)}% away` : "—"}</span>
-                        </div>
-                      )}
+
+                      {/* Progress bar SL → TP */}
                       {progressPct != null && (
-                        <div style={{ marginTop: 4 }}>
+                        <div style={{ marginTop: 2 }}>
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "rgba(232,232,240,0.35)", marginBottom: 3 }}>
-                            <span>SL</span><span>TP</span>
+                            <span>SL</span>
+                            <span style={{ color: "rgba(232,232,240,0.25)" }}>{progressPct.toFixed(0)}% to TP</span>
+                            <span>TP</span>
                           </div>
                           <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", position: "relative", overflow: "hidden" }}>
                             <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${progressPct}%`, background: progressPct > 60 ? "#22c55e" : progressPct < 25 ? "#ef4444" : "#f59e0b", borderRadius: 3, transition: "width 0.5s" }} />
