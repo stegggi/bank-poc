@@ -505,6 +505,7 @@ type Uc6Status = {
     confirmSec?: number;
     meanRevertConfirmSec?: number;
     distanceFromMuPct?: number | null;
+    muPriceUsdcPerWeth?: number | null;
   };
   trendEscape?: {
     enabled?: boolean;
@@ -1545,6 +1546,7 @@ export default function Uc6Page() {
   const trendEscapeView = status?.trendEscape || null;
   const reEntryView = status?.reEntry || null;
   const trendMovePct = trendView?.movePct == null ? null : n(trendView.movePct, 0) * 100;
+  const regimeMuPrice = trendView?.muPriceUsdcPerWeth == null ? null : n(trendView.muPriceUsdcPerWeth, 0);
   const collectableNowUsd = n(status?.fees?.collectableNow?.usd, 0);
   const collectableNowEstimated = Boolean(status?.fees?.collectableNow?.isEstimated);
   const activeMintTargetBandBpsRaw = activeLifecycleRecord?.band?.bandHalfBps;
@@ -1887,7 +1889,7 @@ export default function Uc6Page() {
                 halfLifeLabel={regimeHalfLifeLabel}
                 theta={regimeStatus?.theta ?? null}
                 sigma={regimeStatus?.sigma ?? null}
-                mu={regimeStatus?.mu ?? null}
+                muPrice={regimeMuPrice}
                 sampleCount={regimeStatus?.sampleCount ?? 0}
                 windowSec={regimeStatus?.windowSec ?? n(status?.settings?.regime?.windowSec, 0)}
                 enabled={Boolean(status?.settings?.regime?.enabled)}
@@ -2476,8 +2478,8 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   );
 }
 
-function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, mu, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps }: {
-  label: string|null; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; mu: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number;
+function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps }: {
+  label: string|null; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number;
 }) {
   if (!enabled) {
     return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"16px 0" }}>Regime engine disabled</div>;
@@ -2507,9 +2509,9 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, mu, sa
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
         <Uc6Metric label="Half-life" value={halfLifeLabel} />
         <Uc6Metric label="Samples" value={`${sampleCount}/${windowSec}s`} />
-        {theta != null && <Uc6Metric label="\u03b8" value={theta.toFixed(4)} />}
-        {sigma != null && <Uc6Metric label="\u03c3" value={sigma.toFixed(2)} />}
-        {mu != null && <Uc6Metric label="\u03bc" value={`$${mu.toFixed(2)}`} />}
+        {theta != null && <Uc6Metric label="Mean-Revert Speed" value={theta.toFixed(4)} />}
+        {sigma != null && <Uc6Metric label="Volatility" value={sigma.toFixed(4)} />}
+        {muPrice != null && <Uc6Metric label="Mean Price" value={fmtUsd(muPrice)} />}
         <Uc6Metric label="Edge" value={`${baseEdgePct.toFixed(2)}%\u2192${effectiveEdgePct.toFixed(2)}%`} />
         <Uc6Metric label="Band" value={`\u00b1${baseBandBps}\u2192\u00b1${effectiveBandBps}bps`} />
       </div>
@@ -2548,7 +2550,7 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
       </div>
       {!eligible && reasonIfBlocked && <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reasonIfBlocked}</div>}
       {eligibleAtIso && <Uc6Metric label="Eligible at" value={fmtIsoLocal(eligibleAtIso)} />}
-      {distanceFromMuPct != null && <Uc6Metric label="Distance from \u03bc" value={`${distanceFromMuPct.toFixed(2)}%`} />}
+      {distanceFromMuPct != null && <Uc6Metric label="Distance from Mean" value={`${distanceFromMuPct.toFixed(2)}%`} />}
     </div>
   );
 }
@@ -2579,14 +2581,63 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
 
 function PnlWindows({ status: st }: { status: Uc6Status | null }) {
   const n2 = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+  const nn = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : null; };
+
+  // APR values from bot are raw ratios (0.365 = 36.5%) — multiply by 100 for display
+  const fmtApr = (v: unknown) => { const x = nn(v); return x == null ? "—" : fmtPct(x * 100); };
+
+  const walletUsd = n2(st?.wallet?.valuesUsd?.total);
+  const lpUsd = n2(st?.position?.amountsInLP?.usdValue);
+  const portfolioNow = walletUsd + lpUsd;
+
+  // Entry value of active LP position as "start" proxy (best available)
+  const activeEntryUsd = nn(st?.activePositionRecord?.entry?.entryValueUsd);
+  // Wallet reserve at entry isn't tracked, so we show LP-only change
+  const lpChange = activeEntryUsd != null && activeEntryUsd > 0
+    ? lpUsd - activeEntryUsd
+    : null;
+  const lpChangePct = lpChange != null && activeEntryUsd! > 0
+    ? (lpChange / activeEntryUsd!) * 100
+    : null;
+
   const rows = [
     ["Fees", fmtUsd(n2(st?.fees?.collectedTodayUsd)), fmtUsd(n2(st?.fees?.collected7dUsd)), fmtUsd(n2(st?.fees?.collected30dUsd)), fmtUsd(n2(st?.fees?.collectedTotalUsd))],
     ["Costs", fmtUsd(n2(st?.costs?.totalTodayUsd)), fmtUsd(n2(st?.costs?.total7dUsd)), fmtUsd(n2(st?.costs?.total30dUsd)), fmtUsd(n2(st?.costs?.totalTotalUsd))],
     ["Net", fmtSignedUsd(n2(st?.pnl?.netTodayUsd)), fmtSignedUsd(n2(st?.pnl?.net7dUsd)), fmtSignedUsd(n2(st?.pnl?.net30dUsd)), fmtSignedUsd(n2(st?.pnl?.netTotalUsd))],
-    ["APR", fmtPct(n2(st?.pnl?.aprToday)), fmtPct(n2(st?.pnl?.apr7d)), fmtPct(n2(st?.pnl?.apr30d)), "\u2014"],
+    ["APR (ann.)", fmtApr(st?.pnl?.aprToday), fmtApr(st?.pnl?.apr7d), fmtApr(st?.pnl?.apr30d), "—"],
   ];
+
+  const valColor = (v: number) => v >= 0 ? "#22c55e" : "#ef4444";
+
   return (
-    <DarkTable headers={["\u00a0", "Today", "7D", "30D", "Total"]} rows={rows} />
+    <div style={{ display:"grid", gap:16 }}>
+      <DarkTable headers={["\u00a0", "Today", "7D", "30D", "Total"]} rows={rows} />
+
+      {/* Portfolio snapshot */}
+      <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:14 }}>
+        <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.35)", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Portfolio Snapshot</div>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+          <Uc6Metric label="LP position" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd(lpUsd)}</span>} />
+          <Uc6Metric label="Wallet (idle)" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd(walletUsd)}</span>} />
+          <Uc6Metric label="Total portfolio" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(portfolioNow)}</span>} />
+        </div>
+        {activeEntryUsd != null && activeEntryUsd > 0 && (
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:10 }}>
+            <Uc6Metric label="LP at entry" value={<span style={{ fontFamily:"monospace", color:"rgba(232,232,240,0.55)" }}>{fmtUsd(activeEntryUsd)}</span>} />
+            <Uc6Metric label="LP change" value={
+              <span style={{ fontFamily:"monospace", color: lpChange! >= 0 ? "#22c55e" : "#ef4444" }}>
+                {fmtSignedUsd(lpChange)}
+              </span>
+            } />
+            <Uc6Metric label="LP change %" value={
+              lpChangePct != null
+                ? <span style={{ fontFamily:"monospace", color:valColor(lpChangePct), fontWeight:700 }}>{fmtSignedPct(lpChangePct)}</span>
+                : <span style={{ color:"rgba(232,232,240,0.35)" }}>—</span>
+            } />
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -2642,27 +2693,89 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
 
 function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]> }) {
   const totals = taxSummary.totals;
+  const signColor = (v: number | null | undefined) => (v ?? 0) >= 0 ? "#22c55e" : "#ef4444";
+
   return (
-    <div style={{ display:"grid", gap:8, marginTop:12 }}>
-      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8 }}>
-        <Uc6Metric label="Fees collected" value={fmtUsd(totals?.feesCollectedUsd)} />
-        <Uc6Metric label="Total costs" value={fmtUsd(totals?.totalCostsUsd)} />
-        <Uc6Metric label="Net fees" value={fmtSignedUsd(totals?.feesNetUsd)} />
-        <Uc6Metric label="Alpha vs HODL" value={fmtSignedUsd(totals?.alphaVsHodlUsd)} />
-        <Uc6Metric label="Cap G/L" value={fmtSignedUsd(totals?.capitalGainLossUsd)} />
-        <Uc6Metric label="Net profit" value={fmtSignedUsd(totals?.realizedNetProfitUsd)} />
-        <Uc6Metric label="Closed positions" value={String(totals?.closedPositions ?? 0)} />
-      </div>
-      {(taxSummary.years || []).map((yr) => (
-        <div key={yr.year} style={{ display:"grid", gridTemplateColumns:"60px repeat(5, 1fr)", gap:6, fontSize:11, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
-          <span style={{ color:"rgba(232,232,240,0.6)", fontWeight:600 }}>{yr.year}</span>
-          <span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(yr.feesCollectedUsd)}</span>
-          <span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(yr.totalCostsUsd)}</span>
-          <span style={{ fontFamily:"monospace", color: (yr.feesNetUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(yr.feesNetUsd)}</span>
-          <span style={{ fontFamily:"monospace", color: (yr.alphaVsHodlUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(yr.alphaVsHodlUsd)}</span>
-          <span style={{ fontFamily:"monospace", color:"rgba(232,232,240,0.5)" }}>{fmtSignedUsd(yr.capitalGainLossUsd)}</span>
+    <div style={{ display:"grid", gap:16, marginTop:12 }}>
+
+      {/* All-time totals */}
+      <div>
+        <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.35)", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>All-time totals</div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))", gap:10 }}>
+          <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(totals?.feesCollectedUsd)}</span>} />
+          <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(totals?.totalCostsUsd)}</span>} />
+          <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.feesNetUsd) }}>{fmtSignedUsd(totals?.feesNetUsd)}</span>} />
+          <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.alphaVsHodlUsd) }}>{fmtSignedUsd(totals?.alphaVsHodlUsd)}</span>} />
+          <Uc6Metric label="Capital gain/loss" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.capitalGainLossUsd) }}>{fmtSignedUsd(totals?.capitalGainLossUsd)}</span>} />
+          <Uc6Metric label="Net profit" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:signColor(totals?.realizedNetProfitUsd) }}>{fmtSignedUsd(totals?.realizedNetProfitUsd)}</span>} />
+          <Uc6Metric label="Closed positions" value={String(totals?.closedPositions ?? 0)} />
+          {totals?.totalAssetValueTodayUsd != null && (
+            <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
+          )}
         </div>
-      ))}
+      </div>
+
+      {/* Per-year breakdown */}
+      {(taxSummary.years || []).length > 0 && (
+        <div style={{ display:"grid", gap:12 }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.35)", textTransform:"uppercase", letterSpacing:1 }}>By year</div>
+          {(taxSummary.years || []).map((yr) => {
+            const ytdPct = yr.ytdPct ?? null;
+            const startUsd = yr.assetValueStartUsd ?? null;
+            const endUsd = yr.assetValueTodayUsd ?? null;
+            const hasPortfolioData = startUsd != null || endUsd != null;
+            return (
+              <div key={yr.year} style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:8, padding:"12px 14px" }}>
+                {/* Year header */}
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
+                  <span style={{ fontSize:16, fontWeight:800, color:"#e8e8f0" }}>{yr.year}</span>
+                  <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                    <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)" }}>{yr.closedPositions ?? 0} positions closed</span>
+                    {ytdPct != null && (
+                      <span style={{ fontSize:13, fontFamily:"monospace", fontWeight:700, color:signColor(ytdPct), padding:"2px 8px", borderRadius:20, background: ytdPct >= 0 ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)" }}>
+                        {ytdPct >= 0 ? "+" : ""}{ytdPct.toFixed(2)}%
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Portfolio start → end */}
+                {hasPortfolioData && (
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.03)", borderRadius:6 }}>
+                    <Uc6Metric label="Start value" value={
+                      startUsd != null
+                        ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
+                        : <span style={{ color:"rgba(232,232,240,0.3)" }}>—</span>
+                    } />
+                    <Uc6Metric label="End value" value={
+                      endUsd != null
+                        ? <span style={{ fontFamily:"monospace", color:"#e8e8f0", fontWeight:700 }}>{fmtUsd(endUsd)}</span>
+                        : <span style={{ color:"rgba(232,232,240,0.3)" }}>—</span>
+                    } />
+                    <Uc6Metric label="Change" value={
+                      startUsd != null && endUsd != null && startUsd > 0
+                        ? <span style={{ fontFamily:"monospace", fontWeight:700, color:signColor(endUsd - startUsd) }}>
+                            {fmtSignedUsd(endUsd - startUsd)}
+                          </span>
+                        : <span style={{ color:"rgba(232,232,240,0.3)" }}>—</span>
+                    } />
+                  </div>
+                )}
+
+                {/* P&L details */}
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(120px, 1fr))", gap:8 }}>
+                  <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(yr.feesCollectedUsd)}</span>} />
+                  <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(yr.totalCostsUsd)}</span>} />
+                  <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(yr.feesNetUsd) }}>{fmtSignedUsd(yr.feesNetUsd)}</span>} />
+                  <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(yr.alphaVsHodlUsd) }}>{fmtSignedUsd(yr.alphaVsHodlUsd)}</span>} />
+                  <Uc6Metric label="Capital gain/loss" value={<span style={{ fontFamily:"monospace", color:signColor(yr.capitalGainLossUsd) }}>{fmtSignedUsd(yr.capitalGainLossUsd)}</span>} />
+                  <Uc6Metric label="Net profit" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:signColor(yr.realizedNetProfitUsd) }}>{fmtSignedUsd(yr.realizedNetProfitUsd)}</span>} />
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
