@@ -1692,1170 +1692,978 @@ export default function Uc6Page() {
     row.compareToCurrent?.reason || "—",
   ]);
 
+
+  // ── return ─────────────────────────────────────────────────────────────────
   return (
     <>
       <NavBar active={"uc6" as never} />
-      <main style={styles.main}>
-        <section style={styles.headerCard}>
-          <div style={styles.headerRow}>
-            <div>
-              <h1 style={{ margin: 0, fontSize: 30 }}>UC6: LP Bot Dashboard</h1>
-              <p style={styles.subtle}>Operational cockpit for LP performance, costs, risk controls, and owner actions.</p>
-            </div>
-            <Pill
-              label={status?.killSwitch ? "KILL SWITCH ACTIVE" : "KILL SWITCH OFF"}
-              tone={status?.killSwitch ? "bad" : "good"}
-            />
-          </div>
+      <style>{`
+        body { background: #07080f !important; color: #e8e8f0 !important; }
+        * { box-sizing: border-box; }
+        input, select, textarea {
+          background: rgba(255,255,255,0.06) !important;
+          color: #e8e8f0 !important;
+          border: 1px solid rgba(255,255,255,0.15) !important;
+          border-radius: 6px;
+          padding: 6px 10px;
+          font-size: 13px;
+          outline: none;
+        }
+        input:focus, select:focus { border-color: #06b6d4 !important; }
+        details > summary { list-style: none; }
+        details > summary::-webkit-details-marker { display: none; }
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+        .uc6-pulse { animation: pulse 2s ease-in-out infinite; }
+      `}</style>
 
-          <div style={styles.row}>
-            <button style={styles.button} onClick={connectWallet} disabled={busy !== "" || !hasMetaMask}>
-              {walletAddress ? "Reconnect MetaMask" : "Connect MetaMask"}
-            </button>
-            <button style={styles.buttonSecondary} onClick={switchToBase} disabled={busy !== "" || !walletAddress || isBase}>
-              {isBase ? "On Base" : "Switch To Base"}
-            </button>
-            <button style={styles.buttonSuccess} onClick={enableTrading} disabled={busy !== "" || !isOwner || !draft}>
-              Enable Trading
-            </button>
-            <button style={styles.buttonDanger} onClick={emergencyStop} disabled={busy !== "" || !isOwner || !draft || draft.killSwitch}>
-              Emergency Stop
-            </button>
-          </div>
+      {/* ZONE 1: Hero Strip */}
+      <div style={{ position:"sticky", top:0, zIndex:100, background:"#07080f", borderBottom:"1px solid rgba(255,255,255,0.08)", padding:"10px 20px", display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
+        {/* Pulsing dot */}
+        <span className="uc6-pulse" style={{ width:10, height:10, borderRadius:"50%", background: status?.killSwitch ? "#ef4444" : (status?.tradingEnabled ? "#22c55e" : "#f59e0b"), display:"inline-block", flexShrink:0 }} />
 
-          <div style={styles.metaGrid}>
-            <Metric label="MetaMask" value={hasMetaMask ? "Detected" : "Not found"} />
-            <Metric label="Wallet" value={walletAddress ? shortAddr(walletAddress) : "Not connected"} />
-            <Metric label="Owner Wallet" value={OWNER_ADDRESS ? shortAddr(OWNER_ADDRESS) : "Missing NEXT_PUBLIC_UC6_OWNER_ADDRESS"} />
-            <Metric label="Wallet Chain" value={walletChain ? `${walletChain} (${isBase ? "Base" : "Not Base"})` : "Unknown"} />
-            <Metric label="Bot Account" value={shortAddr(status?.account)} mono />
-            <Metric label="Owner Session" value={isOwner ? "Authorized" : "Read-only"} />
-          </div>
+        {/* Strategy mode */}
+        <span style={{ ...strategyModePillStyle(strategyMode) }}>{strategyMode}</span>
 
-          {!!notice && <p style={{ ...styles.alert, ...styles.alertOk }}>{notice}</p>}
-          {!!error && <p style={{ ...styles.alert, ...styles.alertErr }}>{error}</p>}
-          {!!statusError && <p style={{ ...styles.alert, ...styles.alertErr }}>Status refresh error: {statusError}</p>}
-          {hasMultipleActive && (
-            <p style={{ ...styles.alert, ...styles.alertErr }}>
-              Multiple active Slipstream positions detected ({activeLpCount}). Bot trading is blocked until positions are consolidated.
-            </p>
-          )}
-        </section>
+        {/* Spot price */}
+        <span style={{ fontFamily:"monospace", fontSize:18, fontWeight:700, color:"#e8e8f0" }}>
+          {fmtSpotPrice(status?.market?.spotPrice?.usdcPerWeth)}
+          <span style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginLeft:4 }}>WETH/USDC</span>
+        </span>
 
-        <section style={styles.cardGrid}>
-          <Card title="Strategy Overview" fullWidth>
-            <div style={styles.overviewHero}>
-              <div>
-                <div style={styles.overviewEyebrow}>UC6 live operating picture</div>
-                <div style={styles.overviewHeadline}>
-                  {`${status?.market?.pair?.base || "WETH"}/${status?.market?.pair?.quote || "USDC"} on ${status?.market?.venueActive || "—"}`}
-                </div>
-                <div style={styles.overviewSubhead}>
-                  Market, capital allocation, regime state, and trend-escape gating in one place. All values are current cached bot state.
-                </div>
-              </div>
-              <CompactMetricList
-                items={[
-                  { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
-                  {
-                    label: "Strategy Mode",
-                    value: <Pill label={String(strategyMode)} tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"} />,
-                  },
-                  {
-                    label: "Regime Label",
-                    value: (
-                      <Pill
-                        label={String(regimeStatus?.label || "unknown")}
-                        tone={
-                          regimeStatus?.label === "trending"
-                            ? "warn"
-                            : regimeStatus?.label === "mean_reverting"
-                              ? "good"
-                              : "muted"
-                        }
-                      />
-                    ),
-                  },
-                  {
-                    label: "Alpha Live",
-                    value: (
-                      <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                        {fmtSignedUsd(alphaLiveUsd)}
-                      </span>
-                    ),
-                  },
-                  {
-                    label: "Close Gate",
-                    value: (
-                      <span title={hodlGateReason}>
-                        <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
-                      </span>
-                    ),
-                  },
-                  {
-                    label: "Next Action",
-                    value: `${String(decision.action || "monitor")} (${String(decision.reason || "n/a")})`,
-                  },
-                ]}
-                dense
-              />
-            </div>
+        {/* Separator */}
+        <span style={{ flex:1 }} />
 
-            <div style={styles.overviewSectionGrid}>
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Liquidity Pool Overview</div>
-                  <div style={styles.overviewBlockSubtle}>Market, venue, connectivity, and trading cadence.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    { label: "Pair", value: `${status?.market?.pair?.base || "WETH"}/${status?.market?.pair?.quote || "USDC"}` },
-                    { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
-                    { label: "Price Updated", value: status?.market?.spotPrice?.updatedAtIso || "—" },
-                    { label: "Venue Active", value: status?.market?.venueActive || "—" },
-                    { label: "Chain", value: `${status?.market?.chain?.name || "Base"} (${status?.market?.chain?.chainId || BASE_CHAIN_ID_DEC})` },
-                    { label: "Total LP (All NFTs)", value: fmtUsd(aggregateLpUsd) },
-                    { label: "Active LP NFTs", value: String(activeLpCount || 0) },
-                    {
-                      label: "Time In Range",
-                      value: status?.ops?.timeInRange?.pct == null ? "—" : fmtPct(n(status?.ops?.timeInRange?.pct, 0) * 100),
-                    },
-                    { label: "Time In Range Since", value: status?.ops?.timeInRange?.sinceIso || "—" },
-                    {
-                      label: "Cooldown Remaining",
-                      value: <Pill label={cooldownRemaining > 0 ? `${cooldownRemaining}s` : "ready"} tone={cooldownRemaining > 0 ? "warn" : "good"} />,
-                    },
-                    { label: "Min Rebalance Interval", value: `${String(status?.settings?.minRebalanceIntervalSec ?? "—")}s` },
-                    { label: "HTTP Provider", value: status?.providers?.http?.active || "—" },
-                    {
-                      label: "WS Provider",
-                      value: status?.providers?.ws?.enabled
-                        ? `${status?.providers?.ws?.active || "—"} (${status?.providers?.ws?.connected ? "connected" : "disconnected"})`
-                        : "disabled",
-                    },
-                    {
-                      label: "Last Head",
-                      value: status?.providers?.ws?.lastHeadBlock != null ? String(status.providers?.ws?.lastHeadBlock) : "—",
-                    },
-                    { label: "Head Seen", value: status?.providers?.ws?.lastHeadAtIso || "—" },
-                    { label: "Dashboard Poll", value: `${statusPollMs}ms` },
-                  ]}
-                  dense
-                />
-              </div>
-
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Wallet & Allocation</div>
-                  <div style={styles.overviewBlockSubtle}>Idle capital, deployed value, and gas wallet capacity.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    { label: "Wallet Total", value: fmtUsd(status?.wallet?.valuesUsd?.total) },
-                    { label: "LP Deployed", value: fmtUsd(status?.wallet?.allocationUsd?.lpDeployed) },
-                    { label: "Idle Value", value: fmtUsd(status?.wallet?.allocationUsd?.idle) },
-                    { label: "Reserve Target", value: fmtUsd(status?.wallet?.allocationUsd?.reserveTarget) },
-                    { label: "% Deployed", value: fmtPct(status?.wallet?.deployedPct) },
-                    { label: "% Idle", value: fmtPct(100 - n(status?.wallet?.deployedPct, 0)) },
-                    { label: "USDC", value: `${fmtNum(status?.wallet?.balances?.usdc, 4)} (${fmtUsd(status?.wallet?.valuesUsd?.usdc)})` },
-                    { label: "WETH", value: `${fmtNum(status?.wallet?.balances?.weth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.weth)})` },
-                    { label: "ETH (Gas)", value: `${fmtNum(status?.wallet?.balances?.eth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.eth)})` },
-                  ]}
-                  dense
-                />
-              </div>
-
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Regime</div>
-                  <div style={styles.overviewBlockSubtle}>OU half-life classification and effective LP thresholds.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    {
-                      label: "Regime Engine",
-                      value: <Pill label={status?.settings?.regime?.enabled ? "ON" : "OFF"} tone={status?.settings?.regime?.enabled ? "good" : "muted"} />,
-                    },
-                    {
-                      label: "Label",
-                      value: (
-                        <Pill
-                          label={String(regimeStatus?.label || "unknown")}
-                          tone={
-                            regimeStatus?.label === "trending"
-                              ? "warn"
-                              : regimeStatus?.label === "mean_reverting"
-                                ? "good"
-                                : "muted"
-                          }
-                        />
-                      ),
-                    },
-                    { label: "Confidence", value: regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct) },
-                    { label: "Half-life", value: regimeHalfLifeLabel },
-                    { label: "Advice", value: String(regimeDecisionView?.adviceReason || "—") },
-                    {
-                      label: "Wait Recommended",
-                      value: <Pill label={regimeDecisionView?.waitRecommended ? "yes" : "no"} tone={regimeDecisionView?.waitRecommended ? "warn" : "muted"} />,
-                    },
-                    { label: "Edge Threshold", value: `${fmtPct(regimeBaseEdgePct)} → ${fmtPct(regimeEffectiveEdgePct)}` },
-                    { label: "Cooldown", value: `${Math.round(regimeBaseCooldown)}s → ${Math.round(regimeEffectiveCooldown)}s` },
-                    { label: "Band Target", value: `±${fmtPct(regimeBaseBandBps / 100)} → ±${fmtPct(regimeEffectiveBandBps / 100)}` },
-                    {
-                      label: "Samples",
-                      value: `${String(regimeStatus?.sampleCount ?? 0)} / ${String(regimeStatus?.windowSec ?? status?.settings?.regime?.windowSec ?? "—")}s`,
-                    },
-                    { label: "Updated", value: regimeStatus?.updatedAtIso || "—" },
-                  ]}
-                  dense
-                />
-                <div style={styles.note}>
-                  Regime uses OU half-life heuristics on cached tick samples only (no extra RPC reads). Effective thresholds apply per decision and do not overwrite stored settings.
-                </div>
-              </div>
-
-              <div style={styles.overviewBlock}>
-                <div style={styles.overviewBlockHeader}>
-                  <div style={styles.overviewBlockTitle}>Trend Escape</div>
-                  <div style={styles.overviewBlockSubtle}>Hybrid hold-state gating for trend exits and mean-reversion re-entry.</div>
-                </div>
-                <CompactMetricList
-                  items={[
-                    {
-                      label: "Mode",
-                      value: <Pill label={String(strategyMode)} tone={strategyMode === "LP_ACTIVE" ? "good" : "warn"} />,
-                    },
-                    {
-                      label: "Escape Eligible",
-                      value: <Pill label={trendEscapeView?.eligible ? "yes" : "no"} tone={trendEscapeView?.eligible ? "warn" : "muted"} />,
-                    },
-                    { label: "Escape Block Reason", value: String(trendEscapeView?.reasonIfBlocked || "—") },
-                    { label: "Escape Hold Target", value: String(trendEscapeView?.holdTargetIfEscape || "—") },
-                    {
-                      label: "Re-entry Eligible",
-                      value: <Pill label={reEntryView?.eligible ? "yes" : "no"} tone={reEntryView?.eligible ? "good" : "muted"} />,
-                    },
-                    { label: "Re-entry Block Reason", value: String(reEntryView?.reasonIfBlocked || "—") },
-                    { label: "Re-entry Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
-                    { label: "Escape Cooldown Until", value: fmtIsoLocal(trendEscapeView?.cooldownUntilIso) },
-                    { label: "Trend Direction", value: String(trendView?.direction || "flat") },
-                    { label: "Move Over Lookback", value: trendMovePct == null ? "—" : fmtSignedPct(trendMovePct) },
-                    { label: "Lookback", value: `${String(trendView?.lookbackSec ?? "—")}s` },
-                    { label: "Trend Confirm", value: `${String(trendView?.confirmSec ?? 0)}s` },
-                    { label: "Mean-Revert Confirm", value: `${String(trendView?.meanRevertConfirmSec ?? 0)}s` },
-                    {
-                      label: "Distance From Mu",
-                      value: trendView?.distanceFromMuPct == null ? "—" : fmtPct(n(trendView.distanceFromMuPct, 0) * 100),
-                    },
-                    { label: "Alpha Live", value: fmtSignedUsd(alphaLiveUsd) },
-                    { label: "Escape Alpha Min", value: fmtSignedUsd(status?.settings?.trendEscape?.minAlphaUsdToEscape) },
-                  ]}
-                  dense
-                />
-                <div style={styles.note}>
-                  In trending regimes the bot can close LP and hold inventory directionally. Re-entry requires sustained mean reversion and price proximity to regime mu.
-                </div>
-              </div>
-            </div>
-          </Card>
-
-          <Card title={isHoldMode ? "Hold State & Re-entry" : "LP Position Composition"} fullWidth wideViewport>
-            {isOwner && hasActiveLpPosition && (
-              <div style={{ ...styles.row, marginBottom: 12 }}>
-                <button
-                  style={styles.buttonDanger}
-                  onClick={liquidateAndPause}
-                  disabled={busy !== "" || !status?.position?.tokenId}
-                  title={!status?.position?.tokenId ? "No active LP position" : "Close LP and enable kill switch"}
-                >
-                  Liquidate LP + Pause
-                </button>
-              </div>
-            )}
-            {isHoldMode ? (
-              <>
-                <div style={styles.lpHero}>
-                  <div>
-                    <div style={styles.overviewEyebrow}>Hold-state snapshot</div>
-                    <div style={styles.lpHeadline}>
-                      {`${String(strategyMode)} · ${holdTargetLabel}`}
-                    </div>
-                    <div style={styles.lpSubhead}>
-                      Liquidity is currently withdrawn. This view focuses on hold inventory, regime state, and the re-entry gates that must clear before the bot mints again.
-                    </div>
-                  </div>
-                  <CompactMetricList
-                    items={[
-                      { label: "Strategy Mode", value: <Pill label={String(strategyMode)} tone="warn" /> },
-                      { label: "Hold Target", value: holdTargetLabel },
-                      { label: "Hold Inventory Value", value: fmtUsd(holdInventoryValueUsd) },
-                      {
-                        label: "Re-entry Eligible",
-                        value: <Pill label={reEntryView?.eligible ? "Yes" : "No"} tone={reEntryView?.eligible ? "good" : "muted"} />,
-                      },
-                      { label: "Re-entry Block", value: String(reEntryView?.reasonIfBlocked || "—") },
-                      { label: "Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
-                    ]}
-                    dense
-                  />
-                </div>
-
-                <div style={styles.lpSectionGrid}>
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Hold Inventory</div>
-                      <div style={styles.overviewBlockSubtle}>Wallet composition that will fund the next re-entry.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Wallet Total", value: fmtUsd(status?.wallet?.valuesUsd?.total) },
-                        { label: "USDC", value: `${fmtNum(status?.wallet?.balances?.usdc, 4)} (${fmtUsd(status?.wallet?.valuesUsd?.usdc)})` },
-                        { label: "WETH", value: `${fmtNum(status?.wallet?.balances?.weth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.weth)})` },
-                        { label: "ETH (Gas)", value: `${fmtNum(status?.wallet?.balances?.eth, 6)} (${fmtUsd(status?.wallet?.valuesUsd?.eth)})` },
-                        { label: "Reserve Target", value: fmtUsd(status?.settings?.reservePolicy?.effectiveTargetUsdc) },
-                        { label: "Collectable Now", value: "—" },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Re-entry Gate</div>
-                      <div style={styles.overviewBlockSubtle}>The exact conditions that control when LP can be re-opened.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Re-entry Eligible", value: <Pill label={reEntryView?.eligible ? "Yes" : "No"} tone={reEntryView?.eligible ? "good" : "muted"} /> },
-                        { label: "Block Reason", value: String(reEntryView?.reasonIfBlocked || "—") },
-                        { label: "Eligible At", value: fmtIsoLocal(reEntryView?.eligibleAtIso) },
-                        { label: "Escape Cooldown Until", value: fmtIsoLocal(trendEscapeView?.cooldownUntilIso) },
-                        { label: "Mean-Revert Confirm", value: `${String(trendView?.meanRevertConfirmSec ?? 0)}s` },
-                        { label: "Distance From Mu", value: distanceFromMuPctDisplay == null ? "—" : fmtPct(distanceFromMuPctDisplay) },
-                        { label: "Max Distance To Re-enter", value: fmtPct(n(status?.settings?.reEntry?.maxDistanceFromMuPct, 0) * 100) },
-                        { label: "Min Hold", value: `${String(status?.settings?.reEntry?.minHoldSec ?? "—")}s` },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Market & Regime</div>
-                      <div style={styles.overviewBlockSubtle}>Current price action and the regime state used to unlock re-entry.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Spot Price", value: fmtUsd(status?.market?.spotPrice?.usdcPerWeth) },
-                        {
-                          label: "Regime Label",
-                          value: (
-                            <Pill
-                              label={String(regimeStatus?.label || "unknown")}
-                              tone={
-                                regimeStatus?.label === "mean_reverting"
-                                  ? "good"
-                                  : regimeStatus?.label === "trending"
-                                    ? "warn"
-                                    : "muted"
-                              }
-                            />
-                          ),
-                        },
-                        { label: "Confidence", value: regimeConfidencePct == null ? "—" : fmtPct(regimeConfidencePct) },
-                        { label: "Half-life", value: regimeHalfLifeLabel },
-                        { label: "Trend Direction", value: String(trendView?.direction || "flat") },
-                        { label: "Move Over Lookback", value: trendMovePct == null ? "—" : fmtSignedPct(trendMovePct) },
-                        { label: "Lookback", value: `${String(trendView?.lookbackSec ?? "—")}s` },
-                        { label: "Trend Confirm", value: `${String(trendView?.confirmSec ?? 0)}s` },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Economics & Protection</div>
-                      <div style={styles.overviewBlockSubtle}>Live alpha protection, HODL benchmark context, and the most recent LP record.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Alpha Live", value: fmtSignedUsd(alphaLiveUsd) },
-                        { label: "Required Fees To Beat HODL", value: fmtUsd(requiredFeesToBeatHodlLiveUsd) },
-                        { label: "Last Closed Reason", value: closedPositionRecords[0]?.closeReason || activeLifecycleRecord?.closeReason || "—" },
-                        { label: "Last Hold Target", value: closedPositionRecords[0]?.closeHoldTarget || "—" },
-                        { label: "Close Gate", value: activeCloseGateLabel },
-                        { label: "Latest LP P/L", value: fmtSignedUsd(closedPositionRecords[0]?.performance?.netProfitUsd) },
-                      ]}
-                      dense
-                    />
-                  </div>
-                </div>
-              </>
-            ) : (
-              <>
-                <div style={styles.lpHero}>
-                  <div>
-                    <div style={styles.overviewEyebrow}>Active LP snapshot</div>
-                    <div style={styles.lpHeadline}>
-                      {hasActiveLpPosition
-                        ? `${activePairLabel} · ${String(status?.position?.tokenId)}`
-                        : "No active LP position"}
-                    </div>
-                    <div style={styles.lpSubhead}>
-                      {hasActiveLpPosition
-                        ? "Live LP structure, inventory mix, collectable fees, and close-gate economics from the current cached bot state."
-                        : `The strategy is currently not providing liquidity. Mode: ${String(strategyMode)}.`}
-                    </div>
-                  </div>
-                  <CompactMetricList
-                    items={[
-                      {
-                        label: "Status",
-                        value: hasActiveLpPosition
-                          ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} />
-                          : "—",
-                      },
-                      { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
-                      {
-                        label: "Collectable Now",
-                        value: hasActiveLpPosition
-                          ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (est.)" : ""}`
-                          : "—",
-                      },
-                      {
-                        label: "Alpha Live",
-                        value: hasActiveLpPosition
-                          ? (
-                            <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                              {fmtSignedUsd(alphaLiveUsd)}
-                            </span>
-                          )
-                          : "—",
-                      },
-                      {
-                        label: "Close Gate",
-                        value: hasActiveLpPosition
-                          ? (
-                            <span title={hodlGateReason}>
-                              <Pill label={hodlGateAllowed ? "Allowed" : "Blocked"} tone={hodlGateAllowed ? "good" : "bad"} />
-                            </span>
-                          )
-                          : "—",
-                      },
-                      { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
-                    ]}
-                    dense
-                  />
-                </div>
-
-                <div style={styles.lpSectionGrid}>
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Position</div>
-                      <div style={styles.overviewBlockSubtle}>Identity, opening timestamps, and top-level lifecycle state.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Token ID (LP NFT)", value: String(status?.position?.tokenId ?? "—"), mono: true },
-                        { label: "Pair", value: activePairLabel },
-                        { label: "Pool Tier / Selector", value: selectorLabel },
-                        { label: "Opened", value: fmtIsoLocal(activeLifecycleRecord?.entry?.openedAtIso) },
-                        { label: "Entry Snapshot", value: fmtIsoLocal(activeLifecycleRecord?.entry?.entrySnapshotAtIso) },
-                        { label: "Entry Value", value: fmtUsd(activeLifecycleRecord?.entry?.entryValueUsd) },
-                        { label: "Tx Count", value: String(activeLifecycleRecord?.activity?.txCount ?? 0) },
-                        { label: "Record Status", value: activeLifecycleRecord?.status || "—" },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Band & Risk</div>
-                      <div style={styles.overviewBlockSubtle}>Placed band, current pool location, and rebalance risk context.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Current Pool Tick", value: String(status?.market?.tick?.current ?? "—") },
-                        { label: "Pool Tick Spacing", value: String(status?.market?.tick?.spacing ?? "—") },
-                        { label: "Base Band Setting", value: `±${fmtPct(configuredBandHalfPct)}` },
-                        {
-                          label: "Regime Effective Band (at mint)",
-                          value: regimeEffectiveBandAtMintBps == null ? "—" : `±${fmtPct(regimeEffectiveBandAtMintBps / 100)}`,
-                        },
-                        {
-                          label: "Mint Target Used",
-                          value: activeMintTargetBandBps == null ? "—" : `±${fmtPct(activeMintTargetBandBps / 100)}`,
-                        },
-                        {
-                          label: "Actual Band Width",
-                          value: !hasActiveLpPosition || actualBandHalfPct == null ? "—" : `±${fmtPct(actualBandHalfPct)}`,
-                        },
-                        { label: "Band Ticks", value: activeBandTicksLabel, mono: true },
-                        {
-                          label: "Distance To Edge",
-                          value:
-                            !hasActiveLpPosition || edgeDistPct == null
-                              ? "—"
-                              : `${String(status?.position?.distanceToEdge?.ticks ?? "—")} ticks (${fmtPct(edgeDistPct)})`,
-                        },
-                        { label: "In Range", value: hasActiveLpPosition ? <Pill label={inRange ? "In Range" : "Out of Range"} tone={boolTone(status?.position?.inRange)} /> : "—" },
-                        { label: "Liquidity", value: status?.position?.liquidity || "—", mono: true },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Inventory Mix</div>
-                      <div style={styles.overviewBlockSubtle}>Current deployed capital split across both LP sides and collectable fees.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "LP Value", value: hasActiveLpPosition ? fmtUsd(lpValueUsd) : "—" },
-                        {
-                          label: "USDC in LP",
-                          value: hasActiveLpPosition
-                            ? `${fmtNum(status?.position?.amountsInLP?.usdc, 4)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.usdc)})`
-                            : "—",
-                        },
-                        {
-                          label: "WETH in LP",
-                          value: hasActiveLpPosition
-                            ? `${fmtNum(status?.position?.amountsInLP?.weth, 6)} (${fmtUsd(status?.position?.amountsInLP?.sideUsd?.weth)})`
-                            : "—",
-                        },
-                        {
-                          label: "LP Split",
-                          value: hasActiveLpPosition ? `${fmtPct(lpSplitUsdcPct)} / ${fmtPct(lpSplitWethPct)}` : "—",
-                        },
-                        {
-                          label: "Collectable Now",
-                          value: hasActiveLpPosition
-                            ? `${fmtUsd(collectableNowUsd)}${collectableNowEstimated ? " (simulation fallback)" : ""}`
-                            : "—",
-                        },
-                        { label: "Pending Compound", value: hasActiveLpPosition ? fmtUsd(status?.fees?.pendingCompoundUsd) : "—" },
-                      ]}
-                      dense
-                    />
-                  </div>
-
-                  <div style={styles.overviewBlock}>
-                    <div style={styles.overviewBlockHeader}>
-                      <div style={styles.overviewBlockTitle}>Live Economics</div>
-                      <div style={styles.overviewBlockSubtle}>Collected fees, realized costs so far, live alpha, and close-gate constraint.</div>
-                    </div>
-                    <CompactMetricList
-                      items={[
-                        { label: "Fees Collected", value: fmtUsd(activeLifecycleRecord?.performance?.feesCollectedUsd) },
-                        { label: "Total Costs", value: fmtUsd(activeLifecycleRecord?.performance?.totalCostsUsd) },
-                        { label: "Fees Net", value: fmtSignedUsd(activeLifecycleRecord?.performance?.feesNetUsd) },
-                        { label: "Capital Gain/Loss", value: fmtSignedUsd(activeLifecycleRecord?.performance?.capitalGainLossUsd) },
-                        { label: "Divergence vs HODL", value: fmtSignedUsd(activeLifecycleRecord?.performance?.divergenceVsHodlUsd) },
-                        {
-                          label: "Alpha vs HODL (Live)",
-                          value: hasActiveLpPosition
-                            ? (
-                              <span style={{ color: alphaLiveUsd >= 0 ? "#145b2f" : "#8d1111", fontWeight: 700 }}>
-                                {fmtSignedUsd(alphaLiveUsd)} {alphaLiveUsd >= 0 ? "(Beating HODL)" : "(Behind HODL)"}
-                              </span>
-                            )
-                            : "—",
-                        },
-                        {
-                          label: "Required Fees to Beat HODL (Live)",
-                          value: hasActiveLpPosition ? fmtUsd(requiredFeesToBeatHodlLiveUsd) : "—",
-                        },
-                        { label: "LP P/L (absolute)", value: fmtSignedUsd(activeLifecycleRecord?.performance?.netProfitUsd) },
-                        { label: "Close Gate Status", value: hasActiveLpPosition ? activeCloseGateLabel : "—" },
-                      ]}
-                      dense
-                    />
-                  </div>
-                </div>
-              </>
-            )}
-          </Card>
-
-          <Card title="LP Position Record" fullWidth wideViewport>
-            {!!positionsError && <p style={{ ...styles.alert, ...styles.alertErr, marginTop: 0 }}>Positions refresh error: {positionsError}</p>}
-
-            <div style={styles.recordActiveWrap}>
-              <div style={styles.recordActiveTitle}>Realized (Closed) Summary for Tax Tracking</div>
-              <div style={{ ...styles.note, marginBottom: 10 }}>
-                Aggregated from closed LP position records only. Tax years grouped by {positionsTaxSummary?.timezone || "UTC"} ({positionsTaxSummary?.dateRangeRule || "01-01..12-31"}). Asset value start uses the oldest closed-record entry value available in that year as a proxy.
-              </div>
-              <SimpleTable
-                headers={["Tax Year", "Closed Positions", "Net Fees", "Capital Gain/Loss", "Alpha vs HODL", "Asset Value Start", "Asset Value Today", "YTD %"]}
-                rows={
-                  Array.isArray(positionsTaxSummary?.years) && positionsTaxSummary!.years!.length > 0
-                    ? positionsTaxSummary!.years!.map((row) => [
-                        String(Math.round(n(row?.year, 0))),
-                        String(Math.round(n(row?.closedPositions, 0))),
-                        fmtSignedUsd(row?.feesNetUsd),
-                        fmtSignedUsd(row?.capitalGainLossUsd),
-                        fmtSignedUsd(row?.alphaVsHodlUsd),
-                        fmtUsd(row?.assetValueStartUsd),
-                        row?.assetValueTodayUsd == null ? "—" : fmtUsd(row?.assetValueTodayUsd),
-                        row?.ytdPct == null ? "—" : fmtSignedPct(row?.ytdPct),
-                      ])
-                    : [["—", "0", "—", "—", "—", "—", "—", "—"]]
-                }
-              />
-            </div>
-
-            <div style={{ ...styles.note, marginTop: 12 }}>
-              Closed LP positions only (each row is one LP NFT lifecycle). Newest closed position appears first. Entry value uses the delayed entry snapshot (after initial top-up), not raw mint inputs. LP P/L (absolute) = Fees Net + Capital Gain/Loss. Alpha vs HODL = Fees Net + Divergence vs HODL.
-            </div>
-
-            <div style={styles.tableWrap}>
-              <table style={styles.table}>
-                <thead>
-                  <tr>
-                    {[
-                      "Pair",
-                      "Venue",
-                      "Fee/Tier",
-                      "Band",
-                      "Entry Time",
-                      "Exit Time",
-                      "Duration",
-                      "Entry Value",
-                      "Fees Collected",
-                      "Total Costs",
-                      "Fees Net",
-                      "Capital G/L",
-                      "Div. vs HODL",
-                      "LP P/L (absolute)",
-                      "Alpha vs HODL",
-                      "Req Fees to Beat HODL",
-                      "Cost/Fee",
-                      "Close Reason",
-                      "Hold Target",
-                      "Entry/Exit Price",
-                      "Actions",
-                    ].map((h) => (
-                      <th key={h} style={styles.th}>
-                        {h}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {closedPositionRecords.length === 0 ? (
-                    <tr>
-                      <td style={styles.td} colSpan={21}>
-                        No closed position records yet.
-                      </td>
-                    </tr>
-                  ) : (
-                    closedPositionRecords.map((rec) => {
-                      const selectorLabel = rec.selector?.humanLabel || `${rec.selector?.type || "—"}:${String(rec.selector?.value ?? "—")}`;
-                      const bandLabel = formatRecordBandLabel(rec);
-                      const ticksLabel = `${rec.band?.tickLower ?? "—"} .. ${rec.band?.tickUpper ?? "—"}`;
-                      const divVsHodlUsd = n(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd, 0);
-                      const feesNetUsd = n(rec.performance?.feesNetUsd, 0);
-                      const capitalGainLossUsd = n(rec.performance?.capitalGainLossUsd, 0);
-                      const netUsd = n(rec.performance?.netProfitUsd, 0);
-                      const alphaVsHodlUsd = n(rec.performance?.alphaVsHodlUsd, 0);
-                      const requiredFeesToBeatHodlUsd = n(rec.performance?.requiredFeesToBeatHodlUsd, 0);
-                      const closeReason = String(rec.closeReason || "—")
-                        .replaceAll("_", " ")
-                        .replace(/\b\w/g, (m) => m.toUpperCase());
-                      const closeHoldTarget = rec.closeReason === "trend_escape"
-                        ? String(rec.closeHoldTarget || "—")
-                        : "—";
-                      return (
-                        <tr key={rec.id}>
-                          <td style={styles.td}>{`${rec.pair?.base || "WETH"}/${rec.pair?.quote || "USDC"}`}</td>
-                          <td style={styles.td}>{rec.venue === "uniswapv3" ? "Uniswap v3" : "Slipstream"}</td>
-                          <td style={styles.td}>{selectorLabel}</td>
-                          <td style={styles.td}>
-                            <span title={ticksLabel}>{bandLabel}</span>
-                          </td>
-                          <td style={styles.td} title={rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso || ""}>
-                            {fmtIsoLocal(rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso)}
-                          </td>
-                          <td style={styles.td} title={rec.exit?.closedAtIso || ""}>
-                            {rec.exit?.closedAtIso ? fmtIsoLocal(rec.exit.closedAtIso) : "OPEN"}
-                          </td>
-                          <td style={styles.td}>{rec.duration?.human || fmtDurationCompact(rec.duration?.secondsInPosition)}</td>
-                          <td style={styles.td}>{fmtUsd(rec.entry?.entryValueUsd)}</td>
-                          <td style={styles.td}>{fmtUsd(rec.performance?.feesCollectedUsd)}</td>
-                          <td style={styles.td}>{fmtUsd(rec.performance?.totalCostsUsd)}</td>
-                          <td style={{ ...styles.td, color: feesNetUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.feesNetUsd)}</td>
-                          <td style={{ ...styles.td, color: capitalGainLossUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.capitalGainLossUsd)}</td>
-                          <td style={{ ...styles.td, color: divVsHodlUsd < 0 ? "#8d1111" : styles.td.color }}>{fmtSignedUsd(rec.performance?.divergenceVsHodlUsd ?? rec.performance?.impermanentLossUsd)}</td>
-                          <td style={{ ...styles.td, color: netUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.netProfitUsd)}</td>
-                          <td style={{ ...styles.td, color: alphaVsHodlUsd < 0 ? "#8d1111" : "#145b2f" }}>{fmtSignedUsd(rec.performance?.alphaVsHodlUsd)}</td>
-                          <td style={styles.td}>{fmtUsd(requiredFeesToBeatHodlUsd)}</td>
-                          <td style={styles.td}>{fmtRatioPct(rec.performance?.costToFeeRatio)}</td>
-                          <td style={styles.td}>{closeReason}</td>
-                          <td style={styles.td}>{closeHoldTarget}</td>
-                          <td style={styles.td}>
-                            {fmtSpotPrice(rec.entry?.spotPriceUsdcPerWeth)} -&gt; {fmtSpotPrice(rec.exit?.spotPriceUsdcPerWeth)}
-                          </td>
-                          <td style={styles.td}>
-                            <button style={styles.tableActionButton} onClick={() => setSelectedPosition(rec)}>
-                              View
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-              </table>
-            </div>
-
-            <div style={styles.paginationRow}>
-              <button
-                style={styles.buttonSecondary}
-                onClick={() => setPositionsPageNum((p) => Math.max(1, p - 1))}
-                disabled={positionsCurrentPage <= 1}
-              >
-                Prev
-              </button>
-              <span style={styles.paginationLabel}>
-                Page {positionsCurrentPage} / {positionsPageCount}
-                {positionsPage ? ` (${positionsPage.totalItems} records)` : ""}
-              </span>
-              <button
-                style={styles.buttonSecondary}
-                onClick={() => setPositionsPageNum((p) => Math.min(positionsPageCount, p + 1))}
-                disabled={positionsCurrentPage >= positionsPageCount}
-              >
-                Next
-              </button>
-            </div>
-          </Card>
-
-          <Card title="Profitability (Net)" fullWidth wideViewport>
-            <div style={styles.profitTablesGrid}>
-              <div style={styles.profitTableCol}>
-                <SimpleTable
-                  headers={["Window", "Fees", "Rewards", "Costs", "Net", "APR"]}
-                  rows={[
-                    [
-                      "Today",
-                      fmtUsd(status?.fees?.collectedTodayUsd),
-                      "$0.00",
-                      fmtUsd(status?.costs?.totalTodayUsd),
-                      fmtUsd(status?.pnl?.netTodayUsd),
-                      fmtPct(n(status?.pnl?.aprToday, 0) * 100),
-                    ],
-                    [
-                      "7D",
-                      fmtUsd(status?.fees?.collected7dUsd),
-                      "$0.00",
-                      fmtUsd(status?.costs?.total7dUsd),
-                      fmtUsd(status?.pnl?.net7dUsd),
-                      fmtPct(n(status?.pnl?.apr7d, 0) * 100),
-                    ],
-                    [
-                      "30D",
-                      fmtUsd(status?.fees?.collected30dUsd),
-                      "$0.00",
-                      fmtUsd(status?.costs?.total30dUsd),
-                      fmtUsd(status?.pnl?.net30dUsd),
-                      status?.pnl?.apr30d == null ? "—" : fmtPct(n(status?.pnl?.apr30d, 0) * 100),
-                    ],
-                  ]}
-                />
-                <div style={{ ...styles.note, marginTop: 8 }}>
-                  Net = Fees Net (fees + rewards - costs). Divergence vs HODL is shown in LP Position Records as a separate benchmark metric and is not deducted as a cash cost.
-                </div>
-                <div style={styles.note}>
-                  Collectable now: {fmtUsd(status?.fees?.collectableNow?.usd)}
-                  {status?.fees?.collectableNow?.isEstimated ? " (simulation fallback)" : ""} | Pending compound: {fmtUsd(status?.fees?.pendingCompoundUsd)}
-                </div>
-              </div>
-
-              <div style={styles.profitTableCol}>
-                <div style={{ ...styles.note, marginTop: 0, marginBottom: 8 }}>
-                  Band performance (completed runs only; grouped by actual placed band width after tick-grid snapping).
-                </div>
-                <SimpleTable
-                  headers={["Band", "Runs", "Alpha vs HODL / LP (bps)", "Win Rate vs HODL", "Avg Cost / LP (bps)", "Avg Time To Rebalance"]}
-                  rows={
-                    bandPerformanceRows.length > 0
-                      ? bandPerformanceRows
-                      : [["—", "0", "—", "—", "—", "—"]]
-                  }
-                />
-              </div>
-            </div>
-
-            <div style={{ ...styles.recordActiveWrap, marginTop: 12 }}>
-              <div style={styles.recordActiveTitle}>Rebalance & Activity</div>
-              {isOwner && (
-                <div style={{ ...styles.row, marginTop: 0, marginBottom: 12 }}>
-                  <button
-                    style={styles.buttonSecondary}
-                    onClick={forceRebalance}
-                    disabled={busy !== "" || Boolean(status?.killSwitch) || !status?.tradingEnabled}
-                    title={
-                      status?.killSwitch
-                        ? "Kill switch active"
-                        : !status?.tradingEnabled
-                          ? "Trading is disabled"
-                          : "Request an immediate rebalance (owner-only)"
-                    }
-                  >
-                    Force Rebalance
-                  </button>
-                </div>
-              )}
-              <div style={styles.metaGrid}>
-                <Metric label="Rebalances (24h)" value={String(status?.ops?.rebalances24h ?? 0)} />
-                <Metric label="Rebalances (7d)" value={String(status?.ops?.rebalances7d ?? 0)} />
-                <Metric label="Costs Today" value={fmtUsd(status?.costs?.totalTodayUsd)} />
-                <Metric label="Avg Cost / Rebalance" value={fmtUsd(n(status?.costs?.totalTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
-                <Metric label="Avg Fees / Rebalance" value={fmtUsd(n(status?.fees?.collectedTodayUsd, 0) / Math.max(1, n(status?.ops?.rebalances24h, 0)))} />
-                <Metric label="Churn Ratio" value={<Pill label={churnRatio == null ? "n/a" : fmtPct(churnRatio * 100)} tone={churnTone(churnRatio)} />} />
-                <Metric label="Churn Protection" value={status?.settings?.churnProtection?.enabled ? "enabled" : "disabled"} />
-                <Metric label="Churn Limit" value={fmtPct(n(status?.settings?.churnProtection?.maxCostToFeeRatio, 0) * 100)} />
-                <Metric label="Rebalance Trigger Threshold" value={fmtPct(n(status?.settings?.edgeRebalancePct, 0) * 100)} />
-                <Metric label="Last Rebalance" value={status?.ops?.lastRebalanceAtIso || "—"} />
-                <Metric label="Gate" value={status?.counters?.reason || "—"} />
-              </div>
-            </div>
-          </Card>
-
-          <Card title="Events & Decisions" fullWidth>
-            <SimpleTable
-              headers={["Time", "Type", "Reason", "Tx", "Gas", "Swap", "Slip", "Fees", "Net"]}
-              rows={events.map((ev) => [
-                ev.atIso || "—",
-                ev.type || "—",
-                ev.reason || "—",
-                ev.txHashes && ev.txHashes.length > 0 ? shortAddr(ev.txHashes[0]) : "—",
-                fmtUsd(ev.gasUsd),
-                fmtUsd(ev.swapCostUsd),
-                ev.slippageBpsReal == null ? "—" : `${n(ev.slippageBpsReal, 0).toFixed(1)} bps`,
-                fmtUsd(ev.feesCollectedUsd),
-                fmtUsd(ev.netUsd),
-              ])}
-            />
-            <div style={styles.note}>Swap costs and slippage use quote vs actual wallet balance deltas.</div>
-          </Card>
-
-          <Card title="Pool Comparison (Base)" fullWidth>
-            <div style={styles.note}>
-              Daily GeckoTerminal-based comparison for Base majors/stables pools (Aerodrome Slipstream, Uniswap v3, PancakeSwap v3, SushiSwap v3). Heuristic score estimates expected net/day for your current UC6 capital and settings; use as a screening tool, not a guarantee.
-            </div>
-            {poolComparison?.lastError?.message && (
-              <div style={{ ...styles.note, color: "#7a2830", marginTop: 6 }}>
-                Last compute warning ({fmtIsoLocal(poolComparison?.lastError?.atIso)}): {poolComparison.lastError.message}
-              </div>
-            )}
-            <div style={{ ...styles.note, marginTop: 6 }}>
-              Computed: {fmtIsoLocal(poolComparison?.computedAtIso)} | Network: {poolComparison?.network?.name || "Base"} | Ref capital:{" "}
-              {fmtUsd(poolComparison?.ref?.currentPool?.refCapitalUsd)}
-            </div>
-
-            <div style={{ marginTop: 10, fontWeight: 600 }}>Current pool</div>
-            <SimpleTable
-              headers={[
-                "Venue",
-                "Chain",
-                "Pair",
-                "Variant",
-                "Fee/Tier",
-                "TVL (7d / 30d)",
-                "Volume (7d / 30d)",
-                "Fees/day (7d / 30d)",
-                "Scalability",
-                "FeePower (7d / 30d)",
-                "Exp Net/day",
-              ]}
-              rows={
-                poolComparisonCurrentRow
-                  ? [poolComparisonCurrentRow]
-                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—"]]
-              }
-            />
-
-            <div style={{ marginTop: 12, fontWeight: 600 }}>Top 5 candidate pools</div>
-            <SimpleTable
-              headers={[
-                "Venue",
-                "Pair",
-                "Variant",
-                "Fee/Tier",
-                "TVL (7d / 30d)",
-                "Volume (7d / 30d)",
-                "Fees/day (7d / 30d)",
-                "Scalability",
-                "FeePower (7d / 30d)",
-                "Exp Net/day",
-                "Rating vs current",
-                "Break-even",
-              ]}
-              rows={
-                poolComparisonTopRows.length > 0
-                  ? poolComparisonTopRows
-                  : [["—", "—", "—", "—", "—", "—", "—", "—", "—", "—", "—"]]
-              }
-            />
-            {poolComparisonNotRecommendedRows.length > 0 && (
-              <>
-                <div style={{ marginTop: 12, fontWeight: 600 }}>Not scalable / experimental pools</div>
-                <SimpleTable
-                  headers={["Venue", "Pair", "Variant", "Fee/Tier", "TVL (7d / 30d)", "Fees/day (7d / 30d)", "Scalability", "Why not recommended"]}
-                  rows={poolComparisonNotRecommendedRows}
-                />
-              </>
-            )}
-            <div style={{ ...styles.note, marginTop: 8 }}>
-              Ratings use inferred fee tier, absolute fees/day, fee-power, recent flow stability, and TVL scalability for your current capital. Pools with unknown fee or insufficient scalability are excluded from Top 5.
-            </div>
-          </Card>
-        </section>
-
-        {isOwner && draft && (
-          <section style={styles.panel}>
-            <h2 style={styles.h2}>Owner Controls</h2>
-            <div style={styles.formGrid}>
-              <SelectField label="Kill Switch" value={draft.killSwitch ? "true" : "false"} onChange={(v) => updateBool("killSwitch", v === "true")} options={["false", "true"]} />
-              <SelectField
-                label="Trading Enabled"
-                value={draft.tradingEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("tradingEnabled", v === "true")}
-                options={["true", "false"]}
-                disabled={draft.killSwitch}
-              />
-              <SelectField label="Venue" value={draft.venue} onChange={(v) => setDraft((p) => (p ? { ...p, venue: v as Uc6Venue } : p))} options={["slipstream", "uniswapv3"]} />
-
-              <NumberField label="bandHalfBps" value={draft.bandHalfBps} onChange={(v) => updateNumber("bandHalfBps", v)} />
-              <NumberField label="edgeRebalancePct" value={draft.edgeRebalancePct} step="0.01" onChange={(v) => updateNumber("edgeRebalancePct", v)} />
-              <NumberField label="minRebalanceIntervalSec" value={draft.minRebalanceIntervalSec} onChange={(v) => updateNumber("minRebalanceIntervalSec", v)} />
-              <NumberField label="maxRebalancesPerDay" value={draft.maxRebalancesPerDay} onChange={(v) => updateNumber("maxRebalancesPerDay", v)} />
-              <NumberField label="failureCooldownSec" value={draft.failureCooldownSec} onChange={(v) => updateNumber("failureCooldownSec", v)} />
-
-              <NumberField label="slippageBps" value={draft.slippageBps} onChange={(v) => updateNumber("slippageBps", v)} />
-              <NumberField label="pollIntervalMs" value={draft.pollIntervalMs} onChange={(v) => updateNumber("pollIntervalMs", v)} />
-              <SelectField
-                label="wsEnabled"
-                value={draft.wsEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("wsEnabled", v === "true")}
-                options={["true", "false"]}
-              />
-              <NumberField label="slot0RefreshEverySec" value={draft.slot0RefreshEverySec} onChange={(v) => updateNumber("slot0RefreshEverySec", v)} />
-              <NumberField label="balancesRefreshEverySec" value={draft.balancesRefreshEverySec} onChange={(v) => updateNumber("balancesRefreshEverySec", v)} />
-              <NumberField label="positionRefreshEverySec" value={draft.positionRefreshEverySec} onChange={(v) => updateNumber("positionRefreshEverySec", v)} />
-              <NumberField label="inventoryRefreshEverySec" value={draft.inventoryRefreshEverySec} onChange={(v) => updateNumber("inventoryRefreshEverySec", v)} />
-              <NumberField label="collectableRefreshEverySec" value={draft.collectableRefreshEverySec} onChange={(v) => updateNumber("collectableRefreshEverySec", v)} />
-              <NumberField
-                label="dashboardRecommendedPollMs"
-                value={draft.dashboardRecommendedPollMs}
-                onChange={(v) => updateNumber("dashboardRecommendedPollMs", v)}
-              />
-              <NumberField label="maxDeployUsdc" value={draft.maxDeployUsdc} onChange={(v) => updateNumber("maxDeployUsdc", v)} />
-              <NumberField
-                label="maxInitialMintUsdc"
-                value={draft.maxInitialMintUsdc}
-                onChange={(v) => updateNumber("maxInitialMintUsdc", v)}
-              />
-              <NumberField label="minTopUpUsd" value={draft.minTopUpUsd} onChange={(v) => updateNumber("minTopUpUsd", v)} />
-
-              <NumberField label="reserveMinUsdc" value={draft.reserveMinUsdc} onChange={(v) => updateNumber("reserveMinUsdc", v)} />
-              <NumberField label="reservePct (%)" value={draft.reservePct} step="0.1" onChange={(v) => updateNumber("reservePct", v)} />
-              <NumberField label="reserveMaxUsdc" value={draft.reserveMaxUsdc} onChange={(v) => updateNumber("reserveMaxUsdc", v)} />
-
-              <SelectField
-                label="compoundMode"
-                value={draft.compoundMode}
-                onChange={(v) => setDraft((p) => (p ? { ...p, compoundMode: v as CompoundMode } : p))}
-                options={["on_rebalance", "threshold_harvest"]}
-              />
-              <NumberField label="harvestThresholdUsd" value={draft.harvestThresholdUsd} onChange={(v) => updateNumber("harvestThresholdUsd", v)} />
-
-              <SelectField
-                label="churnProtectionEnabled"
-                value={draft.churnProtectionEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("churnProtectionEnabled", v === "true")}
-                options={["false", "true"]}
-              />
-              <NumberField
-                label="churnMaxCostToFeeRatio (%)"
-                value={draft.churnMaxCostToFeeRatio}
-                step="0.1"
-                onChange={(v) => updateNumber("churnMaxCostToFeeRatio", v)}
-              />
-
-              <SelectField
-                label="regime.enabled"
-                value={draft.regimeEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("regimeEnabled", v === "true")}
-                options={["false", "true"]}
-              />
-              <NumberField label="regime.windowSec" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
-              <NumberField
-                label="regime.sampleEverySec"
-                value={draft.regimeSampleEverySec}
-                onChange={(v) => updateNumber("regimeSampleEverySec", v)}
-              />
-              <NumberField label="regime.minSamples" value={draft.regimeMinSamples} onChange={(v) => updateNumber("regimeMinSamples", v)} />
-              <NumberField
-                label="regime.mrHalfLifeMaxSec"
-                value={draft.regimeMrHalfLifeMaxSec}
-                onChange={(v) => updateNumber("regimeMrHalfLifeMaxSec", v)}
-              />
-              <NumberField
-                label="regime.trendHalfLifeMinSec"
-                value={draft.regimeTrendHalfLifeMinSec}
-                onChange={(v) => updateNumber("regimeTrendHalfLifeMinSec", v)}
-              />
-              <NumberField
-                label="regime.maxEdgeAdj"
-                value={draft.regimeMaxEdgeAdj}
-                step="0.01"
-                onChange={(v) => updateNumber("regimeMaxEdgeAdj", v)}
-              />
-              <NumberField
-                label="regime.maxBandAdjBps"
-                value={draft.regimeMaxBandAdjBps}
-                onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)}
-              />
-              <NumberField
-                label="regime.maxCooldownAdjSec"
-                value={draft.regimeMaxCooldownAdjSec}
-                onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)}
-              />
-
-              <SelectField
-                label="trendEscape.enabled"
-                value={draft.trendEscapeEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("trendEscapeEnabled", v === "true")}
-                options={["false", "true"]}
-              />
-              <NumberField
-                label="trendEscape.minRegimeConfidence"
-                value={draft.trendEscapeMinRegimeConfidence}
-                step="0.01"
-                onChange={(v) => updateNumber("trendEscapeMinRegimeConfidence", v)}
-              />
-              <NumberField
-                label="trendEscape.directionLookbackSec"
-                value={draft.trendEscapeDirectionLookbackSec}
-                onChange={(v) => updateNumber("trendEscapeDirectionLookbackSec", v)}
-              />
-              <NumberField
-                label="trendEscape.minTrendMovePct"
-                value={draft.trendEscapeMinTrendMovePct}
-                step="0.0001"
-                onChange={(v) => updateNumber("trendEscapeMinTrendMovePct", v)}
-              />
-              <NumberField
-                label="trendEscape.minTrendConfirmSec"
-                value={draft.trendEscapeMinTrendConfirmSec}
-                onChange={(v) => updateNumber("trendEscapeMinTrendConfirmSec", v)}
-              />
-              <NumberField
-                label="trendEscape.cooldownAfterEscapeSec"
-                value={draft.trendEscapeCooldownAfterEscapeSec}
-                onChange={(v) => updateNumber("trendEscapeCooldownAfterEscapeSec", v)}
-              />
-              <NumberField
-                label="trendEscape.minAlphaUsdToEscape"
-                value={draft.trendEscapeMinAlphaUsdToEscape}
-                step="0.01"
-                onChange={(v) => updateNumber("trendEscapeMinAlphaUsdToEscape", v)}
-              />
-              <NumberField
-                label="trendEscape.emergencyOutOfRangeEdgePct"
-                value={draft.trendEscapeEmergencyOutOfRangeEdgePct}
-                step="0.01"
-                onChange={(v) => updateNumber("trendEscapeEmergencyOutOfRangeEdgePct", v)}
-              />
-              <NumberField
-                label="trendEscape.emergencyMinOutOfRangeSec"
-                value={draft.trendEscapeEmergencyMinOutOfRangeSec}
-                onChange={(v) => updateNumber("trendEscapeEmergencyMinOutOfRangeSec", v)}
-              />
-              <SelectField
-                label="trendEscape.uptrendHold"
-                value={draft.trendEscapeUptrendHold}
-                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeUptrendHold: v as "WETH" | "USDC" | "50_50" } : p))}
-                options={["WETH", "USDC", "50_50"]}
-              />
-              <SelectField
-                label="trendEscape.downtrendHold"
-                value={draft.trendEscapeDowntrendHold}
-                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeDowntrendHold: v as "WETH" | "USDC" | "50_50" } : p))}
-                options={["USDC", "WETH", "50_50"]}
-              />
-              <SelectField
-                label="trendEscape.fallbackHold"
-                value={draft.trendEscapeFallbackHold}
-                onChange={(v) => setDraft((p) => (p ? { ...p, trendEscapeFallbackHold: v as "WETH" | "USDC" | "50_50" } : p))}
-                options={["50_50", "WETH", "USDC"]}
-              />
-
-              <SelectField
-                label="reEntry.enabled"
-                value={draft.reEntryEnabled ? "true" : "false"}
-                onChange={(v) => updateBool("reEntryEnabled", v === "true")}
-                options={["false", "true"]}
-              />
-              <NumberField
-                label="reEntry.minRegimeConfidence"
-                value={draft.reEntryMinRegimeConfidence}
-                step="0.01"
-                onChange={(v) => updateNumber("reEntryMinRegimeConfidence", v)}
-              />
-              <NumberField
-                label="reEntry.minMeanRevertConfirmSec"
-                value={draft.reEntryMinMeanRevertConfirmSec}
-                onChange={(v) => updateNumber("reEntryMinMeanRevertConfirmSec", v)}
-              />
-              <NumberField
-                label="reEntry.maxDistanceFromMuPct"
-                value={draft.reEntryMaxDistanceFromMuPct}
-                step="0.0001"
-                onChange={(v) => updateNumber("reEntryMaxDistanceFromMuPct", v)}
-              />
-              <NumberField
-                label="reEntry.minHoldSec"
-                value={draft.reEntryMinHoldSec}
-                onChange={(v) => updateNumber("reEntryMinHoldSec", v)}
-              />
-              <NumberField
-                label="reEntry.cooldownAfterReEntrySec"
-                value={draft.reEntryCooldownAfterReEntrySec}
-                onChange={(v) => updateNumber("reEntryCooldownAfterReEntrySec", v)}
-              />
-            </div>
-
-            <div style={styles.row}>
-              <button style={styles.button} onClick={saveSettings} disabled={busy !== ""}>
-                Save Settings
-              </button>
-              <button style={styles.buttonSuccess} onClick={enableTrading} disabled={busy !== "" || draft.tradingEnabled}>
-                Enable Trading
-              </button>
-              <button style={styles.buttonDanger} onClick={emergencyStop} disabled={busy !== "" || draft.killSwitch}>
-                Emergency Stop
-              </button>
-            </div>
-          </section>
+        {/* Range pill */}
+        {hasActiveLpPosition && (
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background: inRange ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)", color: inRange ? "#22c55e" : "#ef4444", border:`1px solid ${inRange ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}` }}>
+            {inRange ? "IN RANGE" : "OUT OF RANGE"}
+          </span>
         )}
 
-        <section style={styles.panel}>
-          <h2 style={styles.h2}>Raw Debug</h2>
-          <details>
-            <summary style={styles.summary}>Show raw /status JSON</summary>
-            <pre style={styles.pre}>{JSON.stringify(status, null, 2)}</pre>
-          </details>
-        </section>
+        {/* Cooldown */}
+        {cooldownRemaining > 0 && (
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background:"rgba(245,158,11,0.15)", color:"#f59e0b", border:"1px solid rgba(245,158,11,0.3)" }}>
+            COOLDOWN {fmtDurationCompact(cooldownRemaining)}
+          </span>
+        )}
 
-        <PositionRecordDrawer record={selectedPosition} onClose={() => setSelectedPosition(null)} />
+        {/* Alpha live */}
+        <span style={{ fontFamily:"monospace", fontSize:13, color: alphaLiveUsd >= 0 ? "#22c55e" : "#ef4444", fontWeight:600 }}>
+          α {fmtSignedUsd(alphaLiveUsd)}
+        </span>
+
+        {/* Wallet */}
+        {walletAddress ? (
+          <span style={{ fontSize:12, color:"rgba(232,232,240,0.6)", fontFamily:"monospace" }}>
+            {isOwner ? "OWNER " : ""}{shortAddr(walletAddress)}
+          </span>
+        ) : (
+          <button onClick={connectWallet} disabled={!hasMetaMask || busy !== ""} style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontSize:12, cursor:"pointer" }}>
+            Connect Wallet
+          </button>
+        )}
+
+        {/* Kill switch */}
+        {status?.killSwitch && (
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:800, background:"rgba(239,68,68,0.2)", color:"#ef4444", border:"1px solid rgba(239,68,68,0.4)" }}>
+            KILL SWITCH ACTIVE
+          </span>
+        )}
+
+        {/* Emergency stop */}
+        {isOwner && !status?.killSwitch && (
+          <button onClick={emergencyStop} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            STOP
+          </button>
+        )}
+        {isOwner && status?.killSwitch && (
+          <button onClick={enableTrading} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(34,197,94,0.15)", border:"1px solid rgba(34,197,94,0.4)", color:"#22c55e", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+            ENABLE
+          </button>
+        )}
+      </div>
+
+      <main style={{ maxWidth:1400, margin:"0 auto", padding:"20px 16px 80px", display:"grid", gap:16 }}>
+        {/* Notices */}
+        {notice && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.3)", color:"#22c55e", fontSize:14 }}>{notice}</div>}
+        {error && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>{error}</div>}
+        {statusError && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444", fontSize:13 }}>Status: {statusError}</div>}
+        {hasMultipleActive && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>Multiple active LP positions detected ({activeLpCount}). Bot is blocked.</div>}
+
+        {/* ZONES 2+3+4: Three-column grid */}
+        <div style={{ display:"grid", gridTemplateColumns:"28fr 42fr 30fr", gap:16, alignItems:"start" }}>
+
+          {/* ZONE 2: Position Visual */}
+          <div style={{ display:"grid", gap:12 }}>
+            <Uc6Card title="LP Position" accent>
+              <BandVisualizer
+                hasPosition={hasActiveLpPosition}
+                inRange={inRange}
+                tickLower={status?.position?.tickLower ?? null}
+                tickUpper={status?.position?.tickUpper ?? null}
+                currentTick={status?.market?.tick?.current ?? null}
+                spotPrice={n(status?.market?.spotPrice?.usdcPerWeth, 0)}
+                bandHalfPct={actualBandHalfPct ?? configuredBandHalfPct}
+                timeInRangePct={status?.ops?.timeInRange?.pct != null ? n(status.ops.timeInRange.pct, 0) * 100 : null}
+                pairLabel={activePairLabel}
+                configuredBandHalfPct={configuredBandHalfPct}
+              />
+            </Uc6Card>
+
+            {hasActiveLpPosition && (
+              <Uc6Card title="Liquidity Composition">
+                <LiquidityComposition
+                  lpUsdcSideUsd={lpUsdcSideUsd}
+                  lpWethSideUsd={lpWethSideUsd}
+                  lpValueUsd={lpValueUsd}
+                  lpSplitUsdcPct={lpSplitUsdcPct}
+                  lpSplitWethPct={lpSplitWethPct}
+                  collectableNowUsd={collectableNowUsd}
+                  collectableNowEstimated={collectableNowEstimated}
+                  tokenId={status?.position?.tokenId ?? null}
+                  pendingCompoundUsd={n(status?.fees?.pendingCompoundUsd, 0)}
+                />
+              </Uc6Card>
+            )}
+
+            {isHoldMode && (
+              <Uc6Card title="Hold State">
+                <div style={{ display:"grid", gap:8 }}>
+                  <Uc6Metric label="Mode" value={<Pill label={strategyMode} tone="warn" />} />
+                  <Uc6Metric label="Holding" value={holdTargetLabel} />
+                  <Uc6Metric label="Value" value={fmtUsd(holdInventoryValueUsd)} />
+                  <Uc6Metric label="Re-entry" value={<Pill label={reEntryView?.eligible ? "READY" : "WAITING"} tone={reEntryView?.eligible ? "good" : "warn"} />} />
+                  {reEntryView?.reasonIfBlocked && <Uc6Metric label="Blocked" value={reEntryView.reasonIfBlocked} />}
+                </div>
+              </Uc6Card>
+            )}
+          </div>
+
+          {/* ZONE 3: Live Economics */}
+          <div style={{ display:"grid", gap:12 }}>
+            <Uc6Card title="Fee Economics">
+              <FeeWaterfall status={status} />
+            </Uc6Card>
+
+            <Uc6Card title="Alpha vs HODL">
+              <AlphaCard
+                alphaLiveUsd={alphaLiveUsd}
+                requiredFeesToBeatHodlLiveUsd={requiredFeesToBeatHodlLiveUsd}
+                hodlGateAllowed={hodlGateAllowed}
+                hodlGateReason={hodlGateReason}
+                alphaTodayUsd={n(status?.pnl?.netTodayUsd, 0)}
+              />
+            </Uc6Card>
+
+            <Uc6Card title="Operations">
+              <OpsGrid
+                rebalancesToday={n(status?.ops?.rebalancesToday, 0)}
+                rebalances24h={n(status?.ops?.rebalances24h, 0)}
+                lastRebalanceAtIso={status?.ops?.lastRebalanceAtIso ?? null}
+                churnRatio={churnRatio ?? null}
+                churnProtectionEnabled={Boolean(status?.settings?.churnProtection?.enabled ?? status?.settings?.churnProtectionEnabled)}
+                compoundMode={status?.settings?.compoundMode ?? "threshold_harvest"}
+                harvestThresholdUsd={n(status?.settings?.harvestThresholdUsd, 0)}
+                cooldownRemaining={cooldownRemaining}
+                hodlGateAllowed={hodlGateAllowed}
+                hodlGateReason={hodlGateReason}
+              />
+            </Uc6Card>
+
+            {/* Event Feed */}
+            {events.length > 0 && (
+              <Uc6Card title="Recent Events">
+                <EventFeed events={events} />
+              </Uc6Card>
+            )}
+          </div>
+
+          {/* ZONE 4: Signals */}
+          <div style={{ display:"grid", gap:12 }}>
+            <Uc6Card title="Regime">
+              <RegimeGauge
+                label={regimeStatus?.label ?? null}
+                confidencePct={regimeConfidencePct}
+                halfLifeLabel={regimeHalfLifeLabel}
+                theta={regimeStatus?.theta ?? null}
+                sigma={regimeStatus?.sigma ?? null}
+                mu={regimeStatus?.mu ?? null}
+                sampleCount={regimeStatus?.sampleCount ?? 0}
+                windowSec={regimeStatus?.windowSec ?? n(status?.settings?.regime?.windowSec, 0)}
+                enabled={Boolean(status?.settings?.regime?.enabled)}
+                baseEdgePct={regimeBaseEdgePct}
+                effectiveEdgePct={regimeEffectiveEdgePct}
+                baseBandBps={regimeBaseBandBps}
+                effectiveBandBps={regimeEffectiveBandBps}
+              />
+            </Uc6Card>
+
+            <Uc6Card title="Trend Escape">
+              <TrendEscapeCard
+                enabled={Boolean(trendEscapeView?.enabled ?? status?.settings?.trendEscape?.enabled)}
+                eligible={Boolean(trendEscapeView?.eligible)}
+                holdTarget={trendEscapeView?.holdTargetIfEscape ?? null}
+                reasonIfBlocked={trendEscapeView?.reasonIfBlocked ?? null}
+                cooldownUntilIso={trendEscapeView?.cooldownUntilIso ?? null}
+                trendDirection={trendView?.direction ?? "flat"}
+                trendMovePct={trendMovePct}
+              />
+            </Uc6Card>
+
+            <Uc6Card title="Re-Entry Gate">
+              <ReEntryCard
+                enabled={Boolean(reEntryView?.enabled ?? status?.settings?.reEntry?.enabled)}
+                eligible={Boolean(reEntryView?.eligible)}
+                reasonIfBlocked={reEntryView?.reasonIfBlocked ?? null}
+                eligibleAtIso={reEntryView?.eligibleAtIso ?? null}
+                distanceFromMuPct={distanceFromMuPctDisplay}
+              />
+            </Uc6Card>
+
+            <Uc6Card title="HODL Gate">
+              <HodlGateCard
+                allowed={hodlGateAllowed}
+                reason={hodlGateReason}
+                alphaLiveUsd={alphaLiveUsd}
+                requiredUsd={requiredFeesToBeatHodlLiveUsd}
+                enabled={Boolean(hodlGateView?.enabled)}
+              />
+            </Uc6Card>
+          </div>
+        </div>
+
+        {/* ZONE 5: Analytics Row */}
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))", gap:16 }}>
+          <Uc6Card title="Net P&L Windows">
+            <PnlWindows status={status} />
+          </Uc6Card>
+
+          <Uc6Card title="Band Performance">
+            {bandPerformanceRows.length === 0 ? (
+              <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"12px 0" }}>No band performance data yet.</div>
+            ) : (
+              <DarkTable
+                headers={["Band", "Runs", "Alpha (bps)", "Win%", "Cost (bps)", "Avg Time"]}
+                rows={bandPerformanceRows}
+              />
+            )}
+          </Uc6Card>
+
+          <Uc6Card title="Pool Comparison">
+            <PoolComparisonCard
+              current={poolComparisonCurrent}
+              top5={poolComparisonTop5}
+              computedAtIso={poolComparison?.computedAtIso ?? null}
+            />
+          </Uc6Card>
+        </div>
+
+        {/* ZONE 6: Position History */}
+        <Uc6Card title="Position History">
+          <details>
+            <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13, padding:"4px 0", marginBottom:8 }}>
+              Closed Positions ({positionsPage?.totalItems ?? 0}) · click to expand
+            </summary>
+            <div>
+              {closedPositionRecords.length === 0 ? (
+                <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"12px 0" }}>No closed positions.</div>
+              ) : (
+                <>
+                  <DarkTable
+                    headers={["Opened", "Duration", "Band", "Entry $", "Exit $", "Fees", "Costs", "Net", "Alpha vs HODL", "Reason"]}
+                    rows={closedPositionRecords.map((rec) => [
+                      fmtIsoLocal(rec.entry?.openedAtIso),
+                      rec.duration?.human || fmtDurationCompact(rec.duration?.secondsInPosition),
+                      formatRecordBandLabel(rec),
+                      fmtUsd(rec.entry?.entryValueUsd),
+                      fmtUsd(rec.exit?.exitValueUsd),
+                      fmtUsd(rec.performance?.feesCollectedUsd),
+                      fmtUsd(rec.performance?.totalCostsUsd),
+                      fmtSignedUsd(rec.performance?.feesNetUsd),
+                      fmtSignedUsd(rec.performance?.alphaVsHodlUsd),
+                      rec.closeReason || "—",
+                    ])}
+                    onRowClick={(idx) => setSelectedPosition(closedPositionRecords[idx])}
+                  />
+                  {positionsPageCount > 1 && (
+                    <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:12, fontSize:13, color:"rgba(232,232,240,0.6)" }}>
+                      <button onClick={() => setPositionsPageNum(Math.max(1, positionsCurrentPage - 1))} disabled={positionsCurrentPage <= 1} style={darkBtnStyle}>Prev</button>
+                      <span>{positionsCurrentPage} / {positionsPageCount}</span>
+                      <button onClick={() => setPositionsPageNum(Math.min(positionsPageCount, positionsCurrentPage + 1))} disabled={positionsCurrentPage >= positionsPageCount} style={darkBtnStyle}>Next</button>
+                    </div>
+                  )}
+                </>
+              )}
+
+              {positionsTaxSummary && (
+                <details style={{ marginTop:16 }}>
+                  <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13 }}>Tax Summary</summary>
+                  <TaxSummary taxSummary={positionsTaxSummary} />
+                </details>
+              )}
+            </div>
+          </details>
+        </Uc6Card>
+
+        {/* ZONE 7: Command Center */}
+        {isOwner && draft && (
+          <div style={{ borderTop:"2px solid #06b6d4", paddingTop:16 }}>
+            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
+              <span style={{ color:"#06b6d4", fontWeight:800, fontSize:16, letterSpacing:1 }}>COMMAND CENTER</span>
+              <span style={{ color:"rgba(232,232,240,0.45)", fontSize:12, fontFamily:"monospace" }}>
+                {shortAddr(walletAddress)}
+              </span>
+              {!isBase && (
+                <button onClick={switchToBase} style={{ ...darkBtnStyle, borderColor:"rgba(245,158,11,0.4)", color:"#f59e0b" }}>Switch to Base</button>
+              )}
+            </div>
+
+            <div style={{ display:"grid", gap:10 }}>
+              {/* Section 1: Strategy */}
+              <details>
+                <summary style={cmdSectionStyle}>STRATEGY</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <NumberField label="bandHalfBps" value={draft.bandHalfBps} onChange={(v) => updateNumber("bandHalfBps", v)} />
+                  <NumberField label="edgeRebalancePct" value={draft.edgeRebalancePct} step="0.01" onChange={(v) => updateNumber("edgeRebalancePct", v)} />
+                  <NumberField label="minRebalanceIntervalSec" value={draft.minRebalanceIntervalSec} onChange={(v) => updateNumber("minRebalanceIntervalSec", v)} />
+                  <NumberField label="maxRebalancesPerDay" value={draft.maxRebalancesPerDay} onChange={(v) => updateNumber("maxRebalancesPerDay", v)} />
+                  <NumberField label="slippageBps" value={draft.slippageBps} onChange={(v) => updateNumber("slippageBps", v)} />
+                  <SelectField label="compoundMode" value={draft.compoundMode} onChange={(v) => setDraft((p) => p ? { ...p, compoundMode: v as "on_rebalance" | "threshold_harvest" } : p)} options={["threshold_harvest", "on_rebalance"]} />
+                  <NumberField label="harvestThresholdUsd" value={draft.harvestThresholdUsd} step="0.01" onChange={(v) => updateNumber("harvestThresholdUsd", v)} />
+                  <NumberField label="maxDeployUsdc" value={draft.maxDeployUsdc} onChange={(v) => updateNumber("maxDeployUsdc", v)} />
+                  <NumberField label="maxInitialMintUsdc" value={draft.maxInitialMintUsdc} onChange={(v) => updateNumber("maxInitialMintUsdc", v)} />
+                  <NumberField label="reserveMinUsdc" value={draft.reserveMinUsdc} onChange={(v) => updateNumber("reserveMinUsdc", v)} />
+                  <NumberField label="reservePct%" value={draft.reservePct} step="0.1" onChange={(v) => updateNumber("reservePct", v)} />
+                  <NumberField label="reserveMaxUsdc" value={draft.reserveMaxUsdc} onChange={(v) => updateNumber("reserveMaxUsdc", v)} />
+                  <SelectField label="churnProtection" value={draft.churnProtectionEnabled ? "true" : "false"} onChange={(v) => updateBool("churnProtectionEnabled", v === "true")} options={["false", "true"]} />
+                  <NumberField label="churnMaxCostToFeeRatio%" value={draft.churnMaxCostToFeeRatio} step="1" onChange={(v) => updateNumber("churnMaxCostToFeeRatio", v)} />
+                  <NumberField label="failureCooldownSec" value={draft.failureCooldownSec} onChange={(v) => updateNumber("failureCooldownSec", v)} />
+                </div>
+              </details>
+
+              {/* Section 2: Regime Engine */}
+              <details>
+                <summary style={cmdSectionStyle}>REGIME ENGINE</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="regime.enabled" value={draft.regimeEnabled ? "true" : "false"} onChange={(v) => updateBool("regimeEnabled", v === "true")} options={["false", "true"]} />
+                  <NumberField label="regime.windowSec" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
+                  <NumberField label="regime.sampleEverySec" value={draft.regimeSampleEverySec} onChange={(v) => updateNumber("regimeSampleEverySec", v)} />
+                  <NumberField label="regime.minSamples" value={draft.regimeMinSamples} onChange={(v) => updateNumber("regimeMinSamples", v)} />
+                  <NumberField label="regime.mrHalfLifeMaxSec" value={draft.regimeMrHalfLifeMaxSec} onChange={(v) => updateNumber("regimeMrHalfLifeMaxSec", v)} />
+                  <NumberField label="regime.trendHalfLifeMinSec" value={draft.regimeTrendHalfLifeMinSec} onChange={(v) => updateNumber("regimeTrendHalfLifeMinSec", v)} />
+                  <NumberField label="regime.maxEdgeAdj" value={draft.regimeMaxEdgeAdj} step="0.01" onChange={(v) => updateNumber("regimeMaxEdgeAdj", v)} />
+                  <NumberField label="regime.maxBandAdjBps" value={draft.regimeMaxBandAdjBps} onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)} />
+                  <NumberField label="regime.maxCooldownAdjSec" value={draft.regimeMaxCooldownAdjSec} onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)} />
+                </div>
+              </details>
+
+              {/* Section 3: Trend Escape */}
+              <details>
+                <summary style={cmdSectionStyle}>TREND ESCAPE</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="trendEscape.enabled" value={draft.trendEscapeEnabled ? "true" : "false"} onChange={(v) => updateBool("trendEscapeEnabled", v === "true")} options={["false", "true"]} />
+                  <NumberField label="trendEscape.minRegimeConfidence" value={draft.trendEscapeMinRegimeConfidence} step="0.01" onChange={(v) => updateNumber("trendEscapeMinRegimeConfidence", v)} />
+                  <NumberField label="trendEscape.directionLookbackSec" value={draft.trendEscapeDirectionLookbackSec} onChange={(v) => updateNumber("trendEscapeDirectionLookbackSec", v)} />
+                  <NumberField label="trendEscape.minTrendMovePct" value={draft.trendEscapeMinTrendMovePct} step="0.0001" onChange={(v) => updateNumber("trendEscapeMinTrendMovePct", v)} />
+                  <NumberField label="trendEscape.minTrendConfirmSec" value={draft.trendEscapeMinTrendConfirmSec} onChange={(v) => updateNumber("trendEscapeMinTrendConfirmSec", v)} />
+                  <NumberField label="trendEscape.cooldownAfterEscapeSec" value={draft.trendEscapeCooldownAfterEscapeSec} onChange={(v) => updateNumber("trendEscapeCooldownAfterEscapeSec", v)} />
+                  <NumberField label="trendEscape.minAlphaUsdToEscape" value={draft.trendEscapeMinAlphaUsdToEscape} step="0.01" onChange={(v) => updateNumber("trendEscapeMinAlphaUsdToEscape", v)} />
+                  <NumberField label="trendEscape.emergencyOutOfRangeEdgePct" value={draft.trendEscapeEmergencyOutOfRangeEdgePct} step="0.01" onChange={(v) => updateNumber("trendEscapeEmergencyOutOfRangeEdgePct", v)} />
+                  <NumberField label="trendEscape.emergencyMinOutOfRangeSec" value={draft.trendEscapeEmergencyMinOutOfRangeSec} onChange={(v) => updateNumber("trendEscapeEmergencyMinOutOfRangeSec", v)} />
+                  <SelectField label="uptrendHold" value={draft.trendEscapeUptrendHold} onChange={(v) => setDraft((p) => p ? { ...p, trendEscapeUptrendHold: v as "WETH"|"USDC"|"50_50" } : p)} options={["WETH","USDC","50_50"]} />
+                  <SelectField label="downtrendHold" value={draft.trendEscapeDowntrendHold} onChange={(v) => setDraft((p) => p ? { ...p, trendEscapeDowntrendHold: v as "WETH"|"USDC"|"50_50" } : p)} options={["USDC","WETH","50_50"]} />
+                  <SelectField label="fallbackHold" value={draft.trendEscapeFallbackHold} onChange={(v) => setDraft((p) => p ? { ...p, trendEscapeFallbackHold: v as "WETH"|"USDC"|"50_50" } : p)} options={["50_50","WETH","USDC"]} />
+                </div>
+              </details>
+
+              {/* Section 4: Re-Entry */}
+              <details>
+                <summary style={cmdSectionStyle}>RE-ENTRY</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="reEntry.enabled" value={draft.reEntryEnabled ? "true" : "false"} onChange={(v) => updateBool("reEntryEnabled", v === "true")} options={["false", "true"]} />
+                  <NumberField label="reEntry.minRegimeConfidence" value={draft.reEntryMinRegimeConfidence} step="0.01" onChange={(v) => updateNumber("reEntryMinRegimeConfidence", v)} />
+                  <NumberField label="reEntry.minMeanRevertConfirmSec" value={draft.reEntryMinMeanRevertConfirmSec} onChange={(v) => updateNumber("reEntryMinMeanRevertConfirmSec", v)} />
+                  <NumberField label="reEntry.maxDistanceFromMuPct" value={draft.reEntryMaxDistanceFromMuPct} step="0.0001" onChange={(v) => updateNumber("reEntryMaxDistanceFromMuPct", v)} />
+                  <NumberField label="reEntry.minHoldSec" value={draft.reEntryMinHoldSec} onChange={(v) => updateNumber("reEntryMinHoldSec", v)} />
+                  <NumberField label="reEntry.cooldownAfterReEntrySec" value={draft.reEntryCooldownAfterReEntrySec} onChange={(v) => updateNumber("reEntryCooldownAfterReEntrySec", v)} />
+                </div>
+              </details>
+
+              {/* Section 5: Execution */}
+              <details>
+                <summary style={cmdSectionStyle}>EXECUTION & CAPS</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="venue" value={draft.venue} onChange={(v) => setDraft((p) => p ? { ...p, venue: v as "slipstream"|"uniswapv3" } : p)} options={["slipstream","uniswapv3"]} />
+                  <NumberField label="pollIntervalMs" value={draft.pollIntervalMs} onChange={(v) => updateNumber("pollIntervalMs", v)} />
+                  <SelectField label="wsEnabled" value={draft.wsEnabled ? "true" : "false"} onChange={(v) => updateBool("wsEnabled", v === "true")} options={["true","false"]} />
+                  <NumberField label="minTopUpUsd" value={draft.minTopUpUsd} onChange={(v) => updateNumber("minTopUpUsd", v)} />
+                  <NumberField label="dashboardRecommendedPollMs" value={draft.dashboardRecommendedPollMs} onChange={(v) => updateNumber("dashboardRecommendedPollMs", v)} />
+                </div>
+
+                <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginTop:8 }}>
+                  <button onClick={saveSettings} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                    {busy === "save" ? "Saving..." : "Save All Settings"}
+                  </button>
+                  <button onClick={forceRebalance} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(245,158,11,0.15)", border:"1px solid rgba(245,158,11,0.4)", color:"#f59e0b", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                    Force Rebalance
+                  </button>
+                  {hasActiveLpPosition && (
+                    <button onClick={liquidateAndPause} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                      Liquidate LP + Pause
+                    </button>
+                  )}
+                </div>
+              </details>
+            </div>
+          </div>
+        )}
+
+        {/* Debug */}
+        <details style={{ marginTop:8 }}>
+          <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.3)", fontSize:12 }}>Raw debug JSON</summary>
+          <pre style={{ fontSize:11, color:"rgba(232,232,240,0.5)", overflow:"auto", maxHeight:400, background:"rgba(0,0,0,0.3)", padding:12, borderRadius:6, marginTop:8 }}>
+            {JSON.stringify(status, null, 2)}
+          </pre>
+        </details>
       </main>
+
+      <PositionRecordDrawer record={selectedPosition} onClose={() => setSelectedPosition(null)} />
     </>
+  );
+}
+
+// ─── module-level style constants ────────────────────────────────────────────
+
+const darkBtnStyle: CSSProperties = { padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" };
+const cmdSectionStyle: CSSProperties = { cursor:"pointer", color:"#06b6d4", fontWeight:700, fontSize:13, letterSpacing:1, padding:"8px 0 8px 4px", display:"block", borderBottom:"1px solid rgba(6,182,212,0.2)" };
+
+function strategyModePillStyle(mode: string): CSSProperties {
+  const base: CSSProperties = { padding:"3px 12px", borderRadius:20, fontSize:12, fontWeight:800, letterSpacing:0.5 };
+  if (mode === "LP_ACTIVE") return { ...base, background:"rgba(6,182,212,0.2)", color:"#06b6d4", border:"1px solid rgba(6,182,212,0.4)" };
+  if (mode === "HOLD_WETH") return { ...base, background:"rgba(245,158,11,0.2)", color:"#f59e0b", border:"1px solid rgba(245,158,11,0.4)" };
+  if (mode === "HOLD_USDC") return { ...base, background:"rgba(59,130,246,0.2)", color:"#60a5fa", border:"1px solid rgba(59,130,246,0.4)" };
+  if (mode === "HOLD_50_50") return { ...base, background:"rgba(168,85,247,0.2)", color:"#c084fc", border:"1px solid rgba(168,85,247,0.4)" };
+  return { ...base, background:"rgba(255,255,255,0.08)", color:"rgba(232,232,240,0.6)", border:"1px solid rgba(255,255,255,0.15)" };
+}
+
+// ─── sub-components ───────────────────────────────────────────────────────────
+
+function Uc6Card({ title, children, accent }: { title: string; children: ReactNode; accent?: boolean }) {
+  return (
+    <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:12, padding:16, ...(accent ? { borderTop:"2px solid #06b6d4" } : {}) }}>
+      <div style={{ fontSize:11, fontWeight:700, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:1.2, marginBottom:12 }}>{title}</div>
+      {children}
+    </div>
+  );
+}
+
+function Uc6Metric({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div style={{ display:"grid", gap:2 }}>
+      <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:0.8 }}>{label}</div>
+      <div style={{ fontSize:13, color:"#e8e8f0", fontFamily: typeof value === "string" && (value.startsWith("$") || value.includes(".")) ? "monospace" : "inherit" }}>{value}</div>
+    </div>
+  );
+}
+
+function Pill({ label, tone }: { label: string; tone: "good" | "warn" | "bad" | "muted" }) {
+  const s: CSSProperties = {
+    display:"inline-block", padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, letterSpacing:0.5,
+    background: tone==="good" ? "rgba(34,197,94,0.15)" : tone==="warn" ? "rgba(245,158,11,0.15)" : tone==="bad" ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.07)",
+    color: tone==="good" ? "#22c55e" : tone==="warn" ? "#f59e0b" : tone==="bad" ? "#ef4444" : "rgba(232,232,240,0.45)",
+    border: `1px solid ${tone==="good" ? "rgba(34,197,94,0.3)" : tone==="warn" ? "rgba(245,158,11,0.3)" : tone==="bad" ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.1)"}`,
+  };
+  return <span style={s}>{label}</span>;
+}
+
+function DarkTable({ headers, rows, onRowClick }: { headers: string[]; rows: Array<Array<ReactNode>>; onRowClick?: (idx: number) => void }) {
+  return (
+    <div style={{ overflowX:"auto" }}>
+      <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+        <thead>
+          <tr>
+            {headers.map((h, i) => (
+              <th key={i} style={{ padding:"6px 8px", textAlign:"left", fontSize:10, color:"rgba(232,232,240,0.4)", fontWeight:600, letterSpacing:0.8, textTransform:"uppercase", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.length === 0 ? (
+            <tr><td colSpan={headers.length} style={{ padding:"16px 8px", color:"rgba(232,232,240,0.3)", textAlign:"center" }}>No data</td></tr>
+          ) : rows.map((row, i) => (
+            <tr key={i} onClick={() => onRowClick?.(i)} style={{ cursor: onRowClick ? "pointer" : "default", borderBottom:"1px solid rgba(255,255,255,0.04)" }}
+              onMouseEnter={(e) => { if (onRowClick) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.03)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
+            >
+              {row.map((cell, j) => (
+                <td key={j} style={{ padding:"6px 8px", color:"rgba(232,232,240,0.75)", fontFamily:"monospace", verticalAlign:"middle" }}>{cell}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+const darkInputStyle: CSSProperties = { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"4px 8px", color:"#e8e8f0", fontSize:12, width:"100%", boxSizing:"border-box" };
+const darkLabelStyle: CSSProperties = { display:"grid", gap:4, fontSize:12 };
+const darkLabelSpanStyle: CSSProperties = { fontSize:10, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:0.6 };
+
+function NumberField({ label, value, onChange, step = "1" }: { label: string; value: number; onChange: (next: string) => void; step?: string }) {
+  return (
+    <label style={darkLabelStyle}>
+      <span style={darkLabelSpanStyle}>{label}</span>
+      <input type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} style={darkInputStyle} />
+    </label>
+  );
+}
+
+function SelectField({ label, value, onChange, options, disabled }: { label: string; value: string; onChange: (next: string) => void; options: string[]; disabled?: boolean }) {
+  return (
+    <label style={darkLabelStyle}>
+      <span style={darkLabelSpanStyle}>{label}</span>
+      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)} style={darkInputStyle}>
+        {options.map((opt) => <option key={opt} value={opt}>{opt}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct }: {
+  hasPosition: boolean; inRange: boolean; tickLower: number|null; tickUpper: number|null; currentTick: number|null; spotPrice: number; bandHalfPct: number|null; timeInRangePct: number|null; pairLabel: string; configuredBandHalfPct: number;
+}) {
+  if (!hasPosition) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"20px 0", textAlign:"center" }}>No active LP position</div>;
+
+  const priceDotPct = (() => {
+    if (tickLower == null || tickUpper == null || currentTick == null) return 50;
+    const total = tickUpper - tickLower;
+    if (total <= 0) return 50;
+    return Math.max(0, Math.min(100, ((currentTick - tickLower) / total) * 100));
+  })();
+
+  const lowerEdgePrice = (() => {
+    if (!spotPrice || tickLower == null || currentTick == null) return null;
+    return spotPrice * Math.pow(1.0001, tickLower - currentTick);
+  })();
+
+  const upperEdgePrice = (() => {
+    if (!spotPrice || tickUpper == null || currentTick == null) return null;
+    return spotPrice * Math.pow(1.0001, tickUpper - currentTick);
+  })();
+
+  const ticksToLower = currentTick != null && tickLower != null ? currentTick - tickLower : null;
+  const ticksToUpper = currentTick != null && tickUpper != null ? tickUpper - currentTick : null;
+
+  const actualBandStr = bandHalfPct != null ? `\u00b1${bandHalfPct.toFixed(2)}%` : `\u00b1${configuredBandHalfPct.toFixed(2)}% (cfg)`;
+
+  const trackColor = inRange ? "rgba(6,182,212,0.15)" : "rgba(239,68,68,0.1)";
+  const dotColor = inRange ? "#06b6d4" : "#ef4444";
+  const fillColor = inRange ? "rgba(6,182,212,0.25)" : "rgba(239,68,68,0.2)";
+
+  return (
+    <div style={{ display:"grid", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+        <span style={{ fontSize:13, fontWeight:600, color:"rgba(232,232,240,0.8)" }}>{pairLbl}</span>
+        <span style={{ fontSize:12, color:"rgba(232,232,240,0.5)", fontFamily:"monospace" }}>{actualBandStr}</span>
+      </div>
+
+      {/* Price labels */}
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, fontFamily:"monospace", color:"rgba(232,232,240,0.5)" }}>
+        <span>{lowerEdgePrice != null ? `$${lowerEdgePrice.toFixed(0)}` : "\u2014"}</span>
+        <span>{upperEdgePrice != null ? `$${upperEdgePrice.toFixed(0)}` : "\u2014"}</span>
+      </div>
+
+      {/* Band track */}
+      <div style={{ position:"relative", height:28, borderRadius:14, background:trackColor, border:`1px solid ${inRange ? "rgba(6,182,212,0.3)" : "rgba(239,68,68,0.3)"}`, overflow:"visible" }}>
+        {/* Fill from left to dot */}
+        <div style={{ position:"absolute", top:0, left:0, bottom:0, width:`${priceDotPct}%`, background:fillColor, borderRadius:"14px 0 0 14px" }} />
+        {/* Price dot */}
+        <div style={{ position:"absolute", top:"50%", left:`${priceDotPct}%`, transform:"translate(-50%, -50%)", width:18, height:18, borderRadius:"50%", background:dotColor, border:"2px solid #07080f", boxShadow:`0 0 10px ${dotColor}`, zIndex:2 }} />
+      </div>
+
+      {/* Spot price label */}
+      <div style={{ textAlign:"center", fontSize:14, fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>
+        {spotPrice > 0 ? `$${spotPrice.toFixed(2)}` : "\u2014"}
+        <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginLeft:4 }}>now</span>
+      </div>
+
+      {/* Tick distances */}
+      {(ticksToLower != null || ticksToUpper != null) && (
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
+          <span>{ticksToLower != null ? `${ticksToLower} tks to lower` : ""}</span>
+          <span>{ticksToUpper != null ? `${ticksToUpper} tks to upper` : ""}</span>
+        </div>
+      )}
+
+      {/* Time in range */}
+      {timeInRangePct != null && (
+        <div style={{ display:"grid", gap:4 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.6)" }}>
+            <span>Time In Range</span>
+            <span style={{ fontFamily:"monospace", fontWeight:600 }}>{timeInRangePct.toFixed(1)}%</span>
+          </div>
+          <div style={{ height:6, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.min(100, timeInRangePct)}%`, borderRadius:3, background: timeInRangePct >= 80 ? "#22c55e" : timeInRangePct >= 50 ? "#06b6d4" : "#f59e0b" }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function LiquidityComposition({ lpUsdcSideUsd, lpWethSideUsd, lpValueUsd, lpSplitUsdcPct, lpSplitWethPct, collectableNowUsd, collectableNowEstimated, tokenId, pendingCompoundUsd }: {
+  lpUsdcSideUsd: number; lpWethSideUsd: number; lpValueUsd: number; lpSplitUsdcPct: number; lpSplitWethPct: number; collectableNowUsd: number; collectableNowEstimated: boolean; tokenId: string|null; pendingCompoundUsd: number;
+}) {
+  return (
+    <div style={{ display:"grid", gap:10 }}>
+      <div style={{ display:"flex", gap:4, height:16, borderRadius:8, overflow:"hidden" }}>
+        <div style={{ flex: lpSplitUsdcPct, background:"rgba(6,182,212,0.5)", minWidth: lpSplitUsdcPct > 0 ? 2 : 0 }} />
+        <div style={{ flex: lpSplitWethPct, background:"rgba(245,158,11,0.5)", minWidth: lpSplitWethPct > 0 ? 2 : 0 }} />
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"rgba(232,232,240,0.7)" }}>
+        <span>USDC <span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(lpUsdcSideUsd)}</span></span>
+        <span>WETH <span style={{ fontFamily:"monospace", color:"#f59e0b" }}>{fmtUsd(lpWethSideUsd)}</span></span>
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+        <span style={{ color:"rgba(232,232,240,0.6)" }}>LP Total</span>
+        <span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(lpValueUsd)}</span>
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
+        <span style={{ color:"rgba(232,232,240,0.5)" }}>Collectable{collectableNowEstimated ? " (est)" : ""}</span>
+        <span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(collectableNowUsd)}</span>
+      </div>
+      {pendingCompoundUsd > 0 && (
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
+          <span style={{ color:"rgba(232,232,240,0.5)" }}>Pending compound</span>
+          <span style={{ fontFamily:"monospace", color:"#e8e8f0" }}>{fmtUsd(pendingCompoundUsd)}</span>
+        </div>
+      )}
+      {tokenId && <div style={{ fontSize:11, color:"rgba(6,182,212,0.7)", fontFamily:"monospace" }}>NFT #{tokenId}</div>}
+    </div>
+  );
+}
+
+function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
+  const [tab, setTab] = useState<"TODAY"|"7D"|"30D"|"ALL">("TODAY");
+  const nLocal = (v: unknown, fb: number) => { const x = Number(v); return Number.isFinite(x) ? x : fb; };
+  const data = {
+    TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0), gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) },
+    "7D": { fees: nLocal(st?.fees?.collected7dUsd,0), gas: nLocal(st?.costs?.gas7dUsd,0), swap: nLocal(st?.costs?.swapCosts7dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn7dUsd,0), net: nLocal(st?.pnl?.net7dUsd,0) },
+    "30D": { fees: nLocal(st?.fees?.collected30dUsd,0), gas: nLocal(st?.costs?.gas30dUsd,0), swap: nLocal(st?.costs?.swapCosts30dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn30dUsd,0), net: nLocal(st?.pnl?.net30dUsd,0) },
+    ALL: { fees: nLocal(st?.fees?.collectedTotalUsd,0), gas: nLocal(st?.costs?.gasTotalUsd,0), swap: nLocal(st?.costs?.swapCostsTotalUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTotalUsd,0), net: nLocal(st?.pnl?.netTotalUsd,0) },
+  }[tab];
+  const maxVal = Math.max(data.fees, data.gas + data.swap + data.mintBurn, Math.abs(data.net), 0.01);
+  const barRow = (lbl: string, val: number, color: string) => (
+    <div style={{ display:"grid", gridTemplateColumns:"120px 1fr 80px", gap:8, alignItems:"center" }}>
+      <span style={{ fontSize:12, color:"rgba(232,232,240,0.6)" }}>{lbl}</span>
+      <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.05)" }}>
+        <div style={{ height:"100%", width:`${(Math.abs(val)/maxVal)*100}%`, borderRadius:4, background:color, minWidth: Math.abs(val) > 0 ? 2 : 0 }} />
+      </div>
+      <span style={{ fontSize:12, fontFamily:"monospace", textAlign:"right", color }}>{val >= 0 ? fmtUsd(val) : `-${fmtUsd(Math.abs(val))}`}</span>
+    </div>
+  );
+  return (
+    <div style={{ display:"grid", gap:12 }}>
+      <div style={{ display:"flex", gap:4 }}>
+        {(["TODAY","7D","30D","ALL"] as const).map((t) => (
+          <button key={t} onClick={() => setTab(t)} style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", background: tab===t ? "rgba(6,182,212,0.2)" : "transparent", border:`1px solid ${tab===t ? "rgba(6,182,212,0.4)" : "rgba(255,255,255,0.1)"}`, color: tab===t ? "#06b6d4" : "rgba(232,232,240,0.5)" }}>
+            {t}
+          </button>
+        ))}
+      </div>
+      <div style={{ display:"grid", gap:8 }}>
+        {barRow("Fees earned", data.fees, "#06b6d4")}
+        {barRow("Gas", data.gas, "#ef4444")}
+        {barRow("Swap costs", data.swap, "#ef4444")}
+        {barRow("Mint/burn", data.mintBurn, "#ef4444")}
+        <div style={{ height:1, background:"rgba(255,255,255,0.08)", margin:"4px 0" }} />
+        {barRow("Net", data.net, data.net >= 0 ? "#22c55e" : "#ef4444")}
+      </div>
+    </div>
+  );
+}
+
+function AlphaCard({ alphaLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd }: {
+  alphaLiveUsd: number; requiredFeesToBeatHodlLiveUsd: number; hodlGateAllowed: boolean; hodlGateReason: string; alphaTodayUsd: number;
+}) {
+  const beating = alphaLiveUsd >= requiredFeesToBeatHodlLiveUsd;
+  const fillPct = requiredFeesToBeatHodlLiveUsd > 0 ? Math.min(100, (alphaLiveUsd / requiredFeesToBeatHodlLiveUsd) * 100) : alphaLiveUsd > 0 ? 100 : 0;
+  return (
+    <div style={{ display:"grid", gap:12 }}>
+      <div style={{ textAlign:"center" }}>
+        <div style={{ fontSize:28, fontFamily:"monospace", fontWeight:800, color: alphaLiveUsd >= 0 ? "#22c55e" : "#ef4444" }}>
+          {fmtSignedUsd(alphaLiveUsd)}
+        </div>
+        <div style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginTop:2 }}>alpha vs HODL (total)</div>
+        <div style={{ fontSize:14, fontFamily:"monospace", color: alphaTodayUsd >= 0 ? "#22c55e" : "#ef4444", marginTop:4 }}>
+          {fmtSignedUsd(alphaTodayUsd)} today
+        </div>
+      </div>
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:4 }}>
+          <span>Required to beat HODL</span>
+          <span style={{ fontFamily:"monospace" }}>{fmtUsd(requiredFeesToBeatHodlLiveUsd)}</span>
+        </div>
+        <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.08)" }}>
+          <div style={{ height:"100%", width:`${Math.max(0, fillPct)}%`, borderRadius:4, background: beating ? "#22c55e" : "#f59e0b" }} />
+        </div>
+        <div style={{ fontSize:11, color: beating ? "#22c55e" : "#f59e0b", marginTop:4, textAlign:"right" }}>
+          {beating ? "BEATING HODL" : "BELOW HODL"}
+        </div>
+      </div>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+        <span style={{ color:"rgba(232,232,240,0.6)" }}>HODL Gate</span>
+        <span style={{ color: hodlGateAllowed ? "#22c55e" : "#ef4444", fontWeight:700 }} title={hodlGateReason}>
+          {hodlGateAllowed ? "ALLOWED" : "BLOCKED"}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function OpsGrid({ rebalancesToday, rebalances24h, lastRebalanceAtIso, churnRatio, churnProtectionEnabled, compoundMode, harvestThresholdUsd, cooldownRemaining, hodlGateAllowed, hodlGateReason }: {
+  rebalancesToday: number; rebalances24h: number; lastRebalanceAtIso: string|null; churnRatio: number|null; churnProtectionEnabled: boolean; compoundMode: string; harvestThresholdUsd: number; cooldownRemaining: number; hodlGateAllowed: boolean; hodlGateReason: string;
+}) {
+  const lastRebStr = (() => {
+    if (!lastRebalanceAtIso) return "\u2014";
+    const ms = Date.parse(lastRebalanceAtIso);
+    if (!Number.isFinite(ms)) return "\u2014";
+    const secAgo = Math.round((Date.now() - ms) / 1000);
+    return secAgo < 3600 ? `${Math.round(secAgo/60)}m ago` : `${Math.round(secAgo/3600)}h ago`;
+  })();
+  return (
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+      <Uc6Metric label="Rebalances today" value={String(rebalancesToday)} />
+      <Uc6Metric label="Rebalances 24h" value={String(rebalances24h)} />
+      <Uc6Metric label="Last rebalance" value={lastRebStr} />
+      <Uc6Metric label="Churn ratio" value={churnRatio != null ? `${(churnRatio*100).toFixed(1)}%` : "\u2014"} />
+      <Uc6Metric label="Churn protect" value={churnProtectionEnabled ? "ON" : "OFF"} />
+      <Uc6Metric label="Compound" value={compoundMode === "threshold_harvest" ? `harvest $${harvestThresholdUsd}` : "on_rebalance"} />
+      <Uc6Metric label="Cooldown" value={cooldownRemaining > 0 ? fmtDurationCompact(cooldownRemaining) : "ready"} />
+      <Uc6Metric label="Close gate" value={<span style={{ color: hodlGateAllowed ? "#22c55e" : "#ef4444", fontWeight:700 }} title={hodlGateReason}>{hodlGateAllowed ? "ALLOWED" : "BLOCKED"}</span>} />
+    </div>
+  );
+}
+
+function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; gasUsd?: number; feesCollectedUsd?: number; netUsd?: number }> }) {
+  const typeColor = (t?: string) => {
+    const s = (t||"").toUpperCase();
+    if (s.includes("HARVEST") || s.includes("COLLECT")) return "#22c55e";
+    if (s.includes("REBALANCE")) return "#06b6d4";
+    if (s.includes("ESCAPE") || s.includes("STOP")) return "#ef4444";
+    return "#f59e0b";
+  };
+  const timeAgo = (iso?: string) => {
+    if (!iso) return "\u2014";
+    const ms = Date.parse(iso);
+    if (!Number.isFinite(ms)) return "\u2014";
+    const s = Math.round((Date.now() - ms) / 1000);
+    if (s < 60) return `${s}s ago`;
+    if (s < 3600) return `${Math.round(s/60)}m ago`;
+    return `${Math.round(s/3600)}h ago`;
+  };
+  return (
+    <div style={{ display:"grid", gap:6 }}>
+      {evs.map((ev, i) => (
+        <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12 }}>
+          <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:60 }}>{timeAgo(ev.atIso)}</span>
+          <span style={{ color:typeColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{ev.type || "EVENT"}</span>
+          <span style={{ color:"rgba(232,232,240,0.5)" }}>{ev.reason || ""}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, mu, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps }: {
+  label: string|null; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; mu: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number;
+}) {
+  if (!enabled) {
+    return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"16px 0" }}>Regime engine disabled</div>;
+  }
+  const arcR = 50;
+  const arcLen = Math.PI * arcR;
+  const conf01 = (confidencePct ?? 0) / 100;
+  const arcFilled = conf01 * arcLen;
+  const regimeColor = label === "mean_reverting" ? "#06b6d4" : label === "trending" ? "#f59e0b" : "rgba(255,255,255,0.2)";
+  return (
+    <div style={{ display:"grid", gap:12 }}>
+      <div style={{ display:"flex", justifyContent:"center" }}>
+        <svg viewBox="0 0 120 70" width={140} height={82}>
+          <path d="M10,65 A50,50 0 0,1 110,65" stroke="rgba(255,255,255,0.08)" fill="none" strokeWidth={9} strokeLinecap="round" />
+          <path d="M10,65 A50,50 0 0,1 110,65" stroke={regimeColor} fill="none" strokeWidth={9}
+            strokeDasharray={`${arcFilled} ${arcLen}`} strokeLinecap="round" />
+          <text x={60} y={55} textAnchor="middle" fontSize={18} fontWeight={800} fill="#e8e8f0">
+            {confidencePct != null ? `${Math.round(confidencePct)}%` : "\u2014"}
+          </text>
+        </svg>
+      </div>
+      <div style={{ textAlign:"center" }}>
+        <span style={{ fontSize:13, fontWeight:700, color:regimeColor, textTransform:"uppercase" }}>
+          {label || "unknown"}
+        </span>
+      </div>
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+        <Uc6Metric label="Half-life" value={halfLifeLabel} />
+        <Uc6Metric label="Samples" value={`${sampleCount}/${windowSec}s`} />
+        {theta != null && <Uc6Metric label="\u03b8" value={theta.toFixed(4)} />}
+        {sigma != null && <Uc6Metric label="\u03c3" value={sigma.toFixed(2)} />}
+        {mu != null && <Uc6Metric label="\u03bc" value={`$${mu.toFixed(2)}`} />}
+        <Uc6Metric label="Edge" value={`${baseEdgePct.toFixed(2)}%\u2192${effectiveEdgePct.toFixed(2)}%`} />
+        <Uc6Metric label="Band" value={`\u00b1${baseBandBps}\u2192\u00b1${effectiveBandBps}bps`} />
+      </div>
+    </div>
+  );
+}
+
+function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, cooldownUntilIso, trendDirection, trendMovePct }: {
+  enabled: boolean; eligible: boolean; holdTarget: string|null; reasonIfBlocked: string|null; cooldownUntilIso: string|null; trendDirection: string; trendMovePct: number|null;
+}) {
+  if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
+  const borderColor = eligible ? "#22c55e" : "transparent";
+  return (
+    <div style={{ border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px", display:"grid", gap:8 }}>
+      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "rgba(232,232,240,0.5)" }}>
+        {eligible ? "ESCAPE ELIGIBLE" : "NOT ELIGIBLE"}
+      </div>
+      {eligible && holdTarget && <Uc6Metric label="Hold target" value={holdTarget} />}
+      {!eligible && reasonIfBlocked && <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reasonIfBlocked}</div>}
+      {cooldownUntilIso && <Uc6Metric label="Cooldown until" value={fmtIsoLocal(cooldownUntilIso)} />}
+      {trendDirection !== "flat" && (
+        <Uc6Metric label="Trend" value={`${trendDirection} ${trendMovePct != null ? `${trendMovePct > 0 ? "+" : ""}${trendMovePct.toFixed(2)}%` : ""}`} />
+      )}
+    </div>
+  );
+}
+
+function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distanceFromMuPct }: {
+  enabled: boolean; eligible: boolean; reasonIfBlocked: string|null; eligibleAtIso: string|null; distanceFromMuPct: number|null;
+}) {
+  if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
+  return (
+    <div style={{ display:"grid", gap:8 }}>
+      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "#f59e0b" }}>
+        {eligible ? "READY" : "WAITING"}
+      </div>
+      {!eligible && reasonIfBlocked && <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reasonIfBlocked}</div>}
+      {eligibleAtIso && <Uc6Metric label="Eligible at" value={fmtIsoLocal(eligibleAtIso)} />}
+      {distanceFromMuPct != null && <Uc6Metric label="Distance from \u03bc" value={`${distanceFromMuPct.toFixed(2)}%`} />}
+    </div>
+  );
+}
+
+function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _enabled }: {
+  allowed: boolean; reason: string; alphaLiveUsd: number; requiredUsd: number; enabled: boolean;
+}) {
+  return (
+    <div style={{ display:"grid", gap:8 }}>
+      <div style={{ fontSize:14, fontWeight:800, color: allowed ? "#22c55e" : "#ef4444" }} title={reason}>
+        {allowed ? "ALLOWED" : "BLOCKED"}
+      </div>
+      <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reason}</div>
+      {requiredUsd > 0 && (
+        <div style={{ display:"grid", gap:4 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
+            <span>Alpha / Required</span>
+            <span style={{ fontFamily:"monospace" }}>{fmtUsd(alphaLiveUsd)} / {fmtUsd(requiredUsd)}</span>
+          </div>
+          <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, (alphaLiveUsd/requiredUsd)*100))}%`, borderRadius:3, background: alphaLiveUsd >= requiredUsd ? "#22c55e" : "#f59e0b" }} />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PnlWindows({ status: st }: { status: Uc6Status | null }) {
+  const n2 = (v: unknown) => { const x = Number(v); return Number.isFinite(x) ? x : 0; };
+  const rows = [
+    ["Fees", fmtUsd(n2(st?.fees?.collectedTodayUsd)), fmtUsd(n2(st?.fees?.collected7dUsd)), fmtUsd(n2(st?.fees?.collected30dUsd)), fmtUsd(n2(st?.fees?.collectedTotalUsd))],
+    ["Costs", fmtUsd(n2(st?.costs?.totalTodayUsd)), fmtUsd(n2(st?.costs?.total7dUsd)), fmtUsd(n2(st?.costs?.total30dUsd)), fmtUsd(n2(st?.costs?.totalTotalUsd))],
+    ["Net", fmtSignedUsd(n2(st?.pnl?.netTodayUsd)), fmtSignedUsd(n2(st?.pnl?.net7dUsd)), fmtSignedUsd(n2(st?.pnl?.net30dUsd)), fmtSignedUsd(n2(st?.pnl?.netTotalUsd))],
+    ["APR", fmtPct(n2(st?.pnl?.aprToday)), fmtPct(n2(st?.pnl?.apr7d)), fmtPct(n2(st?.pnl?.apr30d)), "\u2014"],
+  ];
+  return (
+    <DarkTable headers={["\u00a0", "Today", "7D", "30D", "Total"]} rows={rows} />
+  );
+}
+
+function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolComparisonRow|null; top5: PoolComparisonRow[]; computedAtIso: string|null }) {
+  if (!current && top5.length === 0) {
+    return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13 }}>No pool comparison data.</div>;
+  }
+  const rowStyle = (isCurrent: boolean): CSSProperties => ({
+    display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, padding:"8px 0", borderBottom:"1px solid rgba(255,255,255,0.05)",
+    ...(isCurrent ? { borderLeft:"2px solid #06b6d4", paddingLeft:8 } : {})
+  });
+  return (
+    <div style={{ display:"grid", gap:4 }}>
+      {computedAtIso && <div style={{ fontSize:11, color:"rgba(232,232,240,0.3)", marginBottom:8 }}>Updated: {fmtIsoLocal(computedAtIso)}</div>}
+      {current && (
+        <div style={rowStyle(true)}>
+          <div>
+            <div style={{ fontSize:12, fontWeight:700, color:"#e8e8f0" }}>{current.dex?.name || "\u2014"} {pairLabel(current)}</div>
+            <div style={{ fontSize:11, color:"rgba(232,232,240,0.45)" }}>{poolComparisonSelectorLabel(current)} \u00b7 CURRENT</div>
+          </div>
+          <div style={{ textAlign:"right", fontSize:12 }}>
+            <div style={{ color: (current.economics?.expectedNetDayUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444", fontFamily:"monospace" }}>{fmtSignedUsd(current.economics?.expectedNetDayUsd)}/d</div>
+          </div>
+          <div />
+        </div>
+      )}
+      {top5.slice(0,3).map((row, i) => {
+        const href = poolLink(row);
+        return (
+          <div key={i} style={rowStyle(false)}>
+            <div>
+              <div style={{ fontSize:12, fontWeight:600, color:"rgba(232,232,240,0.8)" }}>
+                {href ? <a href={href} target="_blank" rel="noreferrer noopener" style={{ color:"rgba(6,182,212,0.8)", textDecoration:"none" }}>{row.dex?.name} {pairLabel(row)}</a> : `${row.dex?.name} ${pairLabel(row)}`}
+              </div>
+              <div style={{ fontSize:11, color:"rgba(232,232,240,0.4)" }}>{poolComparisonSelectorLabel(row)}</div>
+            </div>
+            <div style={{ textAlign:"right", fontSize:12 }}>
+              <div style={{ color:(row.economics?.expectedNetDayUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444", fontFamily:"monospace" }}>{fmtSignedUsd(row.economics?.expectedNetDayUsd)}/d</div>
+            </div>
+            <div>
+              {row.compareToCurrent?.rating && (
+                <span style={{ fontSize:11, padding:"2px 6px", borderRadius:10, background: row.compareToCurrent.rating==="More" ? "rgba(34,197,94,0.15)" : row.compareToCurrent.rating==="Less" ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.05)", color: row.compareToCurrent.rating==="More" ? "#22c55e" : row.compareToCurrent.rating==="Less" ? "#ef4444" : "rgba(232,232,240,0.5)" }}>
+                  {row.compareToCurrent.rating}
+                </span>
+              )}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]> }) {
+  const totals = taxSummary.totals;
+  return (
+    <div style={{ display:"grid", gap:8, marginTop:12 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8 }}>
+        <Uc6Metric label="Fees collected" value={fmtUsd(totals?.feesCollectedUsd)} />
+        <Uc6Metric label="Total costs" value={fmtUsd(totals?.totalCostsUsd)} />
+        <Uc6Metric label="Net fees" value={fmtSignedUsd(totals?.feesNetUsd)} />
+        <Uc6Metric label="Alpha vs HODL" value={fmtSignedUsd(totals?.alphaVsHodlUsd)} />
+        <Uc6Metric label="Cap G/L" value={fmtSignedUsd(totals?.capitalGainLossUsd)} />
+        <Uc6Metric label="Net profit" value={fmtSignedUsd(totals?.realizedNetProfitUsd)} />
+        <Uc6Metric label="Closed positions" value={String(totals?.closedPositions ?? 0)} />
+      </div>
+      {(taxSummary.years || []).map((yr) => (
+        <div key={yr.year} style={{ display:"grid", gridTemplateColumns:"60px repeat(5, 1fr)", gap:6, fontSize:11, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+          <span style={{ color:"rgba(232,232,240,0.6)", fontWeight:600 }}>{yr.year}</span>
+          <span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(yr.feesCollectedUsd)}</span>
+          <span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(yr.totalCostsUsd)}</span>
+          <span style={{ fontFamily:"monospace", color: (yr.feesNetUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(yr.feesNetUsd)}</span>
+          <span style={{ fontFamily:"monospace", color: (yr.alphaVsHodlUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(yr.alphaVsHodlUsd)}</span>
+          <span style={{ fontFamily:"monospace", color:"rgba(232,232,240,0.5)" }}>{fmtSignedUsd(yr.capitalGainLossUsd)}</span>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -2873,671 +2681,100 @@ function PositionRecordDrawer({
   const closeTxs = tx.closeTxHashes || [];
   const allTxs = tx.allTxHashes || [];
   return (
-    <div style={styles.drawerBackdrop} onClick={onClose}>
-      <aside style={styles.drawer} onClick={(e) => e.stopPropagation()}>
-        <div style={styles.drawerHeader}>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", justifyContent:"flex-end", zIndex:1000, backdropFilter:"blur(4px)" }} onClick={onClose}>
+      <aside style={{ width:"min(420px, 100vw)", height:"100vh", overflowY:"auto", background:"#0e0f1a", borderLeft:"1px solid rgba(255,255,255,0.1)", boxShadow:"-16px 0 48px rgba(0,0,0,0.6)", padding:20, display:"grid", gap:0, alignContent:"start" }} onClick={(e) => e.stopPropagation()}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16 }}>
           <div>
-            <div style={{ ...styles.statLabel, marginBottom: 2 }}>Position Lifecycle Record</div>
-            <div style={{ ...styles.statValue, fontSize: 16 }}>{record.id}</div>
+            <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Position Lifecycle Record</div>
+            <div style={{ fontFamily:"monospace", fontSize:15, fontWeight:700, color:"#e8e8f0" }}>{record.id}</div>
           </div>
-          <button style={styles.buttonSecondary} onClick={onClose}>
-            Close
-          </button>
+          <button style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" }} onClick={onClose}>Close</button>
         </div>
 
-        <div style={styles.drawerSection}>
-          <div style={styles.drawerSectionTitle}>Overview</div>
-          <div style={styles.metaGrid}>
-            <Metric label="Pair" value={`${record.pair?.base || "WETH"}/${record.pair?.quote || "USDC"}`} />
-            <Metric label="Venue" value={record.venue === "uniswapv3" ? "Uniswap v3" : "Slipstream"} />
-            <Metric
-              label="Band"
-              value={
-                <span title={`${record.band?.tickLower ?? "—"} .. ${record.band?.tickUpper ?? "—"}`}>
-                  {formatRecordBandLabel(record)}
-                </span>
-              }
-            />
-            <Metric label="Status" value={record.status || "—"} />
-            <Metric label="Entry Snapshot" value={fmtIsoLocal(record.entry?.entrySnapshotAtIso || record.entry?.openedAtIso)} />
-            <Metric label="Exit" value={fmtIsoLocal(record.exit?.closedAtIso)} />
-            <Metric label="Duration" value={record.duration?.human || fmtDurationCompact(record.duration?.secondsInPosition)} />
-            <Metric label="Entry Value" value={fmtUsd(record.entry?.entryValueUsd)} />
-            <Metric label="Exit Value" value={fmtUsd(record.exit?.exitValueUsd)} />
-            <Metric label="Avg Deployed" value={fmtUsd(perf.avgDeployedUsd)} />
-          </div>
-        </div>
+        <DrawerSection title="Overview">
+          <DRow label="Pair" value={`${record.pair?.base || "WETH"}/${record.pair?.quote || "USDC"}`} />
+          <DRow label="Venue" value={record.venue === "uniswapv3" ? "Uniswap v3" : "Slipstream"} />
+          <DRow label="Band" value={<span title={`${record.band?.tickLower ?? "\u2014"} .. ${record.band?.tickUpper ?? "\u2014"}`}>{formatRecordBandLabel(record)}</span>} />
+          <DRow label="Status" value={record.status || "\u2014"} />
+          <DRow label="Entry Snapshot" value={fmtIsoLocal(record.entry?.entrySnapshotAtIso || record.entry?.openedAtIso)} />
+          <DRow label="Exit" value={fmtIsoLocal(record.exit?.closedAtIso)} />
+          <DRow label="Duration" value={record.duration?.human || fmtDurationCompact(record.duration?.secondsInPosition)} />
+          <DRow label="Entry Value" value={fmtUsd(record.entry?.entryValueUsd)} />
+          <DRow label="Exit Value" value={fmtUsd(record.exit?.exitValueUsd)} />
+          <DRow label="Avg Deployed" value={fmtUsd(perf.avgDeployedUsd)} />
+        </DrawerSection>
 
-        <div style={styles.drawerSection}>
-          <div style={styles.drawerSectionTitle}>Performance</div>
-          <div style={styles.metaGrid}>
-            <Metric label="Fees Collected" value={fmtUsd(perf.feesCollectedUsd)} />
-            <Metric label="Rewards" value={fmtUsd(perf.rewardsUsd)} />
-            <Metric label="Gas" value={fmtUsd(perf.gasUsd)} />
-            <Metric label="Swap Cost" value={fmtUsd(perf.swapCostUsd)} />
-            <Metric label="Mint/Burn (subset)" value={fmtUsd(perf.mintBurnUsd)} />
-            <Metric label="Total Costs" value={fmtUsd(perf.totalCostsUsd)} />
-            <Metric label="Fees Net" value={fmtSignedUsd(perf.feesNetUsd)} />
-            <Metric label="Capital Gain/Loss" value={fmtSignedUsd(perf.capitalGainLossUsd)} />
-            <Metric label="Divergence vs HODL" value={fmtSignedUsd(perf.divergenceVsHodlUsd ?? perf.impermanentLossUsd)} />
-            <Metric label="LP P/L (absolute)" value={fmtSignedUsd(perf.netProfitUsd)} />
-            <Metric label="Alpha vs HODL" value={fmtSignedUsd(perf.alphaVsHodlUsd)} />
-            <Metric label="Required Fees to Beat HODL" value={fmtUsd(perf.requiredFeesToBeatHodlUsd)} />
-            <Metric label="Cost / Fee" value={fmtRatioPct(perf.costToFeeRatio)} />
-            <Metric label="Fee APR" value={fmtPct(perf.feeApr ?? 0)} />
-            <Metric label="Alpha APR vs HODL" value={fmtPct(perf.alphaApr ?? 0)} />
-            <Metric label="Absolute APR" value={fmtPct(perf.absoluteApr ?? perf.apr ?? 0)} />
-          </div>
-        </div>
+        <DrawerSection title="Performance">
+          <DRow label="Fees Collected" value={fmtUsd(perf.feesCollectedUsd)} />
+          <DRow label="Rewards" value={fmtUsd(perf.rewardsUsd)} />
+          <DRow label="Gas" value={fmtUsd(perf.gasUsd)} />
+          <DRow label="Swap Cost" value={fmtUsd(perf.swapCostUsd)} />
+          <DRow label="Mint/Burn" value={fmtUsd(perf.mintBurnUsd)} />
+          <DRow label="Total Costs" value={fmtUsd(perf.totalCostsUsd)} />
+          <DRow label="Fees Net" value={fmtSignedUsd(perf.feesNetUsd)} />
+          <DRow label="Capital Gain/Loss" value={fmtSignedUsd(perf.capitalGainLossUsd)} />
+          <DRow label="Divergence vs HODL" value={fmtSignedUsd(perf.divergenceVsHodlUsd ?? perf.impermanentLossUsd)} />
+          <DRow label="LP P/L (absolute)" value={fmtSignedUsd(perf.netProfitUsd)} />
+          <DRow label="Alpha vs HODL" value={fmtSignedUsd(perf.alphaVsHodlUsd)} />
+          <DRow label="Required Fees to Beat HODL" value={fmtUsd(perf.requiredFeesToBeatHodlUsd)} />
+          <DRow label="Cost / Fee" value={fmtRatioPct(perf.costToFeeRatio)} />
+          <DRow label="Fee APR" value={fmtPct(perf.feeApr ?? 0)} />
+          <DRow label="Alpha APR vs HODL" value={fmtPct(perf.alphaApr ?? 0)} />
+          <DRow label="Absolute APR" value={fmtPct(perf.absoluteApr ?? perf.apr ?? 0)} />
+        </DrawerSection>
 
-        <div style={styles.drawerSection}>
-          <div style={styles.drawerSectionTitle}>Activity</div>
-          <div style={styles.metaGrid}>
-            <Metric label="Rebalances" value={String(record.activity?.rebalances ?? 0)} />
-            <Metric label="Harvests" value={String(record.activity?.harvests ?? 0)} />
-            <Metric label="Swaps" value={String(record.activity?.swaps ?? 0)} />
-            <Metric label="Tx Count" value={String(record.activity?.txCount ?? 0)} />
-            <Metric label="Close Gate Blocks" value={String(record.activity?.closeGateBlockedCount ?? 0)} />
-            <Metric label="Close Gate Override" value={record.activity?.closeGateOverrideReason || "—"} />
-          </div>
-        </div>
+        <DrawerSection title="Activity">
+          <DRow label="Rebalances" value={String(record.activity?.rebalances ?? 0)} />
+          <DRow label="Harvests" value={String(record.activity?.harvests ?? 0)} />
+          <DRow label="Swaps" value={String(record.activity?.swaps ?? 0)} />
+          <DRow label="Tx Count" value={String(record.activity?.txCount ?? 0)} />
+          <DRow label="Close Gate Blocks" value={String(record.activity?.closeGateBlockedCount ?? 0)} />
+          <DRow label="Close Gate Override" value={record.activity?.closeGateOverrideReason || "\u2014"} />
+        </DrawerSection>
 
-        <div style={styles.drawerSection}>
-          <div style={styles.drawerSectionTitle}>Transactions</div>
-          <div style={styles.note}>Open: {openTxs.length} | Close: {closeTxs.length} | All: {allTxs.length}</div>
-          <div style={styles.drawerTxList}>
+        <DrawerSection title="Transactions">
+          <div style={{ fontSize:12, color:"rgba(232,232,240,0.4)", marginBottom:8 }}>
+            Open: {openTxs.length} | Close: {closeTxs.length} | All: {allTxs.length}
+          </div>
+          <div style={{ maxHeight:200, overflowY:"auto" }}>
             {allTxs.length === 0 ? (
-              <div style={styles.note}>No tx hashes recorded.</div>
+              <div style={{ fontSize:12, color:"rgba(232,232,240,0.3)" }}>No tx hashes recorded.</div>
             ) : (
               allTxs.map((hash) => (
-                <div key={hash} style={styles.drawerTxRow}>
-                  <code style={styles.drawerMono}>{hash}</code>
+                <div key={hash} style={{ padding:"5px 0", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
+                  <code style={{ fontSize:11, color:"#06b6d4", wordBreak:"break-all" }}>{hash}</code>
                 </div>
               ))
             )}
           </div>
-        </div>
+        </DrawerSection>
       </aside>
     </div>
   );
 }
 
-function Card({
-  title,
-  children,
-  fullWidth,
-  wideViewport,
-}: {
-  title: string;
-  children: ReactNode;
-  fullWidth?: boolean;
-  wideViewport?: boolean;
-}) {
+function DrawerSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <section
-      style={{
-        ...styles.panel,
-        ...(fullWidth ? styles.fullWidth : undefined),
-        ...(wideViewport ? styles.wideViewportPanel : undefined),
-      }}
-    >
-      <h2 style={styles.h2}>{title}</h2>
+    <div style={{ border:"1px solid rgba(255,255,255,0.07)", borderRadius:10, padding:14, background:"rgba(255,255,255,0.02)", marginBottom:12 }}>
+      <div style={{ fontSize:11, fontWeight:700, color:"#06b6d4", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>{title}</div>
       {children}
-    </section>
-  );
-}
-
-function Metric({ label, value, mono }: { label: string; value: ReactNode; mono?: boolean }) {
-  return (
-    <div style={styles.statCell}>
-      <div style={styles.statLabel}>{label}</div>
-      <div style={{ ...styles.statValue, fontFamily: mono ? "monospace" : "inherit" }}>{value}</div>
     </div>
   );
 }
 
-function CompactMetricList({
-  items,
-  dense,
-}: {
-  items: Array<{ label: string; value: ReactNode; mono?: boolean }>;
-  dense?: boolean;
-}) {
+function DRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ ...styles.compactList, ...(dense ? styles.compactListDense : undefined) }}>
-      {items.map((item) => (
-        <div key={item.label} style={styles.compactRow}>
-          <div style={styles.compactLabel}>{item.label}</div>
-          <div style={{ ...styles.compactValue, fontFamily: item.mono ? "monospace" : "inherit" }}>{item.value}</div>
-        </div>
-      ))}
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, padding:"5px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", alignItems:"start" }}>
+      <span style={{ fontSize:11, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:"0.04em" }}>{label}</span>
+      <span style={{ fontSize:12, color:"#e8e8f0", fontWeight:600, wordBreak:"break-word", textAlign:"right" }}>{value}</span>
     </div>
   );
 }
 
-function Pill({ label, tone }: { label: string; tone: "good" | "warn" | "bad" | "muted" }) {
-  const toneStyle =
-    tone === "good"
-      ? styles.pillGood
-      : tone === "warn"
-        ? styles.pillWarn
-        : tone === "bad"
-          ? styles.pillBad
-          : styles.pillMuted;
-  return <span style={{ ...styles.pill, ...toneStyle }}>{label}</span>;
-}
-
-function NumberField({
-  label,
-  value,
-  onChange,
-  step = "1",
-}: {
-  label: string;
-  value: number;
-  onChange: (next: string) => void;
-  step?: string;
-}) {
-  return (
-    <label style={styles.field}>
-      <span>{label}</span>
-      <input type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-  options,
-  disabled,
-}: {
-  label: string;
-  value: string;
-  onChange: (next: string) => void;
-  options: string[];
-  disabled?: boolean;
-}) {
-  return (
-    <label style={styles.field}>
-      <span>{label}</span>
-      <select value={value} disabled={disabled} onChange={(e) => onChange(e.target.value)}>
-        {options.map((opt) => (
-          <option key={opt} value={opt}>
-            {opt}
-          </option>
-        ))}
-      </select>
-    </label>
-  );
-}
-
-function SimpleTable({ headers, rows }: { headers: string[]; rows: Array<Array<ReactNode>> }) {
-  return (
-    <div style={styles.tableWrap}>
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            {headers.map((h) => (
-              <th key={h} style={styles.th}>
-                {h}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {rows.length === 0 ? (
-            <tr>
-              <td style={styles.td} colSpan={headers.length}>
-                No data
-              </td>
-            </tr>
-          ) : (
-            rows.map((r, idx) => (
-              <tr key={idx}>
-                {r.map((cell, cidx) => (
-                  <td key={cidx} style={styles.td}>
-                    {cell}
-                  </td>
-                ))}
-              </tr>
-            ))
-          )}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
+// keep styles alias referenced by poolComparisonCurrentRow/poolComparisonTopRows link elements
 const styles: Record<string, CSSProperties> = {
-  main: {
-    maxWidth: 1360,
-    margin: "0 auto",
-    padding: "24px 16px 64px",
-    display: "grid",
-    gap: 16,
-  },
-  headerCard: {
-    border: "1px solid #d7dce4",
-    borderRadius: 14,
-    padding: 18,
-    background: "#ffffff",
-  },
-  panel: {
-    border: "1px solid #d7dce4",
-    borderRadius: 14,
-    padding: 18,
-    background: "#ffffff",
-  },
-  fullWidth: {
-    gridColumn: "1 / -1",
-  },
-  wideViewportPanel: {
-    width: "calc(100vw - 32px)",
-    maxWidth: "none",
-    marginLeft: "calc(50% - 50vw + 16px)",
-  },
-  cardGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(420px, 1fr))",
-    gap: 16,
-  },
-  headerRow: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "flex-start",
-    gap: 12,
-    flexWrap: "wrap",
-  },
-  h2: {
-    margin: "0 0 12px",
-    fontSize: 20,
-  },
-  subtle: {
-    margin: "8px 0 0",
-    color: "#4a5a70",
-    fontSize: 14,
-  },
-  link: {
-    color: "#0b57d0",
-    textDecoration: "underline",
-  },
-  row: {
-    marginTop: 12,
-    display: "flex",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  button: {
-    border: "1px solid #132238",
-    background: "#132238",
-    color: "#fff",
-    borderRadius: 8,
-    padding: "8px 14px",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  buttonSecondary: {
-    border: "1px solid #9db3cf",
-    background: "#f8fbff",
-    color: "#10253f",
-    borderRadius: 8,
-    padding: "8px 14px",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  buttonDanger: {
-    border: "1px solid #8a1010",
-    background: "#b91c1c",
-    color: "#fff",
-    borderRadius: 8,
-    padding: "8px 14px",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  buttonSuccess: {
-    border: "1px solid #0f5132",
-    background: "#198754",
-    color: "#fff",
-    borderRadius: 8,
-    padding: "8px 14px",
-    cursor: "pointer",
-    fontWeight: 700,
-  },
-  alert: {
-    marginTop: 12,
-    border: "1px solid",
-    borderRadius: 8,
-    padding: "8px 10px",
-    color: "#203047",
-    fontSize: 14,
-  },
-  alertOk: {
-    background: "#e9f9ef",
-    borderColor: "#a1ddb4",
-  },
-  alertErr: {
-    background: "#fff1f1",
-    borderColor: "#f3b8b8",
-  },
-  metaGrid: {
-    marginTop: 10,
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-    gap: 10,
-  },
-  statCell: {
-    border: "1px solid #e5ebf4",
-    borderRadius: 10,
-    background: "#fbfdff",
-    padding: "10px 12px",
-  },
-  statLabel: {
-    fontSize: 12,
-    color: "#5b6e8a",
-    marginBottom: 4,
-  },
-  statValue: {
-    fontSize: 14,
-    fontWeight: 700,
-    color: "#10253f",
-    wordBreak: "break-word",
-  },
-  note: {
-    marginTop: 10,
-    fontSize: 13,
-    color: "#42526a",
-  },
-  overviewHero: {
-    display: "grid",
-    gridTemplateColumns: "minmax(280px, 1.1fr) minmax(380px, 1fr)",
-    gap: 16,
-    alignItems: "start",
-    padding: 16,
-    border: "1px solid #dde6f2",
-    borderRadius: 12,
-    background: "linear-gradient(180deg, #f7fbff 0%, #eef5fb 100%)",
-  },
-  overviewEyebrow: {
-    fontSize: 12,
-    fontWeight: 700,
-    letterSpacing: "0.08em",
-    textTransform: "uppercase",
-    color: "#5e7392",
-    marginBottom: 8,
-  },
-  overviewHeadline: {
-    fontSize: 24,
-    lineHeight: 1.2,
-    fontWeight: 800,
-    color: "#10253f",
-  },
-  overviewSubhead: {
-    marginTop: 10,
-    fontSize: 14,
-    lineHeight: 1.5,
-    color: "#435973",
-    maxWidth: 720,
-  },
-  overviewSectionGrid: {
-    marginTop: 16,
-    display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-    gap: 12,
-  },
-  overviewBlock: {
-    border: "1px solid #e1e8f2",
-    borderRadius: 12,
-    background: "#fbfdff",
-    padding: 12,
-  },
-  overviewBlockHeader: {
-    marginBottom: 8,
-  },
-  overviewBlockTitle: {
-    fontSize: 15,
-    fontWeight: 800,
-    color: "#14314d",
-  },
-  overviewBlockSubtle: {
-    marginTop: 4,
-    fontSize: 12,
-    color: "#60748f",
-    lineHeight: 1.45,
-  },
-  lpHero: {
-    display: "grid",
-    gridTemplateColumns: "minmax(320px, 1.15fr) minmax(340px, 0.95fr)",
-    gap: 16,
-    alignItems: "start",
-    padding: 16,
-    border: "1px solid #dde6f2",
-    borderRadius: 12,
-    background: "linear-gradient(180deg, #fcfeff 0%, #f1f7fb 100%)",
-  },
-  lpHeadline: {
-    fontSize: 24,
-    lineHeight: 1.2,
-    fontWeight: 800,
-    color: "#10253f",
-  },
-  lpSubhead: {
-    marginTop: 10,
-    fontSize: 14,
-    lineHeight: 1.5,
-    color: "#435973",
-    maxWidth: 760,
-  },
-  lpSectionGrid: {
-    marginTop: 16,
-    display: "grid",
-    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
-    gap: 12,
-  },
-  compactList: {
-    display: "grid",
-    gap: 0,
-    marginTop: 2,
-  },
-  compactListDense: {
-    marginTop: 0,
-  },
-  compactRow: {
-    display: "grid",
-    gridTemplateColumns: "minmax(0, 0.95fr) minmax(0, 1.05fr)",
-    gap: 12,
-    alignItems: "start",
-    padding: "7px 0",
-    borderBottom: "1px solid #ebf0f6",
-  },
-  compactLabel: {
-    fontSize: 11,
-    fontWeight: 700,
-    letterSpacing: "0.02em",
-    textTransform: "uppercase",
-    color: "#61748d",
-  },
-  compactValue: {
-    fontSize: 13,
-    fontWeight: 600,
-    color: "#10253f",
-    textAlign: "right",
-    wordBreak: "break-word",
-  },
-  recordActiveWrap: {
-    border: "1px solid #e5ebf4",
-    borderRadius: 10,
-    background: "#fbfdff",
-    padding: 12,
-  },
-  recordActiveTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: "#243850",
-    marginBottom: 4,
-  },
-  pill: {
-    display: "inline-flex",
-    alignItems: "center",
-    borderRadius: 999,
-    padding: "2px 9px",
-    fontSize: 12,
-    fontWeight: 700,
-    border: "1px solid transparent",
-  },
-  pillGood: {
-    background: "#e8f8ec",
-    color: "#145b2f",
-    borderColor: "#9dd8ae",
-  },
-  pillWarn: {
-    background: "#fff7ea",
-    color: "#8a4b08",
-    borderColor: "#f2c283",
-  },
-  pillBad: {
-    background: "#ffecec",
-    color: "#8d1111",
-    borderColor: "#f1b1b1",
-  },
-  pillMuted: {
-    background: "#eef2f7",
-    color: "#50627c",
-    borderColor: "#cfd8e5",
-  },
-  formGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-    gap: 10,
-  },
-  field: {
-    display: "grid",
-    gap: 6,
-    fontSize: 13,
-    color: "#2a3c57",
-  },
-  tableWrap: {
-    overflowX: "auto",
-    border: "1px solid #e5ebf4",
-    borderRadius: 10,
-  },
-  profitTablesGrid: {
-    display: "grid",
-    gridTemplateColumns: "repeat(auto-fit, minmax(520px, 1fr))",
-    gap: 12,
-    alignItems: "start",
-  },
-  profitTableCol: {
-    minWidth: 0,
-  },
-  table: {
-    width: "100%",
-    borderCollapse: "collapse",
-    fontSize: 13,
-  },
-  tableActionButton: {
-    border: "1px solid #9db3cf",
-    background: "#f8fbff",
-    color: "#10253f",
-    borderRadius: 7,
-    padding: "4px 9px",
-    cursor: "pointer",
-    fontWeight: 700,
-    fontSize: 12,
-  },
-  th: {
-    textAlign: "left",
-    padding: "8px 10px",
-    background: "#f3f7fc",
-    borderBottom: "1px solid #e5ebf4",
-    whiteSpace: "nowrap",
-  },
-  td: {
-    padding: "8px 10px",
-    borderBottom: "1px solid #eef2f7",
-    whiteSpace: "nowrap",
-    color: "#1f2f45",
-  },
-  paginationRow: {
-    marginTop: 10,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    flexWrap: "wrap",
-  },
-  paginationLabel: {
-    color: "#42526a",
-    fontSize: 13,
-    fontWeight: 600,
-  },
-  drawerBackdrop: {
-    position: "fixed",
-    inset: 0,
-    background: "rgba(15, 23, 42, 0.35)",
-    display: "flex",
-    justifyContent: "flex-end",
-    zIndex: 1000,
-  },
-  drawer: {
-    width: "min(760px, 100vw)",
-    height: "100vh",
-    overflowY: "auto",
-    background: "#ffffff",
-    borderLeft: "1px solid #d7dce4",
-    boxShadow: "-12px 0 36px rgba(15, 23, 42, 0.12)",
-    padding: 16,
-    display: "grid",
-    gap: 12,
-  },
-  drawerHeader: {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: 12,
-  },
-  drawerSection: {
-    border: "1px solid #e5ebf4",
-    borderRadius: 10,
-    padding: 12,
-    background: "#fbfdff",
-  },
-  drawerSectionTitle: {
-    fontSize: 13,
-    fontWeight: 700,
-    color: "#243850",
-    marginBottom: 8,
-  },
-  drawerTxList: {
-    maxHeight: 240,
-    overflowY: "auto",
-    border: "1px solid #e5ebf4",
-    borderRadius: 8,
-    background: "#fff",
-    marginTop: 8,
-  },
-  drawerTxRow: {
-    padding: "8px 10px",
-    borderBottom: "1px solid #eef2f7",
-  },
-  drawerMono: {
-    fontSize: 12,
-    color: "#243850",
-    wordBreak: "break-all",
-  },
-  summary: {
-    cursor: "pointer",
-    fontWeight: 600,
-    color: "#21354f",
-  },
-  pre: {
-    marginTop: 10,
-    border: "1px solid #e5ebf4",
-    background: "#f7f9fc",
-    borderRadius: 10,
-    padding: 10,
-    fontSize: 12,
-    overflowX: "auto",
-  },
+  link: { color: "#06b6d4", textDecoration: "underline" },
 };
+
+// suppress unused-variable warning (styles IS used in poolComparisonCurrentRow computed above line 1695)
+void styles;
