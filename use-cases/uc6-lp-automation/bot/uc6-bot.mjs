@@ -8892,6 +8892,8 @@ class Uc6Bot {
         meanRevertConfirmSec: Number(trendCtx?.meanRevertConfirmSec || 0),
         distanceFromMuPct:
           Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
+        muPriceUsdcPerWeth:
+          Number.isFinite(Number(trendCtx?.muPrice)) ? Number(trendCtx.muPrice) : null,
       },
       trendEscape: {
         enabled: Boolean(trendEscapeEval.enabled),
