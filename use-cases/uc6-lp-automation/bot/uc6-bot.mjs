@@ -3170,18 +3170,22 @@ class Uc6Bot {
       Number(perf.feesCollectedUsd || 0) +
       Number(perf.rewardsUsd || 0) -
       Number(perf.totalCostsUsd || 0);
-    const entryWeth = Number(rec.entry?.entryTokens?.weth || 0);
-    const entryUsdc = Number(rec.entry?.entryTokens?.usdc || 0);
+    // Use swap-adjusted baseline when available (consistent with live HODL gate
+    // and closeLifecycleRecordFromPrincipalOut). Fall back to original entry tokens.
+    const hasAdjustedBaseline = Boolean(rec._internal?.entryCaptured) &&
+      (Math.abs(Number(rec._internal?.baselineWeth || 0)) > 0 || Math.abs(Number(rec._internal?.baselineUsdc || 0)) > 0);
+    const baselineWeth = hasAdjustedBaseline ? Number(rec._internal.baselineWeth) : Number(rec.entry?.entryTokens?.weth || 0);
+    const baselineUsdc = hasAdjustedBaseline ? Number(rec._internal.baselineUsdc) : Number(rec.entry?.entryTokens?.usdc || 0);
     const exitWeth = Number(rec.exit?.exitTokens?.weth || 0);
     const exitUsdc = Number(rec.exit?.exitTokens?.usdc || 0);
     const exitSpot = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
     if (
       rec.status === "CLOSED" &&
       exitSpot > 0 &&
-      (Math.abs(entryWeth) > 0 || Math.abs(entryUsdc) > 0) &&
+      (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0) &&
       (Math.abs(exitWeth) > 0 || Math.abs(exitUsdc) > 0)
     ) {
-      const hodlExitUsd = entryUsdc + entryWeth * exitSpot;
+      const hodlExitUsd = baselineUsdc + baselineWeth * exitSpot;
       const lpExitPrincipalUsd = exitUsdc + exitWeth * exitSpot;
       perf.impermanentLossUsd = lpExitPrincipalUsd - hodlExitUsd;
     } else {
