@@ -4814,15 +4814,21 @@ class Uc6Bot {
       else if (trendMovePct <= -trendCfg.minTrendMovePct) direction = "down";
     }
     const regimeOk = Boolean(latestRegime?.ok);
+    const regimeLabel = String(latestRegime?.label || "unknown");
+    const hasUsableMu =
+      regimeOk &&
+      regimeLabel === "mean_reverting" &&
+      Number.isFinite(Number(latestRegime?.mu)) &&
+      Number.isFinite(Number(latestRegime?.theta)) &&
+      Number(latestRegime.theta) > 0;
     const muLogPrice =
-      regimeOk && Number.isFinite(Number(latestRegime?.mu))
+      hasUsableMu
         ? Number(latestRegime.mu)
         : null;
     const distanceFromMuPct =
       Number.isFinite(logPriceNow) && Number.isFinite(muLogPrice)
         ? Math.abs(Math.exp(logPriceNow - muLogPrice) - 1)
         : null;
-    const regimeLabel = String(latestRegime?.label || "unknown");
     const regimeConfidence = clamp(Number(latestRegime?.confidence || 0), 0, 1);
     const trendingCondition =
       trendCfg.enabled &&
@@ -5015,6 +5021,12 @@ class Uc6Bot {
         );
       }
       const estOk = Boolean(est?.ok);
+      const hasUsableMu =
+        estOk &&
+        est?.label === "mean_reverting" &&
+        Number.isFinite(Number(est?.mu)) &&
+        Number.isFinite(Number(est?.theta)) &&
+        Number(est?.theta) > 0;
       latest.regime = {
         enabled: true,
         ok: estOk,
@@ -5022,7 +5034,7 @@ class Uc6Bot {
         theta: estOk && Number.isFinite(Number(est?.theta)) ? Number(est.theta) : null,
         halfLifeSec: estOk && Number.isFinite(Number(est?.halfLifeSec)) ? Number(est.halfLifeSec) : null,
         sigma: estOk && Number.isFinite(Number(est?.sigma)) ? Number(est.sigma) : null,
-        mu: estOk && Number.isFinite(Number(est?.mu)) ? Number(est.mu) : null,
+        mu: hasUsableMu ? Number(est.mu) : null,
         confidence: Number.isFinite(Number(est?.confidence)) ? Number(est.confidence) : 0,
         updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
         sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
