@@ -922,18 +922,22 @@ class DailyDbManager:
     count = 0
     now_ms = int(time.time() * 1000)
     for conn in self._connections_for_range(from_ms, now_ms):
-      cur = conn.execute(
-        """
-        SELECT COUNT(*) FROM trades
-        WHERE ts_ms >= ?
-          AND event_type IN ('EXIT', 'FLATTEN')
-        """,
-        (int(from_ms),),
-      )
-      row = cur.fetchone()
-      if row and row[0]:
+      try:
+        cur = conn.execute(
+          """
+          SELECT COUNT(*) FROM trades
+          WHERE ts_ms >= ?
+            AND event_type IN ('EXIT', 'FLATTEN')
+          """,
+          (int(from_ms),),
+        )
+        row = cur.fetchone()
+      except Exception:
+        continue
+      raw_count = _row_get(row, 0)
+      if raw_count:
         try:
-          count += int(row[0])
+          count += int(raw_count)
         except Exception:
           pass
     return count
@@ -1081,8 +1085,9 @@ class DailyDbManager:
         row = conn.execute(
           "SELECT COUNT(*) FROM trades WHERE event_type IN ('EXIT', 'FLATTEN')"
         ).fetchone()
-        if row and row[0]:
-          count += int(row[0])
+        raw_count = _row_get(row, 0)
+        if raw_count:
+          count += int(raw_count)
       except Exception:
         pass
     return count

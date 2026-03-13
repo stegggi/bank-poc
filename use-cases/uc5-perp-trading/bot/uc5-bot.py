@@ -551,8 +551,124 @@ def apply_command_updates(updates: List[Dict[str, Any]]) -> None:
         c["result"] = clone_jsonable(u.get("result"))
 
 
-LATEST_STATUS: Dict[str, Any] = {"bot": {"alive": False, "message": "starting"}}
 STATUS_LOCK = threading.Lock()
+
+
+def _safe_call(default: Any, fn, *args, **kwargs) -> Any:
+  try:
+    return fn(*args, **kwargs)
+  except Exception:
+    return default
+
+
+def _runtime_status_defaults(cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+  c = cfg if isinstance(cfg, dict) else get_runtime_config()
+  return {
+    "ingestionEnabled": bool(c.get("ingestionEnabled", True)),
+    "tradingEnabled": bool(c.get("tradingEnabled", True)),
+    "riskLoopIntervalSec": int(c.get("riskLoopIntervalSec", 1)),
+    "decisionLoopIntervalSec": int(c.get("decisionLoopIntervalSec", 4)),
+    "inPositionReassessIntervalSec": int(c.get("inPositionReassessIntervalSec", 8)),
+    "metricsLoopIntervalSec": int(c.get("metricsLoopIntervalSec", 45)),
+    "reassessIntervalSec": int(c.get("inPositionReassessIntervalSec", 8)),
+    "minHoldSeconds": int(c.get("minHoldSeconds", 5)),
+    "maxHoldSeconds": int(c.get("maxHoldSeconds", 7200)),
+    "trendEntryStrength": float(c.get("trendEntryStrength", 0.70)),
+    "stopLossPct": _to_opt_float(c.get("stopLossPct")),
+    "stopLossAtrMult": _to_opt_float(c.get("stopLossAtrMult")),
+    "atrStopLossConfirmSec": int(c.get("atrStopLossConfirmSec", 120)),
+    "takeProfitPct": _to_opt_float(c.get("takeProfitPct")),
+    "takeProfitAtrMult": _to_opt_float(c.get("takeProfitAtrMult")),
+    "trailingStopPct": _to_opt_float(c.get("trailingStopPct")),
+    "maxDailyTrades": int(c.get("maxDailyTrades", 0)),
+  }
+
+
+def _position_status_defaults(now_ms: Optional[int] = None) -> Dict[str, Any]:
+  ts = int(now_ms or int(time.time() * 1000))
+  return {
+    "open": False,
+    "side": None,
+    "size": 0.0,
+    "entryPrice": None,
+    "entryAt": None,
+    "ageSec": None,
+    "unrealizedPnl": 0.0,
+    "atrPct": 0.0,
+    "liveAtrPct": 0.0,
+    "entryAtrPct": None,
+    "fixedStopPct": None,
+    "fixedTakePct": None,
+    "fixedStopPrice": None,
+    "fixedTakePrice": None,
+    "atrStopLossDebounceActive": False,
+    "atrStopLossConfirmSec": 120,
+    "atrStopLossBreachSec": None,
+    "atrStopLossConfirmRemainingSec": None,
+    "updatedAt": ts,
+  }
+
+
+def _status_payload_base(message: str, alive: bool = True, cfg: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+  c = cfg if isinstance(cfg, dict) else get_runtime_config()
+  now_ms = int(time.time() * 1000)
+  return {
+    "updatedAt": now_ms,
+    "bot": {
+      "alive": bool(alive),
+      "lastLoopAt": now_ms,
+      "message": str(message),
+      "version": BOT_VERSION,
+    },
+    "runtime": _runtime_status_defaults(c),
+    "market": {
+      "ticker": str(c.get("ticker", "BTCUSD")),
+      "price": None,
+      "oraclePrice": None,
+      "bestBid": None,
+      "bestAsk": None,
+    },
+    "account": {
+      "owner": str(c.get("ownerAddress") or ""),
+      "subaccountId": str(c.get("subaccountId") or ""),
+      "subaccountName": str(c.get("subaccountName") or ""),
+    },
+    "position": _position_status_defaults(now_ms),
+    "agent": {},
+    "trading": {
+      "enabled": bool(c.get("tradingEnabled", True)),
+      "running": False,
+      "positionOpen": False,
+      "entryAt": None,
+      "initialHoldEndsAt": None,
+      "nextReassessAt": None,
+      "maxHoldEndsAt": None,
+      "cooldownUntil": None,
+      "nextDecisionAt": None,
+      "tradesToday": 0,
+      "maxDailyTrades": int(c.get("maxDailyTrades", 0)),
+      "countdowns": {
+        "initialHoldEndsInSec": None,
+        "nextReassessInSec": None,
+        "maxHoldEndsInSec": None,
+        "cooldownEndsInSec": None,
+        "nextDecisionInSec": None,
+      },
+    },
+    "ingestion": {"running": bool(c.get("ingestionEnabled", True)), "lastTickAt": None, "ticksCount": 0},
+    "execution": {},
+    "db": {
+      "dir": DB_DIR,
+      "todayPath": _safe_call("", DB_MANAGER.today_path),
+      "sizeBytes": 0,
+      "maxBytes": int(DB_MAX_GB * 1024 * 1024 * 1024),
+      "targetBytes": int(DB_TARGET_GB * 1024 * 1024 * 1024),
+    },
+    "lastAction": None,
+  }
+
+
+LATEST_STATUS: Dict[str, Any] = _status_payload_base("starting", alive=False)
 
 
 def to_countdown_sec(target_ms: Optional[int], now_ms: Optional[int] = None) -> Optional[int]:
@@ -642,7 +758,7 @@ class TelemetryHandler(BaseHTTPRequestHandler):
 
     if path.startswith("/ingestion"):
       cfg = get_runtime_config()
-      stats = DB_MANAGER.query_ingestion_stats()
+      stats = _safe_call({}, DB_MANAGER.query_ingestion_stats)
       with STATUS_LOCK:
         s = clone_jsonable(LATEST_STATUS)
       return self._send_json(
@@ -720,7 +836,22 @@ class TelemetryHandler(BaseHTTPRequestHandler):
       sub_id = str(cfg.get("subaccountId") or s.get("account", {}).get("subaccountId") or "")
       eth_base = str(cfg.get("etherealApiBase") or "https://api.ethereal.trade")
       snap = fetch_portfolio_snapshot(eth_base, sub_id)
-      summary = DB_MANAGER.query_trades_summary()
+      summary = _safe_call(
+        {
+          "totalTrades": 0,
+          "winRate": 0.0,
+          "avgWin": 0.0,
+          "avgLoss": 0.0,
+          "realizedPnlTotal": 0.0,
+          "realizedPnlToday": 0.0,
+          "closedByConfidence": 0,
+          "closedByRegimeEnd": 0,
+          "closedByRegimeFlip": 0,
+          "closedByRiskLoop": 0,
+          "closedByOther": 0,
+        },
+        DB_MANAGER.query_trades_summary,
+      )
       used = _f(snap.get("usedMarginUsd")) or 0.0
       pv = _f(snap.get("portfolioValueUsd"))
       used_pct = ((used / pv) * 100.0) if pv and pv > 0 else (0.0 if used == 0 else None)
@@ -745,8 +876,26 @@ class TelemetryHandler(BaseHTTPRequestHandler):
         },
       )
 
-    if path.startswith("/uc5/trades/summary"):
-      return self._send_json(200, DB_MANAGER.query_trades_summary())
+    if path.startswith("/uc5/trades/summary") or path.startswith("/trades-summary"):
+      return self._send_json(
+        200,
+        _safe_call(
+          {
+            "totalTrades": 0,
+            "winRate": 0.0,
+            "avgWin": 0.0,
+            "avgLoss": 0.0,
+            "realizedPnlTotal": 0.0,
+            "realizedPnlToday": 0.0,
+            "closedByConfidence": 0,
+            "closedByRegimeEnd": 0,
+            "closedByRegimeFlip": 0,
+            "closedByRiskLoop": 0,
+            "closedByOther": 0,
+          },
+          DB_MANAGER.query_trades_summary,
+        ),
+      )
 
     if path.startswith("/uc5/trades"):
       limit = max(1, min(100, int((qs.get("limit") or ["10"])[0])))
@@ -3962,6 +4111,14 @@ async def main():
         else None
       )
 
+      day_start_ms = _safe_call(now_ms, lambda: DB_MANAGER.utc_day_bounds_ms(now_ms)[0])
+      trades_today = _safe_call(0, DB_MANAGER.query_trade_count_since, int(day_start_ms))
+      ingestion_stats = _safe_call({}, DB_MANAGER.query_ingestion_stats)
+      ticks_count = int(ingestion_stats.get("ticksCollected", 0) or 0)
+      today_path = _safe_call("", DB_MANAGER.today_path)
+      db_size_bytes = _safe_call(0, DB_MANAGER.folder_size_bytes)
+      db_files = _safe_call(0, DB_MANAGER.db_file_count)
+
       status_payload = {
         "updatedAt": int(time.time() * 1000),
         "bot": {
@@ -4083,7 +4240,7 @@ async def main():
           "maxHoldEndsAt": max_hold_until,
           "cooldownUntil": cooldown_until,
           "nextDecisionAt": None if position_state.open else next_decision_ms,
-          "tradesToday": DB_MANAGER.query_trade_count_since(DB_MANAGER.utc_day_bounds_ms(now_ms)[0]),
+          "tradesToday": int(trades_today),
           "maxDailyTrades": int(cfg.get("maxDailyTrades", 0)),
           "countdowns": {
             "initialHoldEndsInSec": to_countdown_sec(min_hold_until, now_ms),
@@ -4096,7 +4253,7 @@ async def main():
         "ingestion": {
           "running": bool(ingest_enabled),
           "lastTickAt": last_tick_ts_ms,
-          "ticksCount": DB_MANAGER.query_ingestion_stats().get("ticksCollected", 0),
+          "ticksCount": ticks_count,
         },
         "execution": {
           "makerOnlyEntry": True,
@@ -4139,32 +4296,44 @@ async def main():
         },
         "db": {
           "dir": DB_DIR,
-          "todayPath": DB_MANAGER.today_path(),
-          "sizeBytes": DB_MANAGER.folder_size_bytes(),
+          "todayPath": today_path,
+          "sizeBytes": db_size_bytes,
           "maxBytes": int(DB_MAX_GB * 1024 * 1024 * 1024),
           "targetBytes": int(DB_TARGET_GB * 1024 * 1024 * 1024),
+          "dbFiles": db_files,
         },
         "lastAction": last_action,
       }
 
     except Exception as e:
-      status_payload = {
-        "updatedAt": int(time.time() * 1000),
-        "bot": {
-          "alive": True,
-          "lastLoopAt": int(time.time() * 1000),
-          "message": f"error: {str(e)}",
-          "version": BOT_VERSION,
-        },
-        "market": {
-          "ticker": get_runtime_config().get("ticker", "BTCUSD"),
-          "price": last_mid,
-          "oraclePrice": last_oracle,
-          "bestBid": last_bid,
-          "bestAsk": last_ask,
-        },
-        "lastAction": {"type": "ERROR", "ok": False, "info": {"error": str(e)}},
+      cfg = get_runtime_config()
+      status_payload = _status_payload_base(f"error: {str(e)}", alive=True, cfg=cfg)
+      with STATUS_LOCK:
+        prev_status = clone_jsonable(LATEST_STATUS)
+      if isinstance(prev_status, dict):
+        for section in ("runtime", "account", "position", "agent", "trading", "ingestion", "execution", "db"):
+          prev_value = prev_status.get(section)
+          if isinstance(prev_value, dict):
+            status_payload[section] = clone_jsonable(prev_value)
+        prev_market = prev_status.get("market")
+        if isinstance(prev_market, dict):
+          status_payload["market"] = clone_jsonable(prev_market)
+      status_payload["updatedAt"] = int(time.time() * 1000)
+      status_payload["bot"] = {
+        "alive": True,
+        "lastLoopAt": int(time.time() * 1000),
+        "message": f"error: {str(e)}",
+        "version": BOT_VERSION,
       }
+      status_payload["market"] = {
+        **(status_payload.get("market") if isinstance(status_payload.get("market"), dict) else {}),
+        "ticker": str(cfg.get("ticker", "BTCUSD")),
+        "price": last_mid,
+        "oraclePrice": last_oracle,
+        "bestBid": last_bid,
+        "bestAsk": last_ask,
+      }
+      status_payload["lastAction"] = {"type": "ERROR", "ok": False, "info": {"error": str(e)}}
 
     with STATUS_LOCK:
       LATEST_STATUS = status_payload
