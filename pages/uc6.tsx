@@ -541,7 +541,11 @@ type Uc6Status = {
     enabled?: boolean;
     marginUsd?: number;
     alphaLiveUsd?: number;
+    feesNetLiveUsd?: number;
+    divVsHodlLiveUsd?: number;
     requiredFeesToBeatHodlLiveUsd?: number;
+    collectableNowUsd?: number;
+    totalCostsToDateUsd?: number;
     outOfRangeDurationSec?: number;
     distanceBeyondEdgePct?: number;
     lastGateDecision?: {
@@ -1540,6 +1544,8 @@ export default function Uc6Page() {
   const hodlGateAllowed = hodlGateView?.lastGateDecision?.allowed !== false;
   const hodlGateReason = String(hodlGateView?.lastGateDecision?.reason || "—");
   const alphaLiveUsd = n(hodlGateView?.alphaLiveUsd, 0);
+  const feesNetLiveUsd = n(hodlGateView?.feesNetLiveUsd, 0);
+  const divVsHodlLiveUsd = n(hodlGateView?.divVsHodlLiveUsd, 0);
   const requiredFeesToBeatHodlLiveUsd = n(hodlGateView?.requiredFeesToBeatHodlLiveUsd, 0);
   const strategyMode = status?.strategyMode || "LP_ACTIVE";
   const isHoldMode = strategyMode !== "LP_ACTIVE";
@@ -1851,6 +1857,8 @@ export default function Uc6Page() {
             <Uc6Card title="Alpha vs HODL">
               <AlphaCard
                 alphaLiveUsd={alphaLiveUsd}
+                feesNetLiveUsd={feesNetLiveUsd}
+                divVsHodlLiveUsd={divVsHodlLiveUsd}
                 requiredFeesToBeatHodlLiveUsd={requiredFeesToBeatHodlLiveUsd}
                 hodlGateAllowed={hodlGateAllowed}
                 hodlGateReason={hodlGateReason}
@@ -2388,11 +2396,15 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   );
 }
 
-function AlphaCard({ alphaLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd }: {
-  alphaLiveUsd: number; requiredFeesToBeatHodlLiveUsd: number; hodlGateAllowed: boolean; hodlGateReason: string; alphaTodayUsd: number;
+function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd }: {
+  alphaLiveUsd: number; feesNetLiveUsd: number; divVsHodlLiveUsd: number; requiredFeesToBeatHodlLiveUsd: number; hodlGateAllowed: boolean; hodlGateReason: string; alphaTodayUsd: number;
 }) {
-  const beating = alphaLiveUsd >= requiredFeesToBeatHodlLiveUsd;
-  const fillPct = requiredFeesToBeatHodlLiveUsd > 0 ? Math.min(100, (alphaLiveUsd / requiredFeesToBeatHodlLiveUsd) * 100) : alphaLiveUsd > 0 ? 100 : 0;
+  const beating = alphaLiveUsd >= 0;
+  const fillPct = requiredFeesToBeatHodlLiveUsd > 0
+    ? Math.max(0, Math.min(100, (feesNetLiveUsd / requiredFeesToBeatHodlLiveUsd) * 100))
+    : beating
+      ? 100
+      : 0;
   return (
     <div style={{ display:"grid", gap:12 }}>
       <div style={{ textAlign:"center" }}>
@@ -2408,6 +2420,10 @@ function AlphaCard({ alphaLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowe
         <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:4 }}>
           <span>Required to beat HODL</span>
           <span style={{ fontFamily:"monospace" }}>{fmtUsd(requiredFeesToBeatHodlLiveUsd)}</span>
+        </div>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.45)", marginBottom:6 }}>
+          <span>Live divergence vs HODL</span>
+          <span style={{ fontFamily:"monospace", color: divVsHodlLiveUsd >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(divVsHodlLiveUsd)}</span>
         </div>
         <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.08)" }}>
           <div style={{ height:"100%", width:`${Math.max(0, fillPct)}%`, borderRadius:4, background: beating ? "#22c55e" : "#f59e0b" }} />

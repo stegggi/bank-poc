@@ -8921,7 +8921,11 @@ class Uc6Bot {
         enabled: Boolean(hodlGateSnapshot.enabled),
         marginUsd: Number(hodlGateSnapshot.marginUsd || 0),
         alphaLiveUsd: Number(hodlGateSnapshot.alphaLiveUsd || 0),
+        feesNetLiveUsd: Number(hodlGateSnapshot.feesNetLiveUsd || 0),
+        divVsHodlLiveUsd: Number(hodlGateSnapshot.divVsHodlLiveUsd || 0),
         requiredFeesToBeatHodlLiveUsd: Number(hodlGateSnapshot.requiredFeesToBeatHodlLiveUsd || 0),
+        collectableNowUsd: Number(hodlGateSnapshot.collectableNowUsd || 0),
+        totalCostsToDateUsd: Number(hodlGateSnapshot.totalCostsToDateUsd || 0),
         outOfRangeDurationSec: Number(hodlGateSnapshot.outOfRangeDurationSec || 0),
         distanceBeyondEdgePct: Number(hodlGateSnapshot.distanceBeyondEdgePct || 0),
         lastGateDecision: {
