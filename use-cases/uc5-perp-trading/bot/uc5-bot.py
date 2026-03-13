@@ -2908,6 +2908,11 @@ async def main():
         position_state.qty = abs(float(pos_size))
         position_state.entry_price = pos_entry_price or position_state.entry_price
         position_state.entry_ts_ms = pos_entry_at_ms or position_state.entry_ts_ms
+        # Restore entry price from DB-backed fallback when API doesn't provide it
+        if not position_state.entry_price and current_trade_entry_price:
+          position_state.entry_price = float(current_trade_entry_price)
+        if not position_state.entry_ts_ms and current_trade_entry_ts:
+          position_state.entry_ts_ms = int(current_trade_entry_ts)
         if current_trade_entry_atr_pct and not position_state.entry_atr_pct:
           position_state.entry_atr_pct = float(current_trade_entry_atr_pct)
         if current_trade_fixed_stop_pct and not position_state.fixed_stop_pct:
