@@ -1560,6 +1560,10 @@ export default function Uc6Page() {
   const activeMintTargetBandBps = Number.isFinite(Number(activeMintTargetBandBpsRaw))
     ? Math.round(Number(activeMintTargetBandBpsRaw))
     : null;
+  const activeLpEntryAtIso =
+    activeLifecycleRecord?.entry?.openedAtIso ||
+    activeLifecycleRecord?.entry?.entrySnapshotAtIso ||
+    null;
   const regimeEffectiveBandAtMintBpsRaw = activeLifecycleRecord?.band?.targetBandHalfBps;
   const regimeEffectiveBandAtMintBps = Number.isFinite(Number(regimeEffectiveBandAtMintBpsRaw))
     ? Math.round(Number(regimeEffectiveBandAtMintBpsRaw))
@@ -1816,6 +1820,7 @@ export default function Uc6Page() {
                 timeInRangePct={status?.ops?.timeInRange?.pct != null ? n(status.ops.timeInRange.pct, 0) * 100 : null}
                 pairLabel={activePairLabel}
                 configuredBandHalfPct={configuredBandHalfPct}
+                entryAtIso={activeLpEntryAtIso}
               />
             </Uc6Card>
 
@@ -2241,8 +2246,18 @@ function SelectField({ label, value, onChange, options, disabled }: { label: str
   );
 }
 
-function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct }: {
-  hasPosition: boolean; inRange: boolean; tickLower: number|null; tickUpper: number|null; currentTick: number|null; spotPrice: number; bandHalfPct: number|null; timeInRangePct: number|null; pairLabel: string; configuredBandHalfPct: number;
+function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct, entryAtIso }: {
+  hasPosition: boolean;
+  inRange: boolean;
+  tickLower: number | null;
+  tickUpper: number | null;
+  currentTick: number | null;
+  spotPrice: number;
+  bandHalfPct: number | null;
+  timeInRangePct: number | null;
+  pairLabel: string;
+  configuredBandHalfPct: number;
+  entryAtIso?: string | null;
 }) {
   if (!hasPosition) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"20px 0", textAlign:"center" }}>No active LP position</div>;
 
@@ -2297,6 +2312,11 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
       <div style={{ textAlign:"center", fontSize:14, fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>
         {spotPrice > 0 ? `$${spotPrice.toFixed(2)}` : "\u2014"}
         <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginLeft:4 }}>now</span>
+      </div>
+
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.55)" }}>
+        <span>Entry</span>
+        <span style={{ fontFamily:"monospace" }}>{entryAtIso ? fmtIsoLocal(entryAtIso) : "\u2014"}</span>
       </div>
 
       {/* Tick distances */}
