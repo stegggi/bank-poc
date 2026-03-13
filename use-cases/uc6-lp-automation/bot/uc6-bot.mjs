@@ -4872,10 +4872,14 @@ class Uc6Bot {
           60,
           7200
         );
+        const requestedBandAdjBps = Math.max(0, Number(advice.bandHalfBpsAdj || 0));
+        const maxBandAdjBps = Math.max(0, Number(cfg.maxBandAdjBps || 0));
+        const cappedBandAdjBps = Math.min(requestedBandAdjBps, maxBandAdjBps);
+        const maxBandHalfBps = Math.min(5000, Math.round(baseThresholds.bandHalfBps + cappedBandAdjBps));
         effective.bandHalfBps = clamp(
-          Math.round(baseThresholds.bandHalfBps + Number(advice.bandHalfBpsAdj || 0)),
-          10,
-          5000
+          Math.round(baseThresholds.bandHalfBps + cappedBandAdjBps),
+          baseThresholds.bandHalfBps,
+          maxBandHalfBps
         );
       }
       latest.regime = {

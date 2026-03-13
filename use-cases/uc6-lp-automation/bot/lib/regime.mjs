@@ -299,8 +299,11 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
 
   const effectiveEdge = clamp(baseEdge + edgeAdj, 0.6, 0.98);
   const effectiveCooldown = clamp(baseCooldown + cooldownAdj, 60, 7200);
-  // Keep regime-adjusted band within the same user-configurable range as bot settings.
-  const effectiveBand = clamp(baseBand + bandAdjBps, 10, 5000);
+  // Widen-only policy: regime may widen the user-selected base band, never narrow it.
+  // Also cap widening by maxBandAdjBps to keep adjustments predictable.
+  const requestedBandAdjBps = Number.isFinite(Number(bandAdjBps)) ? Math.round(Number(bandAdjBps)) : 0;
+  const wideningAdjBps = clamp(Math.max(0, requestedBandAdjBps), 0, Math.round(maxBandAdjBps));
+  const effectiveBand = clamp(baseBand + wideningAdjBps, baseBand, 5000);
 
   return {
     ok: true,

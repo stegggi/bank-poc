@@ -2055,7 +2055,7 @@ export default function Uc6Page() {
                   <NumberField label="regime.mrHalfLifeMaxSec" value={draft.regimeMrHalfLifeMaxSec} onChange={(v) => updateNumber("regimeMrHalfLifeMaxSec", v)} />
                   <NumberField label="regime.trendHalfLifeMinSec" value={draft.regimeTrendHalfLifeMinSec} onChange={(v) => updateNumber("regimeTrendHalfLifeMinSec", v)} />
                   <NumberField label="regime.maxEdgeAdj" value={draft.regimeMaxEdgeAdj} step="0.01" onChange={(v) => updateNumber("regimeMaxEdgeAdj", v)} />
-                  <NumberField label="regime.maxBandAdjBps" value={draft.regimeMaxBandAdjBps} onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)} />
+                  <NumberField label="regime.maxBandAdjBps (widen-only)" value={draft.regimeMaxBandAdjBps} onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)} />
                   <NumberField label="regime.maxCooldownAdjSec" value={draft.regimeMaxCooldownAdjSec} onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)} />
                 </div>
               </details>
