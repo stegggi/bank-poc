@@ -9060,15 +9060,22 @@ class Uc6Bot {
       },
       strategyMode,
       trend: {
-        movePct: Number.isFinite(Number(trendCtx?.trendMovePct)) ? Number(trendCtx.trendMovePct) : null,
+        movePct:
+          trendCtx?.trendMovePct == null || !Number.isFinite(Number(trendCtx.trendMovePct))
+            ? null
+            : Number(trendCtx.trendMovePct),
         direction: String(trendCtx?.direction || "flat"),
         lookbackSec: Number(trendCtx?.lookbackSec || this.getTrendEscapeSettings().directionLookbackSec),
         confirmSec: Number(trendCtx?.trendingConfirmSec || 0),
         meanRevertConfirmSec: Number(trendCtx?.meanRevertConfirmSec || 0),
         distanceFromMuPct:
-          Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
+          trendCtx?.distanceFromMuPct == null || !Number.isFinite(Number(trendCtx.distanceFromMuPct))
+            ? null
+            : Number(trendCtx.distanceFromMuPct),
         muPriceUsdcPerWeth:
-          Number.isFinite(Number(trendCtx?.muPrice)) ? Number(trendCtx.muPrice) : null,
+          trendCtx?.muPrice == null || !Number.isFinite(Number(trendCtx.muPrice))
+            ? null
+            : Number(trendCtx.muPrice),
       },
       trendEscape: {
         enabled: Boolean(trendEscapeEval.enabled),
