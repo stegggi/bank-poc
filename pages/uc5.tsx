@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
 import { CartesianGrid, ComposedChart, Line, ReferenceDot, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import NavBar from "../shared/components/NavBar";
@@ -62,6 +63,19 @@ function fmtUsd(v?: number | null, digits = 2) {
 function fmtPct(v?: number | null, digits = 1) {
   if (v == null || Number.isNaN(v)) return "—";
   return `${Number(v).toFixed(digits)}%`;
+}
+
+function toFiniteNumber(v: unknown): number | null {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstPositiveNumber(...values: unknown[]): number | null {
+  for (const value of values) {
+    const n = toFiniteNumber(value);
+    if (n != null && n > 0) return n;
+  }
+  return null;
 }
 
 function closeReasonLabel(reason?: ChartMarker["closeReason"]) {
@@ -276,6 +290,7 @@ async function readJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export default function Uc5Page() {
+  const { isMobile, isMobileOrTablet } = useBreakpoint();
   const [cfg, setCfg] = useState<Uc5Config | null>(null);
   const [edit, setEdit] = useState<Uc5Config | null>(null);
 
@@ -801,7 +816,7 @@ export default function Uc5Page() {
         .uc5-ctrl summary:hover { background: rgba(255,255,255,0.03) !important; }
       `}</style>
       <NavBar active={"uc5" as never} />
-      <div style={wrap}>
+      <div style={{ ...wrap, padding: isMobile ? "20px 16px 48px" : "14px 16px 48px", maxWidth: isMobile ? "100%" : 1400 }}>
 
         {notices.length > 0 && (
           <div style={{ display: "grid", gap: 6 }}>
@@ -819,11 +834,11 @@ export default function Uc5Page() {
           <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", flex: 1 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
               <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", color: "#f59e0b", padding: "3px 7px", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 5 }}>UC5</span>
-              <span style={{ fontSize: 22, fontWeight: 800, color: "#e8e8f0", letterSpacing: "-0.01em" }}>AI Autopilot Perps</span>
+              <span style={{ fontSize: isMobile ? 16 : 22, fontWeight: 800, color: "#e8e8f0", letterSpacing: "-0.01em" }}>AI Autopilot Perps</span>
               <span style={{ fontSize: 13, color: "rgba(232,232,240,0.45)" }}>{edit?.ticker || "BTCUSD"} · Ethereal</span>
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontSize: 28, fontWeight: 800, color: "#e8e8f0", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+              <span style={{ fontSize: isMobile ? 20 : 28, fontWeight: 800, color: "#e8e8f0", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                 {status?.market?.price ? fmtUsd(status.market.price, 0) : "—"}
               </span>
               {status?.market?.oraclePrice && (
@@ -845,7 +860,7 @@ export default function Uc5Page() {
             {walletAddr ? (
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: "rgba(232,232,240,0.4)", letterSpacing: "0.06em" }}>CONNECTED</div>
-                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "#e8e8f0" }}>{shortAddr(walletAddr)}</div>
+                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "#e8e8f0", wordBreak: "break-all" }}>{shortAddr(walletAddr)}</div>
               </div>
             ) : (
               <button onClick={connectWallet} style={btnPrimary}>Connect MetaMask</button>
@@ -854,7 +869,7 @@ export default function Uc5Page() {
         </div>
 
         {/* METRICS STRIP */}
-        <div style={metricsStrip}>
+        <div style={{ ...metricsStrip, flexWrap: isMobile ? "wrap" : "nowrap" }}>
           {([
             { label: "BID", val: status?.market?.bestBid ? fmtUsd(status.market.bestBid, 0) : "—", color: "#22c55e" },
             { label: "ASK", val: status?.market?.bestAsk ? fmtUsd(status.market.bestAsk, 0) : "—", color: "#ef4444" },
@@ -865,7 +880,7 @@ export default function Uc5Page() {
             { label: "REGIME", val: status?.agent?.regimeState ? `${status.agent.regimeState}${status.agent.regimeDirection ? " " + String(status.agent.regimeDirection) : ""}` : "—", color: "rgba(232,232,240,0.7)" },
             { label: "CONFIDENCE", val: status?.agent?.regimeStrength != null ? `${(status.agent.regimeStrength * 100).toFixed(1)}% ${status.agent.confidenceBand || ""}` : "—", color: "#f59e0b" },
           ] as Array<{ label: string; val: string; color: string }>).map(({ label, val, color }) => (
-            <div key={label} style={{ padding: "0 18px", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+            <div key={label} style={{ padding: isMobile ? "0 10px" : "0 18px", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.32)", marginBottom: 3 }}>{label}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>{val}</div>
             </div>
@@ -873,7 +888,7 @@ export default function Uc5Page() {
         </div>
 
         {/* MAIN DASHBOARD GRID */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 340px", gap: 12, alignItems: "start", minWidth: 0 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobileOrTablet ? "1fr" : "1fr 340px", gap: 12, alignItems: "start", minWidth: 0 }}>
 
           {/* Charts column */}
           <div style={{ display: "flex", flexDirection: "column", gap: 12, minWidth: 0 }}>
@@ -889,9 +904,9 @@ export default function Uc5Page() {
               </div>
               {chart.partial24h && <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 8 }}>Partial 24h · missing: {(chart.missingDays || []).join(", ") || "unknown"}</div>}
               {chartRows.length === 0 ? (
-                <div style={{ height: MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No chart data yet</div>
+                <div style={{ height: isMobile ? 220 : MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No chart data yet</div>
               ) : (
-                <div className="uc5-recharts" style={{ width: "100%", height: MARKET_CHART_HEIGHT }}>
+                <div className="uc5-recharts" style={{ width: "100%", height: isMobile ? 220 : MARKET_CHART_HEIGHT }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chartRows} margin={{ top: 16, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -913,9 +928,9 @@ export default function Uc5Page() {
                 <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>Ornstein-Uhlenbeck · dashed = entry threshold</span>
               </div>
               {regimeRows.length === 0 ? (
-                <div style={{ height: CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No regime data yet</div>
+                <div style={{ height: isMobile ? 100 : CONFIDENCE_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No regime data yet</div>
               ) : (
-                <div className="uc5-recharts" style={{ width: "100%", height: CONFIDENCE_CHART_HEIGHT }}>
+                <div className="uc5-recharts" style={{ width: "100%", height: isMobile ? 100 : CONFIDENCE_CHART_HEIGHT }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={regimeRows} margin={{ top: 8, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
@@ -979,15 +994,67 @@ export default function Uc5Page() {
               <div style={sideCardLabel}>OPEN POSITION</div>
               {status?.position?.open ? (() => {
                 const pos = status.position!;
-                const currentPrice = status.market?.price ?? 0;
-                const entryPrice = pos.entryPrice ?? 0;
-                const atrPct = pos.atrPct ?? 0;
+                const marketRecord = (status?.market || {}) as Record<string, unknown>;
+                const currentPrice =
+                  firstPositiveNumber(
+                    status.market?.price,
+                    status.market?.oraclePrice,
+                    marketRecord.markPrice,
+                    marketRecord.mark_price,
+                    marketRecord.mid,
+                    marketRecord.lastPrice,
+                    marketRecord.last_price
+                  ) ?? 0;
+                const posRecord = pos as unknown as Record<string, unknown>;
+                const entryPrice =
+                  firstPositiveNumber(
+                    pos.entryPrice,
+                    posRecord.entry_price,
+                    posRecord.entryPx,
+                    posRecord.entry_px,
+                    posRecord.avgEntryPrice,
+                    posRecord.avg_entry_price
+                  ) ?? 0;
+                const regimeDiagnostics =
+                  status?.agent?.regimeDiagnostics && typeof status.agent.regimeDiagnostics === "object"
+                    ? (status.agent.regimeDiagnostics as Record<string, unknown>)
+                    : null;
+                const atrPct =
+                  firstPositiveNumber(
+                    pos.atrPct,
+                    posRecord.atrPct,
+                    posRecord.atr_pct,
+                    regimeDiagnostics?.atrPct,
+                    regimeDiagnostics?.atr_pct,
+                    regimeDiagnostics?.atr
+                  ) ?? 0;
                 const atrUsd = atrPct > 0 && entryPrice > 0 ? atrPct * entryPrice : null;
-                const runtimeCfg = (status as unknown as { runtimeConfig?: { stopLossPct?: number | null; stopLossAtrMult?: number | null; takeProfitPct?: number | null; takeProfitAtrMult?: number | null } }).runtimeConfig;
-                const isAtrBasedSl = Boolean(runtimeCfg?.stopLossAtrMult && atrPct > 0);
-                const isAtrBasedTp = Boolean(runtimeCfg?.takeProfitAtrMult && atrPct > 0);
-                const slPct = isAtrBasedSl ? runtimeCfg!.stopLossAtrMult! * atrPct : (runtimeCfg?.stopLossPct ?? 0);
-                const tpPct = isAtrBasedTp ? runtimeCfg!.takeProfitAtrMult! * atrPct : (runtimeCfg?.takeProfitPct ?? 0);
+                const runtimeCfg =
+                  status?.runtime ||
+                  (status as unknown as {
+                    runtimeConfig?: {
+                      stopLossPct?: number | null;
+                      stopLossAtrMult?: number | null;
+                      takeProfitPct?: number | null;
+                      takeProfitAtrMult?: number | null;
+                    };
+                  }).runtimeConfig ||
+                  (edit
+                    ? {
+                        stopLossPct: edit.stopLossPct,
+                        stopLossAtrMult: edit.stopLossAtrMult,
+                        takeProfitPct: edit.takeProfitPct,
+                        takeProfitAtrMult: edit.takeProfitAtrMult,
+                      }
+                    : null);
+                const slFixedPct = firstPositiveNumber(runtimeCfg?.stopLossPct) ?? 0;
+                const tpFixedPct = firstPositiveNumber(runtimeCfg?.takeProfitPct) ?? 0;
+                const slAtrMult = firstPositiveNumber(runtimeCfg?.stopLossAtrMult) ?? 0;
+                const tpAtrMult = firstPositiveNumber(runtimeCfg?.takeProfitAtrMult) ?? 0;
+                const isAtrBasedSl = slFixedPct <= 0 && slAtrMult > 0 && atrPct > 0;
+                const isAtrBasedTp = tpFixedPct <= 0 && tpAtrMult > 0 && atrPct > 0;
+                const slPct = isAtrBasedSl ? slAtrMult * atrPct : slFixedPct;
+                const tpPct = isAtrBasedTp ? tpAtrMult * atrPct : tpFixedPct;
                 const isLong = pos.side === "LONG";
                 const slPrice = entryPrice > 0 && slPct > 0 ? (isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct)) : null;
                 const tpPrice = entryPrice > 0 && tpPct > 0 ? (isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct)) : null;
@@ -1013,7 +1080,7 @@ export default function Uc5Page() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {row("SIZE", `${pos.size?.toFixed(6) || "—"} BTC`)}
-                      {row("ENTRY", fmtUsd(pos.entryPrice))}
+                      {row("ENTRY", fmtUsd(entryPrice || null))}
                       {row("AGE", pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—")}
                       {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444")}
 
@@ -1036,7 +1103,7 @@ export default function Uc5Page() {
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
                             <span style={{ color: "#ef4444", opacity: 0.8 }}>
                               SL {fmtUsd(slPrice)}
-                              {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.stopLossAtrMult}× ATR)</span>}
+                              {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({slAtrMult}× ATR)</span>}
                             </span>
                             <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>
                               {distToSlAtr != null ? `${distToSlAtr.toFixed(2)}× ATR` : distToSlPct != null ? `${distToSlPct.toFixed(2)}%` : "—"}
@@ -1052,7 +1119,7 @@ export default function Uc5Page() {
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
                             <span style={{ color: "#22c55e", opacity: 0.8 }}>
                               TP {fmtUsd(tpPrice)}
-                              {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({runtimeCfg!.takeProfitAtrMult}× ATR)</span>}
+                              {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({tpAtrMult}× ATR)</span>}
                             </span>
                             <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#22c55e" }}>
                               {distToTpAtr != null ? `${distToTpAtr.toFixed(2)}× ATR` : distToTpPct != null ? `${distToTpPct.toFixed(2)}%` : "—"}
@@ -1178,13 +1245,13 @@ export default function Uc5Page() {
               </div>
             </div>
           </div>
-          <div style={{ marginLeft: "auto" }}>
-            <button style={{ ...btnDanger, padding: "10px 20px", fontWeight: 900, letterSpacing: "0.05em" }} disabled={!isOwner || !!busy} onClick={() => void sendFlatten()}>■ FLATTEN NOW</button>
+          <div style={{ marginLeft: isMobile ? 0 : "auto", width: isMobile ? "100%" : "auto" }}>
+            <button style={{ ...btnDanger, padding: "10px 20px", fontWeight: 900, letterSpacing: "0.05em", width: isMobile ? "100%" : "auto" }} disabled={!isOwner || !!busy} onClick={() => void sendFlatten()}>■ FLATTEN NOW</button>
           </div>
         </div>
 
         {/* PORTFOLIO + STATS */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 }}>
+        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 }}>
           <div style={darkCard}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
               <span style={sideCardLabel}>PORTFOLIO</span>
@@ -1279,7 +1346,7 @@ export default function Uc5Page() {
             <div style={{ textAlign: "center", padding: "24px 0", fontSize: 13, color: "rgba(232,232,240,0.25)" }}>No closed trades yet</div>
           ) : (
             <>
-              <div style={{ overflowX: "auto" }}>
+              <div style={{ overflowX: "auto" as const, WebkitOverflowScrolling: "touch" as const }}>
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr>
@@ -1350,10 +1417,10 @@ export default function Uc5Page() {
         </details>
 
         {/* CONTROL CENTER */}
-        <div className="uc5-ctrl" style={controlCenter}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div className="uc5-ctrl" style={{ ...controlCenter, padding: isMobile ? "16px 14px 14px" : "20px 20px 16px" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
             <div>
-              <div style={{ fontSize: 16, fontWeight: 900, color: "#e8e8f0", letterSpacing: "0.04em" }}>
+              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 900, color: "#e8e8f0", letterSpacing: "0.04em" }}>
                 <span style={{ color: "#f59e0b", marginRight: 8 }}>&#9881;</span>CONTROL CENTER
               </div>
               <div style={{ fontSize: 12, color: "rgba(232,232,240,0.38)", marginTop: 3 }}>Owner settings · requires MetaMask signature</div>
@@ -1368,7 +1435,7 @@ export default function Uc5Page() {
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>regime thresholds · timing · loops</span>
             </summary>
             <div style={ctrlBody}>
-              <div style={grid4ctrl}>
+              <div style={{ ...grid4ctrl, gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))" }}>
                 <Field label="openConfidenceThreshold" help="Min confidence to open a position." error={validation.openConfidenceThreshold}>
                   <input style={input} type="number" min={0.5} max={0.95} step={0.01} value={edit?.openConfidenceThreshold ?? 0.65} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, openConfidenceThreshold: Number(e.target.value), confidenceThreshold: Number(e.target.value) } : p))} />
                 </Field>
@@ -1419,7 +1486,7 @@ export default function Uc5Page() {
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>leverage · margin · SL/TP · hold times</span>
             </summary>
             <div style={ctrlBody}>
-              <div style={grid4ctrl}>
+              <div style={{ ...grid4ctrl, gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))" }}>
                 <Field label="maxLeverage" help="Range 1.0 to 20.0." error={validation.maxLeverage}>
                   <input style={input} type="number" min={1} max={20} step={0.1} value={edit?.maxLeverage ?? 2} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxLeverage: Number(e.target.value) } : p))} />
                 </Field>
@@ -1479,7 +1546,7 @@ export default function Uc5Page() {
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>maker orders · spread · chase · timing</span>
             </summary>
             <div style={ctrlBody}>
-              <div style={grid4ctrl}>
+              <div style={{ ...grid4ctrl, gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))" }}>
                 <Field label="feeEstimateBps" help="Estimated round-trip cost in bps." error={undefined}>
                   <input style={input} type="number" min={0} max={100} step={0.5} value={edit?.feeEstimateBps ?? 3} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, feeEstimateBps: Number(e.target.value) } : p))} />
                 </Field>
@@ -1551,7 +1618,7 @@ export default function Uc5Page() {
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>edge gate · funding · daily limit</span>
             </summary>
             <div style={ctrlBody}>
-              <div style={grid4ctrl}>
+              <div style={{ ...grid4ctrl, gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(240px, 1fr))" }}>
                 <Field label="minExpectedMoveBps" help="Min expected price move (bps) to enter. 0 = disabled. Rec: 14." error={undefined}>
                   <input style={input} type="number" min={0} max={500} step={1} value={edit?.minExpectedMoveBps ?? 0} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, minExpectedMoveBps: Number(e.target.value) } : p))} />
                 </Field>
@@ -1568,7 +1635,7 @@ export default function Uc5Page() {
             </div>
           </details>
 
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 12 }}>
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <button style={saveBtnCtrl} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>
               {busy === "save" ? "Saving..." : "Save Settings"}
             </button>
@@ -1588,7 +1655,7 @@ export default function Uc5Page() {
                 <div style={{ fontWeight: 700, color: "#e8e8f0", marginBottom: 4 }}>Link bot signer (recommended)</div>
                 <div style={{ color: "rgba(232,232,240,0.5)", marginBottom: 10, fontSize: 13 }}>Safer than trading with your MetaMask private key.</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <input style={{ ...input, minWidth: 280, flex: 1 }} placeholder="Bot signer address (0x...)" value={signerAddr} onChange={(e) => setSignerAddr(e.target.value)} />
+                  <input style={{ ...input, minWidth: isMobile ? 0 : 280, flex: 1 }} placeholder="Bot signer address (0x...)" value={signerAddr} onChange={(e) => setSignerAddr(e.target.value)} />
                   <button style={btnPrimary} disabled={!isOwner || !!busy || !signerAddr} onClick={() => void createLinkSignerRequest()}>{busy === "link-signer" ? "Requesting..." : "Request link"}</button>
                 </div>
               </div>

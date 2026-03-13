@@ -57,3 +57,44 @@ a {
 ::-webkit-scrollbar-thumb:hover {
   background: rgba(255, 255, 255, 0.20);
 }
+
+/* ── Responsive utilities ───────────────────────────────────── */
+.rsp-page-wrap {
+  width: 100%;
+  max-width: 1400px;
+  margin: 0 auto;
+  padding: 32px 24px;
+}
+
+/* Horizontally scrollable table container */
+.rsp-table-scroll {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Stack flex children vertically on mobile */
+@media (max-width: 639px) {
+  .rsp-page-wrap {
+    padding: 20px 16px;
+  }
+  .rsp-stack-mobile {
+    flex-direction: column !important;
+  }
+  .rsp-hide-mobile {
+    display: none !important;
+  }
+  .rsp-full-mobile {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+}
+
+@media (max-width: 1023px) {
+  .rsp-stack-tablet {
+    flex-direction: column !important;
+  }
+  .rsp-hide-tablet {
+    display: none !important;
+  }
+}

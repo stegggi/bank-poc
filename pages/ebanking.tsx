@@ -6,6 +6,7 @@ import { encodeFunctionData, formatEther, getAddress } from 'viem';
 import { useRouter } from 'next/router';
 import { publicClient } from '../shared/lib/aa';
 import NavBar from '../shared/components/NavBar';
+import { useBreakpoint } from '../shared/hooks/useBreakpoint';
 
 const CHAIN_ID = 421614; // Arbitrum Sepolia
 const DEMO_ETH_CHF = 2000;
@@ -40,6 +41,7 @@ export default function EBanking() {
   const router = useRouter();
   const { ready, authenticated, login, logout, createWallet } = usePrivy() as any;
   const { wallets } = useWallets();
+  const { isMobile, isMobileOrTablet } = useBreakpoint();
 
   const [bankLoggedIn, setBankLoggedIn] = useState(false);
   const [passwordInput, setPasswordInput] = useState('');
@@ -355,7 +357,7 @@ export default function EBanking() {
 
         {!bankLoggedIn ? (
           /* ── Login screen ── */
-          <div style={loginOuter}>
+          <div style={{ ...loginOuter, padding: isMobile ? '60px 16px 100px' : '88px 24px 140px' }}>
             <div style={loginCard}>
               {/* UC chip */}
               <div style={loginChipRow}>
@@ -387,14 +389,14 @@ export default function EBanking() {
           </div>
         ) : (
           /* ── Dashboard ── */
-          <div style={pageOuter}>
+          <div style={{ ...pageOuter, padding: isMobile ? '20px 16px 80px' : '40px 24px 120px' }}>
             {/* Page header */}
             <div style={dashHeader}>
               <div>
                 <div style={dashChip}>
                   <span style={{ color: UC_ACCENT }}>01</span> · eBanking
                 </div>
-                <h1 style={dashTitle}>Your Accounts</h1>
+                <h1 style={{ ...dashTitle, fontSize: isMobile ? 22 : 30 }}>Your Accounts</h1>
               </div>
               <button onClick={onEbankingLogout} className="eb-btn-sec" style={btnGhost}>
                 Sign out
@@ -402,17 +404,17 @@ export default function EBanking() {
             </div>
 
             {/* Traditional CHF accounts */}
-            <div style={acctGrid}>
-              <div style={acctCard}>
+            <div style={{ ...acctGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(260px, 1fr))' }}>
+              <div style={{ ...acctCard, padding: isMobile ? '16px' : '22px 24px' }}>
                 <div style={acctLabel}>Checking Account</div>
-                <div style={acctAmount}>
+                <div style={{ ...acctAmount, fontSize: isMobile ? 24 : 30 }}>
                   {checkingChf.toLocaleString('en-CH', { style: 'currency', currency: 'CHF' })}
                 </div>
                 <div style={acctIban}>IBAN · CHxx 1234 5678 9012 3456 7</div>
               </div>
-              <div style={acctCard}>
+              <div style={{ ...acctCard, padding: isMobile ? '16px' : '22px 24px' }}>
                 <div style={acctLabel}>Savings Account</div>
-                <div style={acctAmount}>
+                <div style={{ ...acctAmount, fontSize: isMobile ? 24 : 30 }}>
                   {savingChf.toLocaleString('en-CH', { style: 'currency', currency: 'CHF' })}
                 </div>
                 <div style={acctIban}>IBAN · CHxx 7654 3210 9876 5432 1</div>
@@ -420,7 +422,7 @@ export default function EBanking() {
             </div>
 
             {/* Crypto wallet panel */}
-            <div style={walletPanel}>
+            <div style={{ ...walletPanel, padding: isMobile ? '16px' : '24px' }}>
               <div style={walletPanelHead}>
                 <span style={walletPanelTitle}>Crypto Wallet</span>
                 <span style={walletEvmBadge}>EVM</span>
@@ -457,7 +459,7 @@ export default function EBanking() {
                   </div>
 
                   {/* Balances */}
-                  <div style={balGrid}>
+                  <div style={{ ...balGrid, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(160px, 1fr))' }}>
                     <div className="eb-bal" style={balCard}>
                       <div style={balLabel}>ETH Balance</div>
                       <div style={balValue}>
@@ -511,6 +513,7 @@ export default function EBanking() {
 
 function WhyThisMatters() {
   const [tab, setTab] = useState(0);
+  const { isMobile } = useBreakpoint();
 
   const tabs = [
     {
@@ -537,7 +540,7 @@ function WhyThisMatters() {
       title: "What's happening under the hood",
       subtitle: 'Three moving pieces: identity, wallet control, and a chain connection.',
       body: (
-        <div style={whyGrid2}>
+        <div style={{ ...whyGrid2, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))' }}>
           <div style={whyCard}>
             <div style={whyCardTitle}>Identity + wallet UX (Privy)</div>
             <div style={whyText}>
@@ -569,7 +572,7 @@ function WhyThisMatters() {
       subtitle: "The balances shown match the ledger you don't control — the chain is the source of truth.",
       body: (
         <>
-          <div style={whyGrid2}>
+          <div style={{ ...whyGrid2, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))' }}>
             <div style={whyCard}>
               <div style={whyCardTitle}>Reads (no transaction)</div>
               <div style={wtmList}>
@@ -611,7 +614,7 @@ function WhyThisMatters() {
       subtitle: 'This is the onboarding layer that makes regulated on-chain finance usable for normal customers.',
       body: (
         <>
-          <div style={whyGrid2}>
+          <div style={{ ...whyGrid2, gridTemplateColumns: isMobile ? '1fr' : 'repeat(auto-fit, minmax(280px, 1fr))' }}>
             <div style={whyCard}>
               <div style={whyCardTitle}>Regulatory lens</div>
               <div style={wtmList}>
@@ -656,7 +659,7 @@ function WhyThisMatters() {
   const active = tabs[tab];
 
   return (
-    <div style={wtmOuter}>
+    <div style={{ ...wtmOuter, padding: isMobile ? '20px 16px 60px' : '48px 24px 80px' }}>
       {/* Divider */}
       <div style={wtmDivider}>
         <div style={wtmDividerLine} />
@@ -688,7 +691,7 @@ function WhyThisMatters() {
       </div>
 
       {/* Content panel — key forces remount + fade-in animation on tab change */}
-      <div key={tab} role="tabpanel" className="wtm-panel" style={wtmPanel}>
+      <div key={tab} role="tabpanel" className="wtm-panel" style={{ ...wtmPanel, padding: isMobile ? '16px' : '24px' }}>
         <div style={wtmPanelHead}>
           <div style={wtmPanelTitle}>{active.title}</div>
           <div style={wtmPanelSub}>{active.subtitle}</div>

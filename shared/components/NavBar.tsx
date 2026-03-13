@@ -79,16 +79,25 @@ export default function NavBar({ active }: NavBarProps) {
         @media (prefers-reduced-motion: reduce) {
           .navPill, .navSeg, .chevBtn { transition: none !important; }
         }
+        /* Mobile: tighter padding, smaller brand */
+        @media (max-width: 639px) {
+          .navInner { padding: 7px 10px !important; gap: 8px !important; }
+          .navBrandSub { display: none !important; }
+          .navBrandMain { font-size: 13px !important; }
+        }
+        @media (max-width: 400px) {
+          .navBrandMain { display: none !important; }
+        }
       `}</style>
 
-      <div style={navInner}>
+      <div style={navInner} className="navInner">
         {/* ── Brand + home ── */}
         <div style={navLeft}>
           <div style={brandStyle}>
-            <span style={{ fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>
+            <span className="navBrandMain" style={{ fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>
               blockchain
             </span>
-            <span style={{ color: "rgba(255,255,255,0.3)", marginLeft: 6, fontWeight: 400 }}>
+            <span className="navBrandSub" style={{ color: "rgba(255,255,255,0.3)", marginLeft: 6, fontWeight: 400 }}>
               concept bank
             </span>
           </div>
@@ -619,7 +628,6 @@ const segBase: CSSProperties = {
   padding: "7px 10px",
   textDecoration: "none",
   fontSize: 13,
-  lineHeight: 1,
   whiteSpace: "nowrap",
   flexShrink: 0,
 };

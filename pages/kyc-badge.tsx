@@ -5,6 +5,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
 import NavBar from "../shared/components/NavBar";
 import { publicClient } from "../shared/lib/aa";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
 const BADGE = (process.env.NEXT_PUBLIC_KYC_BADGE_ADDRESS || "") as `0x${string}`;
 
@@ -45,6 +46,7 @@ const BADGE_ABI = [
 const BADGE_IFACE = new Interface(BADGE_ABI as any);
 
 export default function KYCBadge() {
+  const { isMobile } = useBreakpoint();
   const router = useRouter();
   const { ready, authenticated, login } = usePrivy();
   const { wallets } = useWallets();
@@ -268,8 +270,8 @@ export default function KYCBadge() {
 
   // --- Style objects ---
   const page:      CSSProperties = { minHeight: "100vh", background: "#0d0d0d", color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" };
-  const wrap:      CSSProperties = { maxWidth: 780, margin: "0 auto", padding: "24px 20px 64px" };
-  const glassCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20, marginTop: 16 };
+  const wrap:      CSSProperties = { maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 48px" : "24px 20px 64px" };
+  const glassCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: isMobile ? 14 : 20, marginTop: 16 };
   const miniGlass: CSSProperties = { background: "rgba(255,255,255,0.04)",  border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
 
   const stepChip:    CSSProperties = { display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 };
@@ -288,13 +290,13 @@ export default function KYCBadge() {
 
   // WTM
   const wtmOuter:     CSSProperties = { marginTop: 32 };
-  const wtmTitle:     CSSProperties = { fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
+  const wtmTitle:     CSSProperties = { fontSize: isMobile ? 16 : 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
   const wtmIntro:     CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55, margin: "0 0 16px" };
   const wtmTabBar:    CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap" as const, marginBottom: 16 };
-  const wtmPanel:     CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 };
+  const wtmPanel:     CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: isMobile ? 14 : 20 };
   const wtmPanelTitle: CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 };
   const wtmPanelSub:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.55, marginBottom: 14 };
-  const wtmGrid2:     CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 };
+  const wtmGrid2:     CSSProperties = { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 };
   const wtmCard:      CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
   const wtmCardTitle: CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
   const wtmCardText:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
@@ -380,7 +382,7 @@ export default function KYCBadge() {
             <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
               UC 03
             </div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>KYC Badge</h1>
+            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>KYC Badge</h1>
             <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 560 }}>
               Issue and verify on-chain identity credentials. Banks mint time-limited badges with embedded claims; any counterparty can verify instantly — no wallet required.
             </p>
@@ -388,7 +390,7 @@ export default function KYCBadge() {
 
           {/* ── Step 1: Bank Issuer Panel ── */}
           <div style={glassCard}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row" }}>
               <div>
                 <div style={stepChip}>STEP 1 · BANK ISSUER</div>
                 <h2 style={sectionTitle}>Issue or revoke a badge</h2>
@@ -409,7 +411,7 @@ export default function KYCBadge() {
             </div>
 
             {/* Form grid */}
-            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 14 }}>
+            <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(210px, 1fr))", gap: 14 }}>
               <div>
                 <div style={fieldLabel}>Target wallet</div>
                 <input value={issueTarget} onChange={(e) => setIssueTarget(e.target.value.trim())} placeholder="0x…" className="kc-input" />
@@ -428,9 +430,9 @@ export default function KYCBadge() {
               </div>
             </div>
 
-            <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap" }}>
-              <button className="kc-btn kc-btn-primary" onClick={doIssueOrRenew} disabled={!ready}>Issue / renew badge</button>
-              <button className="kc-btn kc-btn-danger"  onClick={doRevoke}       disabled={!ready}>Revoke badge</button>
+            <div style={{ marginTop: 16, display: "flex", gap: 10, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row" }}>
+              <button className="kc-btn kc-btn-primary" style={isMobile ? { width: "100%" } : undefined} onClick={doIssueOrRenew} disabled={!ready}>Issue / renew badge</button>
+              <button className="kc-btn kc-btn-danger"  style={isMobile ? { width: "100%" } : undefined} onClick={doRevoke}       disabled={!ready}>Revoke badge</button>
             </div>
 
             {issuerStatus && <div style={statusBox}>{issuerStatus}</div>}
@@ -438,7 +440,7 @@ export default function KYCBadge() {
 
           {/* ── Step 2: Verifier Panel ── */}
           <div style={glassCard}>
-            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12, flexWrap: "wrap", flexDirection: isMobile ? "column" : "row" }}>
               <div>
                 <div style={stepChip}>STEP 2 · ANYONE CAN VERIFY</div>
                 <h2 style={sectionTitle}>Verify a badge</h2>
@@ -449,12 +451,12 @@ export default function KYCBadge() {
 
             <hr style={divider} />
 
-            <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+            <div style={{ display: "flex", gap: 12, alignItems: isMobile ? "stretch" : "flex-end", flexWrap: "wrap", flexDirection: isMobile ? "column" : "row" }}>
               <div style={{ flex: "1 1 300px" }}>
                 <div style={fieldLabel}>Wallet address to verify</div>
                 <input value={walletToVerify} onChange={(e) => setWalletToVerify(e.target.value.trim())} placeholder="0x…" className="kc-input" />
               </div>
-              <button className="kc-btn kc-btn-primary" onClick={verify}>Verify</button>
+              <button className="kc-btn kc-btn-primary" style={isMobile ? { width: "100%" } : undefined} onClick={verify}>Verify</button>
             </div>
 
             {verifyStatus === "invalid_input" && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "rgba(255,255,255,0.62)" }}>Please enter a valid wallet address (0x…).</div>}
@@ -463,7 +465,7 @@ export default function KYCBadge() {
 
             {verifyResult && (
               <>
-                <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
+                <div style={{ marginTop: 14, display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 }}>
                   <div style={miniGlass}>
                     <div style={miniLabel}>Operator</div>
                     <div style={monoVal}>{verifyResult.operator || "—"}</div>

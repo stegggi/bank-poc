@@ -2,6 +2,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import NavBar from "../shared/components/NavBar";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
 /* ── Env vars (unchanged) ── */
 const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as `0x${string}` | "";
@@ -106,6 +107,8 @@ const USE_CASES: UcDef[] = [
 
 /* ── Page ── */
 export default function Home() {
+  const { isMobile, isTablet } = useBreakpoint();
+
   const envStatus = useMemo(() => {
     const missing: string[] = [];
     if (!HUB) missing.push("NEXT_PUBLIC_PAYMENT_HUB_ADDRESS");
@@ -123,13 +126,43 @@ export default function Home() {
     return () => clearInterval(t);
   }, []);
 
+  const heroSectionStyle: CSSProperties = {
+    ...heroSection,
+    padding: isMobile ? "36px 16px 48px" : isTablet ? "52px 20px 64px" : heroSection.padding,
+  };
+
+  const heroH1Style: CSSProperties = {
+    ...heroH1,
+    fontSize: isMobile ? "clamp(28px, 8vw, 36px)" : isTablet ? "clamp(34px, 6vw, 48px)" : heroH1.fontSize,
+    lineHeight: isMobile ? 1.12 : heroH1.lineHeight,
+  };
+
+  const heroSubtextStyle: CSSProperties = {
+    ...heroSubtext,
+    fontSize: isMobile ? 15 : heroSubtext.fontSize,
+  };
+
+  const gridOuterStyle: CSSProperties = {
+    ...gridOuter,
+    padding: isMobile ? "0 16px 56px" : isTablet ? "0 20px 72px" : gridOuter.padding,
+  };
+
+  const ucGridStyle: CSSProperties = {
+    ...ucGrid,
+    gridTemplateColumns: isMobile
+      ? "1fr"
+      : isTablet
+      ? "repeat(2, 1fr)"
+      : ucGrid.gridTemplateColumns,
+  };
+
   return (
     <>
       <NavBar active="home" />
 
       <div style={pageRoot}>
         {/* ── HERO ── */}
-        <section className="hero-bg" style={heroSection}>
+        <section className="hero-bg" style={heroSectionStyle}>
           <div style={heroInner}>
             {/* Eyebrow */}
             <div style={eyebrowRow}>
@@ -139,8 +172,8 @@ export default function Home() {
             </div>
 
             {/* Headline */}
-            <h1 style={heroH1}>
-              <span style={{ whiteSpace: "nowrap" }}>
+            <h1 style={heroH1Style}>
+              <span style={{ whiteSpace: isMobile ? "normal" : "nowrap" }}>
                 Welcome to the{" "}
                 <span
                   key={heroWordIndex}
@@ -155,7 +188,7 @@ export default function Home() {
             </h1>
 
             {/* Subtext */}
-            <p style={heroSubtext}>
+            <p style={heroSubtextStyle}>
               A hands on, bank grade exploration of blockchain based payment
               infrastructure. Make the customer relationship, operating model,
               and economics tangible in a real on chain environment.
@@ -181,7 +214,7 @@ export default function Home() {
         </section>
 
         {/* ── USE CASES ── */}
-        <div style={gridOuter}>
+        <div style={gridOuterStyle}>
           {/* Section divider */}
           <div style={dividerRow}>
             <div style={dividerLine} />
@@ -190,9 +223,9 @@ export default function Home() {
           </div>
 
           {/* Cards */}
-          <div style={ucGrid}>
+          <div style={ucGridStyle}>
             {USE_CASES.map((uc) => (
-              <UcCard key={uc.n} uc={uc} />
+              <UcCard key={uc.n} uc={uc} isMobile={isMobile} />
             ))}
           </div>
         </div>
@@ -274,11 +307,16 @@ export default function Home() {
 }
 
 /* ── Card component ── */
-function UcCard({ uc }: { uc: UcDef }) {
+function UcCard({ uc, isMobile }: { uc: UcDef; isMobile: boolean }) {
+  const ucCardStyle: CSSProperties = {
+    ...ucCard,
+    borderTopColor: uc.accent,
+    padding: isMobile ? "16px 16px 14px" : ucCard.padding,
+  };
   return (
     <article
       className="uc-card"
-      style={{ ...ucCard, borderTopColor: uc.accent }}
+      style={ucCardStyle}
     >
       {/* Number + tag row */}
       <div style={cardTopRow}>

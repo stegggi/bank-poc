@@ -6,6 +6,7 @@ import { encodePacked, keccak256 } from "viem";
 import { hpkeSealJsonToEnvelopeHex } from "../use-cases/uc2-interbank-payment/lib/hpke";
 import { publicClient } from "../shared/lib/aa";
 import NavBar from "../shared/components/NavBar";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
 const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as `0x${string}`;
 const DIR = (process.env.NEXT_PUBLIC_DIRECTORY_ADDRESS || "") as `0x${string}`;
@@ -129,6 +130,7 @@ function readLocalReject(ref: `0x${string}`): RejectRecord | null {
 export default function BankA() {
   const { ready, authenticated, login, user } = usePrivy();
   const { wallets } = useWallets();
+  const { isMobile } = useBreakpoint();
 
   const [status, setStatus] = useState("");
   const [eoa, setEoa] = useState<`0x${string}` | "">("");
@@ -672,7 +674,7 @@ export default function BankA() {
 
       <NavBar active="bankA" />
       <div style={pageWrap}>
-        <div style={inner}>
+        <div style={{ ...inner, padding: isMobile ? '20px 16px' : '32px 24px' }}>
 
           {/* Page header */}
           <div style={pageHeader}>
@@ -684,7 +686,7 @@ export default function BankA() {
           </div>
 
           {/* Wallet card */}
-          <div style={card}>
+          <div style={{ ...card, padding: isMobile ? '16px' : '20px 24px' }}>
             <div style={cardLabel}>Sender Wallet</div>
             {!authenticated || !eoa ? (
               <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
@@ -716,7 +718,7 @@ export default function BankA() {
           </div>
 
           {/* Payment form */}
-          <div style={card}>
+          <div style={{ ...card, padding: isMobile ? '16px' : '20px 24px' }}>
             <div style={cardLabel}>Payment &amp; Travel-Rule Details</div>
             <div style={formNote}>
               Fields below form the encrypted Travel-Rule envelope (Swiss FINMA Art. 10 AMLO-FINMA minimum).

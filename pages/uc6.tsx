@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { BrowserProvider, type Eip1193Provider } from "ethers";
 import NavBar from "../shared/components/NavBar";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
 const BASE_CHAIN_ID_HEX = "0x2105";
 const BASE_CHAIN_ID_DEC = 8453;
@@ -1135,6 +1136,7 @@ function boolTone(v: boolean | null | undefined): "good" | "bad" | "muted" {
 }
 
 export default function Uc6Page() {
+  const { isMobile, isTablet, isMobileOrTablet } = useBreakpoint();
   const [status, setStatus] = useState<Uc6Status | null>(null);
   const [positionsPage, setPositionsPage] = useState<PositionRecordsPage | null>(null);
   const [positionsPageNum, setPositionsPageNum] = useState(1);
@@ -1792,7 +1794,7 @@ export default function Uc6Page() {
         {hasMultipleActive && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>Multiple active LP positions detected ({activeLpCount}). Bot is blocked.</div>}
 
         {/* ZONES 2+3+4: Three-column grid */}
-        <div style={{ display:"grid", gridTemplateColumns:"28fr 42fr 30fr", gap:16, alignItems:"start" }}>
+        <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "28fr 42fr 30fr", gap: isMobile ? 12 : 16, alignItems:"start" }}>
 
           {/* ZONE 2: Position Visual */}
           <div style={{ display:"grid", gap:12 }}>
@@ -1934,7 +1936,7 @@ export default function Uc6Page() {
         </div>
 
         {/* ZONE 5: Analytics Row */}
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit, minmax(300px, 1fr))", gap:16 }}>
+        <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(280px, 1fr))", gap: isMobile ? 12 : 16 }}>
           <Uc6Card title="Net P&L Windows">
             <PnlWindows status={status} />
           </Uc6Card>
@@ -2023,7 +2025,7 @@ export default function Uc6Page() {
               {/* Section 1: Strategy */}
               <details>
                 <summary style={cmdSectionStyle}>STRATEGY</summary>
-                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <NumberField label="bandHalfBps" value={draft.bandHalfBps} onChange={(v) => updateNumber("bandHalfBps", v)} />
                   <NumberField label="edgeRebalancePct" value={draft.edgeRebalancePct} step="0.01" onChange={(v) => updateNumber("edgeRebalancePct", v)} />
                   <NumberField label="minRebalanceIntervalSec" value={draft.minRebalanceIntervalSec} onChange={(v) => updateNumber("minRebalanceIntervalSec", v)} />
@@ -2045,7 +2047,7 @@ export default function Uc6Page() {
               {/* Section 2: Regime Engine */}
               <details>
                 <summary style={cmdSectionStyle}>REGIME ENGINE</summary>
-                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="regime.enabled" value={draft.regimeEnabled ? "true" : "false"} onChange={(v) => updateBool("regimeEnabled", v === "true")} options={["false", "true"]} />
                   <NumberField label="regime.windowSec" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
                   <NumberField label="regime.sampleEverySec" value={draft.regimeSampleEverySec} onChange={(v) => updateNumber("regimeSampleEverySec", v)} />
@@ -2061,7 +2063,7 @@ export default function Uc6Page() {
               {/* Section 3: Trend Escape */}
               <details>
                 <summary style={cmdSectionStyle}>TREND ESCAPE</summary>
-                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="trendEscape.enabled" value={draft.trendEscapeEnabled ? "true" : "false"} onChange={(v) => updateBool("trendEscapeEnabled", v === "true")} options={["false", "true"]} />
                   <NumberField label="trendEscape.minRegimeConfidence" value={draft.trendEscapeMinRegimeConfidence} step="0.01" onChange={(v) => updateNumber("trendEscapeMinRegimeConfidence", v)} />
                   <NumberField label="trendEscape.directionLookbackSec" value={draft.trendEscapeDirectionLookbackSec} onChange={(v) => updateNumber("trendEscapeDirectionLookbackSec", v)} />
@@ -2080,7 +2082,7 @@ export default function Uc6Page() {
               {/* Section 4: Re-Entry */}
               <details>
                 <summary style={cmdSectionStyle}>RE-ENTRY</summary>
-                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="reEntry.enabled" value={draft.reEntryEnabled ? "true" : "false"} onChange={(v) => updateBool("reEntryEnabled", v === "true")} options={["false", "true"]} />
                   <NumberField label="reEntry.minRegimeConfidence" value={draft.reEntryMinRegimeConfidence} step="0.01" onChange={(v) => updateNumber("reEntryMinRegimeConfidence", v)} />
                   <NumberField label="reEntry.minMeanRevertConfirmSec" value={draft.reEntryMinMeanRevertConfirmSec} onChange={(v) => updateNumber("reEntryMinMeanRevertConfirmSec", v)} />
@@ -2093,7 +2095,7 @@ export default function Uc6Page() {
               {/* Section 5: Execution */}
               <details>
                 <summary style={cmdSectionStyle}>EXECUTION & CAPS</summary>
-                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="venue" value={draft.venue} onChange={(v) => setDraft((p) => p ? { ...p, venue: v as "slipstream"|"uniswapv3" } : p)} options={["slipstream","uniswapv3"]} />
                   <NumberField label="pollIntervalMs" value={draft.pollIntervalMs} onChange={(v) => updateNumber("pollIntervalMs", v)} />
                   <SelectField label="wsEnabled" value={draft.wsEnabled ? "true" : "false"} onChange={(v) => updateBool("wsEnabled", v === "true")} options={["true","false"]} />
@@ -2102,14 +2104,14 @@ export default function Uc6Page() {
                 </div>
 
                 <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginTop:8 }}>
-                  <button onClick={saveSettings} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                  <button onClick={saveSettings} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                     {busy === "save" ? "Saving..." : "Save All Settings"}
                   </button>
-                  <button onClick={forceRebalance} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(245,158,11,0.15)", border:"1px solid rgba(245,158,11,0.4)", color:"#f59e0b", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                  <button onClick={forceRebalance} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(245,158,11,0.15)", border:"1px solid rgba(245,158,11,0.4)", color:"#f59e0b", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                     Force Rebalance
                   </button>
                   {hasActiveLpPosition && (
-                    <button onClick={liquidateAndPause} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontWeight:700, cursor:"pointer", fontSize:14 }}>
+                    <button onClick={liquidateAndPause} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                       Liquidate LP + Pause
                     </button>
                   )}
@@ -2347,6 +2349,7 @@ function LiquidityComposition({ lpUsdcSideUsd, lpWethSideUsd, lpValueUsd, lpSpli
 
 function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   const [tab, setTab] = useState<"TODAY"|"7D"|"30D"|"ALL">("TODAY");
+  const { isMobile: fwIsMobile } = useBreakpoint();
   const nLocal = (v: unknown, fb: number) => { const x = Number(v); return Number.isFinite(x) ? x : fb; };
   const data = {
     TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0), gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) },
@@ -2356,7 +2359,7 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   }[tab];
   const maxVal = Math.max(data.fees, data.gas + data.swap + data.mintBurn, Math.abs(data.net), 0.01);
   const barRow = (lbl: string, val: number, color: string) => (
-    <div style={{ display:"grid", gridTemplateColumns:"120px 1fr 80px", gap:8, alignItems:"center" }}>
+    <div style={{ display:"grid", gridTemplateColumns: fwIsMobile ? "80px 1fr 70px" : "120px 1fr 80px", gap:8, alignItems:"center" }}>
       <span style={{ fontSize:12, color:"rgba(232,232,240,0.6)" }}>{lbl}</span>
       <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.05)" }}>
         <div style={{ height:"100%", width:`${(Math.abs(val)/maxVal)*100}%`, borderRadius:4, background:color, minWidth: Math.abs(val) > 0 ? 2 : 0 }} />

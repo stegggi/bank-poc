@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import { ethers } from "ethers";
 import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import NavBar from "../shared/components/NavBar";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 import CONTEXT_PASSPORT_ABI from "../use-cases/uc4-context-passport/lib/ContextPassportABI";
 import {
   UserModulePackageV1,
@@ -246,6 +247,8 @@ function defaultServiceScopeDraft(): ServiceScopeDraft {
 }
 
 export default function ContextVaultPage() {
+  const { isMobile, isMobileOrTablet } = useBreakpoint();
+
   // Hydration guard
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
@@ -1280,7 +1283,7 @@ export default function ContextVaultPage() {
     color: "#fff",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
   };
-  const wrap: React.CSSProperties = { maxWidth: 1000, margin: "0 auto", padding: "24px 20px 64px" };
+  const wrap: React.CSSProperties = { maxWidth: 1000, margin: "0 auto", padding: isMobile ? "20px 16px 64px" : "24px 20px 64px" };
   const sectionHeading: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", margin: "0 0 4px" };
   const sectionSub: React.CSSProperties = { fontSize: 14, color: "rgba(255,255,255,0.62)", lineHeight: 1.6, marginBottom: 14 };
   const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "14px 0" };
@@ -1321,7 +1324,7 @@ export default function ContextVaultPage() {
             <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: accent, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
               UC 04
             </div>
-            <h1 style={{ fontSize: 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>Context Passport</h1>
+            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>Context Passport</h1>
             <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 600 }}>
               Customer-owned encrypted context modules. You control who can decrypt &mdash; with onchain-enforced consent.
             </p>
@@ -1341,7 +1344,7 @@ export default function ContextVaultPage() {
           )}
 
           {/* ── Two journeys grid ── */}
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(440px, 1fr))", gap: 28, alignItems: "start" }}>
+          <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(440px, 1fr))", gap: 28, alignItems: "start" }}>
 
             {/* ════ CUSTOMER JOURNEY ════ */}
             <div>
@@ -1402,7 +1405,7 @@ export default function ContextVaultPage() {
                     </div>
                   ) : (
                     <div style={card}>
-                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", marginBottom: 12 }}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", marginBottom: 12 }}>
                         <div>
                           <div style={labelStyle}>Module type</div>
                           {renderModuleSelector(!canUseCustomer)}
@@ -1463,7 +1466,7 @@ export default function ContextVaultPage() {
                     </div>
                   ) : (
                     <div style={card}>
-                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr", marginBottom: 14 }}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", marginBottom: 14 }}>
                         <div>
                           <div style={labelStyle}>Expiry (days, 0 = forever)</div>
                           <input style={input} value={expiryDays} onChange={(e) => setExpiryDays(e.target.value)} />
@@ -1473,7 +1476,7 @@ export default function ContextVaultPage() {
                           <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
                         </div>
                       </div>
-                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: "1fr 1fr" }}>
+                      <div style={{ display: "grid", gap: 10, gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
                         {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
                           const uiAddr = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
                           return (

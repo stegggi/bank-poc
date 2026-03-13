@@ -5,6 +5,7 @@ import { BrowserProvider, Interface } from "ethers";
 import { encodePacked, keccak256 } from "viem";
 import { publicClient } from "../shared/lib/aa";
 import NavBar from "../shared/components/NavBar";
+import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
 const HUB = (process.env.NEXT_PUBLIC_PAYMENT_HUB_ADDRESS || "") as `0x${string}`;
 const DIR = (process.env.NEXT_PUBLIC_DIRECTORY_ADDRESS || "") as `0x${string}`;
@@ -330,6 +331,7 @@ const formatXBankAmount = (parsed: any) => {
 };
 
 export default function BankB() {
+  const { isMobile, isMobileOrTablet } = useBreakpoint();
   const { ready, authenticated, login } = usePrivy();
   const { wallets } = useWallets();
 
@@ -1091,6 +1093,10 @@ for (let i = 0; i < logs.length; i += 1) {
     );
   }
 
+  // Responsive helpers (derived from hook, safe to use below)
+  const innerPadding = isMobile ? "20px 16px" : "32px 24px";
+  const cardPad = isMobile ? "16px" : "20px 24px";
+
   return (
     <>
       <style jsx global>{`
@@ -1201,19 +1207,19 @@ for (let i = 0; i < logs.length; i += 1) {
 
       <NavBar active="bankB" />
       <div style={pageWrap}>
-        <div style={inner}>
+        <div style={{ ...inner, padding: innerPadding }}>
 
           {/* Page header */}
-          <div style={pageHeader}>
+          <div style={{ ...pageHeader, flexWrap: "wrap" as const }}>
             <div style={ucChip}>UC2</div>
-            <div>
-              <div style={pageTitle}>Travel-Rule Compliant Receiving</div>
+            <div style={{ minWidth: 0 }}>
+              <div style={{ ...pageTitle, fontSize: isMobile ? 16 : 20 }}>Travel-Rule Compliant Receiving</div>
               <div style={pageSubtitle}>Bank B — Receiver perspective · Arbitrum Sepolia</div>
             </div>
           </div>
 
           {/* Receiver wallet card */}
-          <div style={card}>
+          <div style={{ ...card, padding: cardPad }}>
             <div style={cardLabel}>Receiver Wallet</div>
             {!isAddr(DEMO_RECIPIENT) ? (
               <div style={dimText}>
@@ -1240,7 +1246,7 @@ for (let i = 0; i < logs.length; i += 1) {
           </div>
 
           {/* Section 1: Incoming requests */}
-          <div style={card}>
+          <div style={{ ...card, padding: cardPad }}>
             <div style={cardLabel}>Incoming Requests</div>
 
             {showReturnToBankABanner && (
@@ -1284,7 +1290,7 @@ for (let i = 0; i < logs.length; i += 1) {
                                 <span style={tagGreen}>Swiss minimum</span>
                                 <span style={tagBlue}>HPKE decrypted</span>
                               </div>
-                              <div style={payloadGrid}>
+                              <div style={{ ...payloadGrid, gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
                                 <div>
                                   <div style={payloadSectionTitle}>Originator</div>
                                   <div style={payloadLine}>Name: {(r.parsed as any)?.originator?.name ?? "—"}</div>
@@ -1358,7 +1364,7 @@ for (let i = 0; i < logs.length; i += 1) {
           </div>
 
           {/* Section 2: Hub activity log */}
-          <div style={card}>
+          <div style={{ ...card, padding: cardPad }}>
             <div style={cardLabel}>Payment Hub Activity</div>
             <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
               <button className="bb-btn" onClick={scanLogs}>Refresh logs</button>
@@ -1407,7 +1413,7 @@ for (let i = 0; i < logs.length; i += 1) {
           </div>
 
           {/* Section 3: Directory Registry */}
-          <div style={card}>
+          <div style={{ ...card, padding: cardPad }}>
             <div style={cardLabel}>Directory Registry</div>
             <div style={formNote}>
               This reads the on-chain DirectoryRegistry. For HPKE to work, the receiving bank must have a non-empty HPKE public key stored on-chain.
@@ -1470,7 +1476,7 @@ for (let i = 0; i < logs.length; i += 1) {
 
             {/* Admin upsert */}
             <div style={adminPanel}>
-              <div style={adminPanelHeader}>
+              <div style={{ ...adminPanelHeader, flexDirection: isMobileOrTablet ? "column" as const : "row" as const }}>
                 <div>
                   <div style={{ fontWeight: 700, color: "#fff", fontSize: 13, marginBottom: 3 }}>
                     Directory Admin — upsertBank
@@ -1479,8 +1485,8 @@ for (let i = 0; i < logs.length; i += 1) {
                     Works only if your connected wallet is the Directory owner. Use this to set Bank B&apos;s HPKE pubkey.
                   </div>
                 </div>
-                <div style={{ display: "flex", flexDirection: "column", gap: 6, alignItems: "flex-end" }}>
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <div style={{ display: "flex", flexDirection: "column" as const, gap: 6, alignItems: isMobileOrTablet ? "flex-start" as const : "flex-end" as const }}>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" as const, justifyContent: isMobileOrTablet ? "flex-start" as const : "flex-end" as const }}>
                     {!metaMaskAddr ? (
                       <button className="bb-btn" onClick={connectMetaMask}>Connect MetaMask</button>
                     ) : (
