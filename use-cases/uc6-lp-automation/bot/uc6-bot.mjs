@@ -3692,7 +3692,11 @@ class Uc6Bot {
   getActivePositionRecord() {
     const tokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
     if (!tokenId) return null;
-    const rec = this.positionRecordsById.get(tokenId);
+    let rec = this.positionRecordsById.get(tokenId);
+    if (!rec && Array.isArray(this.positionRecords)) {
+      rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
+      if (rec) this.positionRecordsById.set(tokenId, rec);
+    }
     if (!rec || rec.status === "CLOSED") return null;
     return this.sanitizePositionRecordForPersist(rec);
   }
@@ -7076,7 +7080,11 @@ class Uc6Bot {
   getActiveLifecycleRecordInternal() {
     const tokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
     if (!tokenId) return null;
-    const rec = this.positionRecordsById.get(tokenId);
+    let rec = this.positionRecordsById.get(tokenId);
+    if (!rec && Array.isArray(this.positionRecords)) {
+      rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
+      if (rec) this.positionRecordsById.set(tokenId, rec);
+    }
     if (!rec || rec.status === "CLOSED") return null;
     return rec;
   }
@@ -7102,6 +7110,11 @@ class Uc6Bot {
       totalCostsToDateUsd;
 
     const spot = this.getSpotUsdcPerWeth();
+    const baselineSource = rec?._internal?.entryCaptured
+      ? "internal"
+      : rec?.entry?.entryTokens
+        ? "entry_tokens"
+        : "missing";
     const baselineWeth = Number(
       rec?._internal?.entryCaptured ? rec?._internal?.baselineWeth : rec?.entry?.entryTokens?.weth || 0
     );
@@ -7143,6 +7156,12 @@ class Uc6Bot {
       feesNetLiveUsd,
       divVsHodlLiveUsd,
       requiredFeesToBeatHodlLiveUsd,
+      hasBaseline,
+      baselineSource,
+      baselineWeth,
+      baselineUsdc,
+      hodlNowUsd,
+      lpNowUsd,
       collectableNowUsd,
       totalCostsToDateUsd,
       outOfRange: dist.outOfRange,
@@ -8929,6 +8948,12 @@ class Uc6Bot {
         feesNetLiveUsd: Number(hodlGateSnapshot.feesNetLiveUsd || 0),
         divVsHodlLiveUsd: Number(hodlGateSnapshot.divVsHodlLiveUsd || 0),
         requiredFeesToBeatHodlLiveUsd: Number(hodlGateSnapshot.requiredFeesToBeatHodlLiveUsd || 0),
+        hasBaseline: Boolean(hodlGateSnapshot.hasBaseline),
+        baselineSource: String(hodlGateSnapshot.baselineSource || "missing"),
+        baselineWeth: Number(hodlGateSnapshot.baselineWeth || 0),
+        baselineUsdc: Number(hodlGateSnapshot.baselineUsdc || 0),
+        hodlNowUsd: Number(hodlGateSnapshot.hodlNowUsd || 0),
+        lpNowUsd: Number(hodlGateSnapshot.lpNowUsd || 0),
         collectableNowUsd: Number(hodlGateSnapshot.collectableNowUsd || 0),
         totalCostsToDateUsd: Number(hodlGateSnapshot.totalCostsToDateUsd || 0),
         outOfRangeDurationSec: Number(hodlGateSnapshot.outOfRangeDurationSec || 0),
