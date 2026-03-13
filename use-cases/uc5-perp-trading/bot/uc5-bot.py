@@ -2522,6 +2522,79 @@ def _build_strategy_cfg(cfg: Dict[str, Any]) -> StrategyConfig:
   )
 
 
+def _parse_json_object(raw: Any) -> Dict[str, Any]:
+  if isinstance(raw, dict):
+    return dict(raw)
+  if isinstance(raw, str):
+    txt = raw.strip()
+    if not txt:
+      return {}
+    try:
+      parsed = json.loads(txt)
+      if isinstance(parsed, dict):
+        return parsed
+    except Exception:
+      return {}
+  return {}
+
+
+def _extract_entry_risk_from_reason(reason_json: Any) -> Dict[str, Optional[float]]:
+  payload = _parse_json_object(reason_json)
+  return {
+    "entry_atr_pct": _f(payload.get("entryAtrPct") or payload.get("entry_atr_pct")),
+    "fixed_stop_pct": _f(payload.get("fixedStopPct") or payload.get("fixed_stop_pct")),
+    "fixed_take_pct": _f(payload.get("fixedTakePct") or payload.get("fixed_take_pct")),
+    "fixed_stop_price": _f(payload.get("fixedStopPrice") or payload.get("fixed_stop_price")),
+    "fixed_take_price": _f(payload.get("fixedTakePrice") or payload.get("fixed_take_price")),
+  }
+
+
+def _resolve_risk_pcts_from_entry(cfg: StrategyConfig, entry_atr_pct: Optional[float]) -> Tuple[Optional[float], Optional[float]]:
+  atr = float(entry_atr_pct or 0.0)
+  stop_pct: Optional[float] = None
+  take_pct: Optional[float] = None
+  if cfg.stop_loss_pct is not None and float(cfg.stop_loss_pct) > 0:
+    stop_pct = float(cfg.stop_loss_pct)
+  elif cfg.stop_loss_atr_mult is not None and float(cfg.stop_loss_atr_mult) > 0 and atr > 0:
+    stop_pct = float(cfg.stop_loss_atr_mult) * atr
+
+  if cfg.take_profit_pct is not None and float(cfg.take_profit_pct) > 0:
+    take_pct = float(cfg.take_profit_pct)
+  elif cfg.take_profit_atr_mult is not None and float(cfg.take_profit_atr_mult) > 0 and atr > 0:
+    take_pct = float(cfg.take_profit_atr_mult) * atr
+  return stop_pct, take_pct
+
+
+def _ensure_frozen_risk_levels(position: PositionState, cfg: StrategyConfig, live_atr_pct: Optional[float]) -> None:
+  if not position.open:
+    return
+  side = str(position.side or "").upper()
+  if side not in ("LONG", "SHORT"):
+    return
+  entry = _f(position.entry_price)
+  if entry is None or entry <= 0:
+    return
+
+  if (position.entry_atr_pct is None or float(position.entry_atr_pct or 0.0) <= 0) and (live_atr_pct is not None and float(live_atr_pct) > 0):
+    position.entry_atr_pct = float(live_atr_pct)
+
+  stop_pct_from_cfg, take_pct_from_cfg = _resolve_risk_pcts_from_entry(cfg, position.entry_atr_pct)
+  existing_stop_pct = _f(position.fixed_stop_pct)
+  existing_take_pct = _f(position.fixed_take_pct)
+  effective_stop_pct = existing_stop_pct if existing_stop_pct and existing_stop_pct > 0 else stop_pct_from_cfg
+  effective_take_pct = existing_take_pct if existing_take_pct and existing_take_pct > 0 else take_pct_from_cfg
+
+  if position.fixed_stop_pct is None and effective_stop_pct and effective_stop_pct > 0:
+    position.fixed_stop_pct = float(effective_stop_pct)
+  if position.fixed_take_pct is None and effective_take_pct and effective_take_pct > 0:
+    position.fixed_take_pct = float(effective_take_pct)
+
+  if position.fixed_stop_price is None and effective_stop_pct and effective_stop_pct > 0:
+    position.fixed_stop_price = float(entry * (1.0 - effective_stop_pct) if side == "LONG" else entry * (1.0 + effective_stop_pct))
+  if position.fixed_take_price is None and effective_take_pct and effective_take_pct > 0:
+    position.fixed_take_price = float(entry * (1.0 + effective_take_pct) if side == "LONG" else entry * (1.0 - effective_take_pct))
+
+
 def _regime_from_runner_result(result: Dict[str, Any], now_ms: int) -> RegimeDecision:
   state = str(result.get("state") or "UNKNOWN").upper()
   if state not in ("TREND", "RANGE", "UNKNOWN"):
@@ -2631,6 +2704,11 @@ async def main():
 
   current_trade_entry_price: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
+  current_trade_entry_atr_pct: Optional[float] = None
+  current_trade_fixed_stop_pct: Optional[float] = None
+  current_trade_fixed_take_pct: Optional[float] = None
+  current_trade_fixed_stop_price: Optional[float] = None
+  current_trade_fixed_take_price: Optional[float] = None
   # Restore entry price from DB in case bot restarted with an open position.
   # Without this, FLATTEN/risk-exit would compute pnl=None on restart.
   try:
@@ -2638,6 +2716,12 @@ async def main():
     if _open_entry:
       current_trade_entry_price = _open_entry.get("entry_price")
       current_trade_entry_ts = _open_entry.get("entry_ts")
+      _entry_risk = _extract_entry_risk_from_reason(_open_entry.get("reason_json"))
+      current_trade_entry_atr_pct = _entry_risk.get("entry_atr_pct")
+      current_trade_fixed_stop_pct = _entry_risk.get("fixed_stop_pct")
+      current_trade_fixed_take_pct = _entry_risk.get("fixed_take_pct")
+      current_trade_fixed_stop_price = _entry_risk.get("fixed_stop_price")
+      current_trade_fixed_take_price = _entry_risk.get("fixed_take_price")
   except Exception as _e:
     print(f"[startup] Could not restore entry price from DB: {_e}")
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
@@ -2824,6 +2908,16 @@ async def main():
         position_state.qty = abs(float(pos_size))
         position_state.entry_price = pos_entry_price or position_state.entry_price
         position_state.entry_ts_ms = pos_entry_at_ms or position_state.entry_ts_ms
+        if current_trade_entry_atr_pct and not position_state.entry_atr_pct:
+          position_state.entry_atr_pct = float(current_trade_entry_atr_pct)
+        if current_trade_fixed_stop_pct and not position_state.fixed_stop_pct:
+          position_state.fixed_stop_pct = float(current_trade_fixed_stop_pct)
+        if current_trade_fixed_take_pct and not position_state.fixed_take_pct:
+          position_state.fixed_take_pct = float(current_trade_fixed_take_pct)
+        if current_trade_fixed_stop_price and not position_state.fixed_stop_price:
+          position_state.fixed_stop_price = float(current_trade_fixed_stop_price)
+        if current_trade_fixed_take_price and not position_state.fixed_take_price:
+          position_state.fixed_take_price = float(current_trade_fixed_take_price)
         if position_state.entry_ts_ms is None:
           open_leg = DB_MANAGER.query_open_leg_from_trades()
           if open_leg and open_leg.get("ts_ms"):
@@ -2837,8 +2931,25 @@ async def main():
         position_state = PositionState(open=False, side=None, qty=0.0, entry_price=None, entry_ts_ms=None)
         current_trade_entry_price = None
         current_trade_entry_ts = None
+        current_trade_entry_atr_pct = None
+        current_trade_fixed_stop_pct = None
+        current_trade_fixed_take_pct = None
+        current_trade_fixed_stop_price = None
+        current_trade_fixed_take_price = None
       if was_open and not pos_open:
         last_close_ts_ms = now_ms
+
+      if position_state.open:
+        _ensure_frozen_risk_levels(
+          position=position_state,
+          cfg=_build_strategy_cfg(cfg),
+          live_atr_pct=_f(metrics_cache.get("atrPct")),
+        )
+        current_trade_entry_atr_pct = _f(position_state.entry_atr_pct) or current_trade_entry_atr_pct
+        current_trade_fixed_stop_pct = _f(position_state.fixed_stop_pct) or current_trade_fixed_stop_pct
+        current_trade_fixed_take_pct = _f(position_state.fixed_take_pct) or current_trade_fixed_take_pct
+        current_trade_fixed_stop_price = _f(position_state.fixed_stop_price) or current_trade_fixed_stop_price
+        current_trade_fixed_take_price = _f(position_state.fixed_take_price) or current_trade_fixed_take_price
 
       if position_state.open and last_mid:
         position_state = update_position_extremes(position_state, float(last_mid))
@@ -3418,6 +3529,35 @@ async def main():
                     maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
                 entry_px = float(epf if epf and epf > 0 else last_mid)
                 entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
+                entry_risk_state = PositionState(
+                  open=True,
+                  side=desired,
+                  qty=opened_qty,
+                  entry_price=entry_px,
+                  entry_ts_ms=etsf or now_ms,
+                )
+                _ensure_frozen_risk_levels(
+                  position=entry_risk_state,
+                  cfg=strategy_cfg,
+                  live_atr_pct=_f(metrics_cache.get("atrPct")),
+                )
+                entry_reason_payload = {
+                  "reason": "regime_entry",
+                  "regimeState": regime_decision.state,
+                  "regimeDirection": regime_decision.direction,
+                  "regimeStrength": regime_decision.strength,
+                  "entryMode": entry_mode,
+                  "makerFilledQty": filled,
+                  "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
+                  "entryTimedOut": bool(exec_result.get("timedOut")),
+                  "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
+                  "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
+                  "entryAtrPct": entry_risk_state.entry_atr_pct,
+                  "fixedStopPct": entry_risk_state.fixed_stop_pct,
+                  "fixedTakePct": entry_risk_state.fixed_take_pct,
+                  "fixedStopPrice": entry_risk_state.fixed_stop_price,
+                  "fixedTakePrice": entry_risk_state.fixed_take_price,
+                }
 
                 _entry_maker_pct = float(
                   (last_entry_fill_audit or {}).get("summary", {}).get("makerRatePct") or 0.0
@@ -3431,20 +3571,7 @@ async def main():
                   price=entry_px,
                   pnl=None,
                   tag="regime_entry",
-                  reason_json=json.dumps(
-                    {
-                      "reason": "regime_entry",
-                      "regimeState": regime_decision.state,
-                      "regimeDirection": regime_decision.direction,
-                      "regimeStrength": regime_decision.strength,
-                      "entryMode": entry_mode,
-                      "makerFilledQty": filled,
-                      "entryChaseAttempts": int(exec_result.get("attemptCount") or 0),
-                      "entryTimedOut": bool(exec_result.get("timedOut")),
-                      "entryAcceptedPartial": bool(exec_result.get("acceptedPartial")),
-                      "entryPartialFillRatio": float(exec_result.get("partialFillRatio") or 0.0),
-                    }
-                  ),
+                  reason_json=json.dumps(entry_reason_payload),
                   entry_ts=etsf or now_ms,
                   entry_price=entry_px,
                   note=f"maker:{round(_entry_maker_pct)}%" if _entry_maker_pct > 0 else "taker",
@@ -3452,6 +3579,11 @@ async def main():
 
                 current_trade_entry_price = entry_px
                 current_trade_entry_ts = etsf or now_ms
+                current_trade_entry_atr_pct = _f(entry_risk_state.entry_atr_pct)
+                current_trade_fixed_stop_pct = _f(entry_risk_state.fixed_stop_pct)
+                current_trade_fixed_take_pct = _f(entry_risk_state.fixed_take_pct)
+                current_trade_fixed_stop_price = _f(entry_risk_state.fixed_stop_price)
+                current_trade_fixed_take_price = _f(entry_risk_state.fixed_take_price)
                 if submitted_any:
                   last_order_ts.append(time.time())
 
@@ -3792,7 +3924,17 @@ async def main():
             else None
           ),
           "unrealizedPnl": pos_upnl,
-          "atrPct": float(metrics_cache.get("atrPct") or 0.0),
+          "atrPct": (
+            float(position_state.entry_atr_pct)
+            if position_state.open and position_state.entry_atr_pct is not None and float(position_state.entry_atr_pct) > 0
+            else float(metrics_cache.get("atrPct") or 0.0)
+          ),
+          "liveAtrPct": float(metrics_cache.get("atrPct") or 0.0),
+          "entryAtrPct": _f(position_state.entry_atr_pct),
+          "fixedStopPct": _f(position_state.fixed_stop_pct),
+          "fixedTakePct": _f(position_state.fixed_take_pct),
+          "fixedStopPrice": _f(position_state.fixed_stop_price),
+          "fixedTakePrice": _f(position_state.fixed_take_price),
           "updatedAt": int(time.time() * 1000),
         },
         "agent": {

@@ -969,11 +969,11 @@ class DailyDbManager:
     """Return the most recent ENTRY row that has no following EXIT/FLATTEN (i.e. currently open position).
     Walks all DB files in order to match the same pairing logic as query_open_leg_from_trades,
     but returns the full row including entry_price and entry_ts."""
-    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[int]]] = []
+    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[int], Optional[str]]] = []
     for _, conn in self._iter_all_connections():
       cur = conn.execute(
         """
-        SELECT ts_ms, event_type, side, qty, price, entry_price, entry_ts
+        SELECT ts_ms, event_type, side, qty, price, entry_price, entry_ts, reason_json
         FROM trades
         WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
         ORDER BY ts_ms ASC
@@ -988,11 +988,12 @@ class DailyDbManager:
           float(r[4]) if r[4] is not None else None,
           float(r[5]) if r[5] is not None else None,
           int(r[6]) if r[6] is not None else None,
+          str(r[7]) if r[7] is not None else None,
         ))
 
     rows.sort(key=lambda x: x[0])
     open_row: Optional[Dict[str, Any]] = None
-    for ts_ms, et, side, qty, price, entry_price, entry_ts in rows:
+    for ts_ms, et, side, qty, price, entry_price, entry_ts, reason_json in rows:
       if et == "ENTRY":
         open_row = {
           "ts_ms": ts_ms,
@@ -1001,6 +1002,7 @@ class DailyDbManager:
           "price": price,
           "entry_price": entry_price if entry_price is not None else price,
           "entry_ts": entry_ts if entry_ts is not None else ts_ms,
+          "reason_json": reason_json,
         }
       elif et in ("EXIT", "FLATTEN"):
         open_row = None

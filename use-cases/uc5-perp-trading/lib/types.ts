@@ -203,6 +203,12 @@ export type Uc5Status = {
     ageSec?: number;
     unrealizedPnl?: number;
     atrPct?: number;
+    liveAtrPct?: number;
+    entryAtrPct?: number;
+    fixedStopPct?: number;
+    fixedTakePct?: number;
+    fixedStopPrice?: number;
+    fixedTakePrice?: number;
     updatedAt?: number;
   };
   agent?: {

@@ -34,6 +34,11 @@ class PositionState:
   entry_ts_ms: Optional[int]
   peak_price: Optional[float] = None
   trough_price: Optional[float] = None
+  entry_atr_pct: Optional[float] = None
+  fixed_stop_pct: Optional[float] = None
+  fixed_take_pct: Optional[float] = None
+  fixed_stop_price: Optional[float] = None
+  fixed_take_price: Optional[float] = None
 
 
 @dataclass
@@ -144,20 +149,28 @@ def evaluate_risk_exit(
 
   stop_pct = _resolve_stop_pct(cfg, atr_pct)
   take_pct = _resolve_take_pct(cfg, atr_pct)
+  fixed_stop_price = float(position.fixed_stop_price) if position.fixed_stop_price and position.fixed_stop_price > 0 else None
+  fixed_take_price = float(position.fixed_take_price) if position.fixed_take_price and position.fixed_take_price > 0 else None
+  stop_price = fixed_stop_price
+  take_price = fixed_take_price
+  if stop_price is None and stop_pct and stop_pct > 0:
+    stop_price = entry * (1.0 - stop_pct) if side == "LONG" else entry * (1.0 + stop_pct)
+  if take_price is None and take_pct and take_pct > 0:
+    take_price = entry * (1.0 + take_pct) if side == "LONG" else entry * (1.0 - take_pct)
   trail_pct = cfg.trailing_stop_pct if cfg.trailing_stop_pct and cfg.trailing_stop_pct > 0 else None
 
   if side == "LONG":
-    if stop_pct and mark_price <= entry * (1.0 - stop_pct):
+    if stop_price and mark_price <= stop_price:
       return RiskCheckResult(True, "stop_loss", "SL")
-    if take_pct and mark_price >= entry * (1.0 + take_pct):
+    if take_price and mark_price >= take_price:
       return RiskCheckResult(True, "take_profit", "TP")
     if trail_pct and position.peak_price and mark_price <= float(position.peak_price) * (1.0 - trail_pct):
       return RiskCheckResult(True, "trailing_stop", "TRAIL")
 
   if side == "SHORT":
-    if stop_pct and mark_price >= entry * (1.0 + stop_pct):
+    if stop_price and mark_price >= stop_price:
       return RiskCheckResult(True, "stop_loss", "SL")
-    if take_pct and mark_price <= entry * (1.0 - take_pct):
+    if take_price and mark_price <= take_price:
       return RiskCheckResult(True, "take_profit", "TP")
     if trail_pct and position.trough_price and mark_price >= float(position.trough_price) * (1.0 + trail_pct):
       return RiskCheckResult(True, "trailing_stop", "TRAIL")

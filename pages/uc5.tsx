@@ -1019,8 +1019,17 @@ export default function Uc5Page() {
                   status?.agent?.regimeDiagnostics && typeof status.agent.regimeDiagnostics === "object"
                     ? (status.agent.regimeDiagnostics as Record<string, unknown>)
                     : null;
-                const atrPct =
+                const entryAtrPct =
                   firstPositiveNumber(
+                    pos.entryAtrPct,
+                    posRecord.entryAtrPct,
+                    posRecord.entry_atr_pct
+                  ) ?? 0;
+                const liveAtrPct =
+                  firstPositiveNumber(
+                    pos.liveAtrPct,
+                    posRecord.liveAtrPct,
+                    posRecord.live_atr_pct,
                     pos.atrPct,
                     posRecord.atrPct,
                     posRecord.atr_pct,
@@ -1028,7 +1037,12 @@ export default function Uc5Page() {
                     regimeDiagnostics?.atr_pct,
                     regimeDiagnostics?.atr
                   ) ?? 0;
+                const atrPct = entryAtrPct > 0 ? entryAtrPct : liveAtrPct;
                 const atrUsd = atrPct > 0 && entryPrice > 0 ? atrPct * entryPrice : null;
+                const fixedStopPrice = firstPositiveNumber(pos.fixedStopPrice, posRecord.fixedStopPrice, posRecord.fixed_stop_price);
+                const fixedTakePrice = firstPositiveNumber(pos.fixedTakePrice, posRecord.fixedTakePrice, posRecord.fixed_take_price);
+                const fixedStopPct = firstPositiveNumber(pos.fixedStopPct, posRecord.fixedStopPct, posRecord.fixed_stop_pct);
+                const fixedTakePct = firstPositiveNumber(pos.fixedTakePct, posRecord.fixedTakePct, posRecord.fixed_take_pct);
                 const runtimeCfg =
                   status?.runtime ||
                   (cfg
@@ -1051,19 +1065,24 @@ export default function Uc5Page() {
                 const tpFixedPct = firstPositiveNumber(runtimeCfg?.takeProfitPct) ?? 0;
                 const slAtrMult = firstPositiveNumber(runtimeCfg?.stopLossAtrMult) ?? 0;
                 const tpAtrMult = firstPositiveNumber(runtimeCfg?.takeProfitAtrMult) ?? 0;
-                const isAtrBasedSl = slFixedPct <= 0 && slAtrMult > 0 && atrPct > 0;
-                const isAtrBasedTp = tpFixedPct <= 0 && tpAtrMult > 0 && atrPct > 0;
-                const slPct = isAtrBasedSl ? slAtrMult * atrPct : slFixedPct;
-                const tpPct = isAtrBasedTp ? tpAtrMult * atrPct : tpFixedPct;
+                const isAtrBasedSl = fixedStopPrice == null && slFixedPct <= 0 && slAtrMult > 0 && atrPct > 0;
+                const isAtrBasedTp = fixedTakePrice == null && tpFixedPct <= 0 && tpAtrMult > 0 && atrPct > 0;
+                const slPctComputed = isAtrBasedSl ? slAtrMult * atrPct : slFixedPct;
+                const tpPctComputed = isAtrBasedTp ? tpAtrMult * atrPct : tpFixedPct;
+                const slPct = fixedStopPct ?? slPctComputed;
+                const tpPct = fixedTakePct ?? tpPctComputed;
                 const isLong = pos.side === "LONG";
-                const slPrice = entryPrice > 0 && slPct > 0 ? (isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct)) : null;
-                const tpPrice = entryPrice > 0 && tpPct > 0 ? (isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct)) : null;
+                const slPrice = fixedStopPrice ?? (entryPrice > 0 && slPct > 0 ? (isLong ? entryPrice * (1 - slPct) : entryPrice * (1 + slPct)) : null);
+                const tpPrice = fixedTakePrice ?? (entryPrice > 0 && tpPct > 0 ? (isLong ? entryPrice * (1 + tpPct) : entryPrice * (1 - tpPct)) : null);
                 const distToSlUsd = slPrice != null && currentPrice > 0 ? Math.abs(currentPrice - slPrice) : null;
                 const distToTpUsd = tpPrice != null && currentPrice > 0 ? Math.abs(currentPrice - tpPrice) : null;
                 const distToSlPct = distToSlUsd != null && currentPrice > 0 ? (distToSlUsd / currentPrice) * 100 : null;
                 const distToTpPct = distToTpUsd != null && currentPrice > 0 ? (distToTpUsd / currentPrice) * 100 : null;
                 const distToSlAtr = distToSlUsd != null && atrUsd && atrUsd > 0 ? distToSlUsd / atrUsd : null;
                 const distToTpAtr = distToTpUsd != null && atrUsd && atrUsd > 0 ? distToTpUsd / atrUsd : null;
+                const exitsLabel = fixedStopPrice != null || fixedTakePrice != null
+                  ? "frozen at entry"
+                  : (isAtrBasedSl || isAtrBasedTp ? "ATR-based exits" : "fixed exits");
                 const progressPct = (slPrice != null && tpPrice != null && currentPrice > 0)
                   ? Math.max(0, Math.min(100, ((currentPrice - slPrice) / (tpPrice - slPrice)) * 100))
                   : null;
@@ -1087,10 +1106,10 @@ export default function Uc5Page() {
                       {/* ATR / exits block — always shown when position open */}
                       <div style={{ margin: "4px 0 2px", padding: "8px 10px", background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 8 }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: "rgba(6,182,212,0.7)", textTransform: "uppercase", letterSpacing: 1, marginBottom: 6 }}>
-                          ATR · {isAtrBasedSl || isAtrBasedTp ? "ATR-based exits" : "fixed exits"}
+                          ATR · {exitsLabel}
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
-                          <span style={{ color: "rgba(232,232,240,0.5)" }}>1 ATR</span>
+                          <span style={{ color: "rgba(232,232,240,0.5)" }}>{entryAtrPct > 0 ? "ATR at entry" : "1 ATR"}</span>
                           <span style={{ fontFamily: "monospace", fontWeight: 700, color: atrUsd != null ? "#06b6d4" : "rgba(232,232,240,0.3)" }}>
                             {atrUsd != null
                               ? <>{fmtUsd(atrUsd)} <span style={{ color: "rgba(232,232,240,0.4)", fontSize: 11 }}>({(atrPct * 100).toFixed(3)}%)</span></>
