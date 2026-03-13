@@ -3712,7 +3712,21 @@ class Uc6Bot {
       rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
       if (rec) this.positionRecordsById.set(tokenId, rec);
     }
-    if (rec) return rec;
+    if (rec) {
+      const note = String(rec?.entry?.entrySnapshotNote || "");
+      const needsUpgrade = this.isEntrySnapshotMissing(rec) || note.includes("adopted active on-chain position");
+      if (needsUpgrade) {
+        const historicalBaseline =
+          this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso: null }) ||
+          this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso: null });
+        if (historicalBaseline && this.shouldReplaceEntryBaseline(rec, historicalBaseline)) {
+          this.applyEntryBaselineFallbackToRecord(rec, historicalBaseline);
+          this.recomputeLifecycleRecordDerived(rec);
+          this.persistPositionRecords().catch(() => {});
+        }
+      }
+      return rec;
+    }
 
     const pos = this.state.position || {};
     const venue = pos.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
@@ -3743,10 +3757,24 @@ class Uc6Bot {
     });
     if (!rec) return null;
 
-    let baselineWeth = 0;
-    let baselineUsdc = 0;
+    // Prefer reconstructing the true entry baseline from historical lifecycle
+    // events before falling back to a "current snapshot" baseline.
+    const historicalBaseline =
+      this.deriveFallbackEntryBaselineForRecord(rec, { closeAtIso: null }) ||
+      this.deriveValueOnlyEntryBaselineForRecord(rec, { closeAtIso: null });
+    if (historicalBaseline) {
+      this.applyEntryBaselineFallbackToRecord(rec, historicalBaseline);
+    }
+
+    let baselineWeth = Number(rec?._internal?.baselineWeth || 0);
+    let baselineUsdc = Number(rec?._internal?.baselineUsdc || 0);
+    const hasHistoricalBaseline = Boolean(rec?._internal?.entryCaptured) &&
+      (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0);
+
+    // If no historical baseline can be reconstructed, adopt current LP
+    // composition as a degraded baseline to keep gate math coherent.
     const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
-    if (hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96) {
+    if (!hasHistoricalBaseline && hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96) {
       const token0 = activePool?.token0 || this.weth;
       const token1 = activePool?.token1 || this.usdc;
       const amounts = this.lpAmountsFromLiquidity(
@@ -3780,7 +3808,9 @@ class Uc6Bot {
     rec.entry.entryValueUsd = entryValueUsd > 0 ? entryValueUsd : Number(rec.entry.entryValueUsd || 0);
     rec.entry.spotPriceUsdcPerWeth = spot > 0 ? spot : Number(rec.entry.spotPriceUsdcPerWeth || 0);
     rec.entry.entrySnapshotApprox = true;
-    rec.entry.entrySnapshotNote = "entry snapshot fallback (adopted active on-chain position)";
+    if (!hasHistoricalBaseline) {
+      rec.entry.entrySnapshotNote = "entry snapshot fallback (adopted active on-chain position)";
+    }
     rec._internal.baselineWeth = baselineWeth;
     rec._internal.baselineUsdc = baselineUsdc;
     rec._internal.entryCaptured = Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0;
@@ -8450,6 +8480,14 @@ class Uc6Bot {
       this.setDecision({ action: "monitor", reason: "no_market_data" });
       return;
     }
+
+    // Defensive adoption before trigger evaluation to avoid false `no_position`
+    // decisions when local tokenId briefly desyncs from on-chain inventory.
+    if (!this.state.position?.tokenId) {
+      await this.maybeRefreshPositionInventory({ force: true }).catch(() => {});
+      this.enforceSinglePositionInvariant();
+    }
+    this.ensureActiveLifecycleRecordFromTrackedPosition();
 
     const forceRequestedAt = this.state.forceRebalanceRequestedAt || null;
     const forceRebalance = Boolean(forceRequestedAt);
