@@ -4685,7 +4685,11 @@ class Uc6Bot {
       if (trendMovePct >= trendCfg.minTrendMovePct) direction = "up";
       else if (trendMovePct <= -trendCfg.minTrendMovePct) direction = "down";
     }
-    const muLogPrice = Number(latestRegime?.mu);
+    const regimeOk = Boolean(latestRegime?.ok);
+    const muLogPrice =
+      regimeOk && Number.isFinite(Number(latestRegime?.mu))
+        ? Number(latestRegime.mu)
+        : null;
     const distanceFromMuPct =
       Number.isFinite(logPriceNow) && Number.isFinite(muLogPrice)
         ? Math.abs(Math.exp(logPriceNow - muLogPrice) - 1)
@@ -4882,14 +4886,15 @@ class Uc6Bot {
           maxBandHalfBps
         );
       }
+      const estOk = Boolean(est?.ok);
       latest.regime = {
         enabled: true,
-        ok: Boolean(est?.ok),
+        ok: estOk,
         label: est?.label || "unknown",
-        theta: Number.isFinite(Number(est?.theta)) ? Number(est.theta) : null,
-        halfLifeSec: Number.isFinite(Number(est?.halfLifeSec)) ? Number(est.halfLifeSec) : null,
-        sigma: Number.isFinite(Number(est?.sigma)) ? Number(est.sigma) : null,
-        mu: Number.isFinite(Number(est?.mu)) ? Number(est.mu) : null,
+        theta: estOk && Number.isFinite(Number(est?.theta)) ? Number(est.theta) : null,
+        halfLifeSec: estOk && Number.isFinite(Number(est?.halfLifeSec)) ? Number(est.halfLifeSec) : null,
+        sigma: estOk && Number.isFinite(Number(est?.sigma)) ? Number(est.sigma) : null,
+        mu: estOk && Number.isFinite(Number(est?.mu)) ? Number(est.mu) : null,
         confidence: Number.isFinite(Number(est?.confidence)) ? Number(est.confidence) : 0,
         updatedAtIso: this.regimeState?.updatedAtSec ? new Date(this.regimeState.updatedAtSec * 1000).toISOString() : null,
         sampleCount: Array.isArray(this.regimeState?.samples) ? this.regimeState.samples.length : 0,
