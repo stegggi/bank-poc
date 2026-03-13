@@ -20,6 +20,15 @@ def _f(x: Any) -> Optional[float]:
   except Exception:
     return None
 
+
+def _row_get(row: Any, idx: int, default: Any = None) -> Any:
+  try:
+    if row is None:
+      return default
+    return row[idx]
+  except Exception:
+    return default
+
 SCHEMA_SQL = """
 PRAGMA journal_mode=WAL;
 PRAGMA synchronous=NORMAL;
@@ -638,17 +647,22 @@ class DailyDbManager:
         continue
       if row is None:
         continue
+      try:
+        if len(row) < 5:
+          continue
+      except Exception:
+        continue
 
-      this_min = row[0]
-      this_max = row[1]
+      this_min = _row_get(row, 0)
+      this_max = _row_get(row, 1)
       if this_min is not None:
         min_ts = int(this_min) if min_ts is None else min(min_ts, int(this_min))
       if this_max is not None:
         max_ts = int(this_max) if max_ts is None else max(max_ts, int(this_max))
 
-      total += int(row[2] or 0)
-      cnt_24h += int(row[3] or 0)
-      cnt_5m += int(row[4] or 0)
+      total += int(_row_get(row, 2, 0) or 0)
+      cnt_24h += int(_row_get(row, 3, 0) or 0)
+      cnt_5m += int(_row_get(row, 4, 0) or 0)
 
     folder_size = self.folder_size_bytes()
     out = {
@@ -790,25 +804,36 @@ class DailyDbManager:
   def query_trades_summary(self) -> Dict[str, Any]:
     rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[str], Optional[str]]] = []
     for _, conn in self._iter_all_connections():
-      cur = conn.execute(
-        """
-        SELECT ts_ms, event_type, side, qty, price, pnl, tag, reason_json
-        FROM trades
-        WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
-        ORDER BY ts_ms ASC
-        """
-      )
+      try:
+        cur = conn.execute(
+          """
+          SELECT ts_ms, event_type, side, qty, price, pnl, tag, reason_json
+          FROM trades
+          WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
+          ORDER BY ts_ms ASC
+          """
+        )
+      except Exception:
+        continue
       for r in cur.fetchall():
+        ts_ms_raw = _row_get(r, 0)
+        et_raw = _row_get(r, 1)
+        if ts_ms_raw is None or et_raw is None:
+          continue
+        try:
+          ts_ms = int(ts_ms_raw)
+        except Exception:
+          continue
         rows.append(
           (
-            int(r[0]),
-            str(r[1] or ""),
-            str(r[2] or "") if r[2] is not None else None,
-            float(r[3]) if r[3] is not None else None,
-            float(r[4]) if r[4] is not None else None,
-            float(r[5]) if r[5] is not None else None,
-            str(r[6] or "") if r[6] is not None else None,
-            str(r[7] or "") if r[7] is not None else None,
+            ts_ms,
+            str(et_raw or ""),
+            str(_row_get(r, 2, "") or "") if _row_get(r, 2) is not None else None,
+            float(_row_get(r, 3)) if _row_get(r, 3) is not None else None,
+            float(_row_get(r, 4)) if _row_get(r, 4) is not None else None,
+            float(_row_get(r, 5)) if _row_get(r, 5) is not None else None,
+            str(_row_get(r, 6, "") or "") if _row_get(r, 6) is not None else None,
+            str(_row_get(r, 7, "") or "") if _row_get(r, 7) is not None else None,
           )
         )
 
