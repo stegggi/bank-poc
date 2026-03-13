@@ -1031,14 +1031,14 @@ export default function Uc5Page() {
                 const atrUsd = atrPct > 0 && entryPrice > 0 ? atrPct * entryPrice : null;
                 const runtimeCfg =
                   status?.runtime ||
-                  (status as unknown as {
-                    runtimeConfig?: {
-                      stopLossPct?: number | null;
-                      stopLossAtrMult?: number | null;
-                      takeProfitPct?: number | null;
-                      takeProfitAtrMult?: number | null;
-                    };
-                  }).runtimeConfig ||
+                  (cfg
+                    ? {
+                        stopLossPct: cfg.stopLossPct,
+                        stopLossAtrMult: cfg.stopLossAtrMult,
+                        takeProfitPct: cfg.takeProfitPct,
+                        takeProfitAtrMult: cfg.takeProfitAtrMult,
+                      }
+                    : null) ||
                   (edit
                     ? {
                         stopLossPct: edit.stopLossPct,

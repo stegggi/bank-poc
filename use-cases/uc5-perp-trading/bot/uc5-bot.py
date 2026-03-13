@@ -1172,7 +1172,17 @@ def parse_position(
       except Exception:
         continue
 
-  entry_price = _f(pos.get("entryPrice")) or _f(pos.get("avgEntryPrice")) or _f(pos.get("averageEntryPrice"))
+  entry_price = (
+      _f(pos.get("entryPrice"))
+      or _f(pos.get("avgEntryPrice"))
+      or _f(pos.get("averageEntryPrice"))
+      or _f(pos.get("entry_price"))
+      or _f(pos.get("avg_entry_price"))
+      or _f(pos.get("averageOpenPrice"))
+      or _f(pos.get("avgOpenPrice"))
+      or _f(pos.get("entryPx"))
+      or _f(pos.get("entry_px"))
+  )
 
   entry_at_ms = None
   for k in ("openedAt", "openTs", "updatedAt", "createdAt"):
@@ -2880,8 +2890,44 @@ async def main():
           cvd_120 = _cvd(120)
           cvd_300 = _cvd(300)
 
+        # ATR computation: 14 × 5-min candles from tick data
+        atr_pct = 0.0
+        try:
+          atr_ticks = DB_MANAGER.load_ticks(now_ms - (75 * 60 * 1000), now_ms)
+          if len(atr_ticks) > 10 and last_mid and last_mid > 0:
+            bucket_ms = 5 * 60 * 1000
+            candles: List[Tuple[float, float]] = []  # (high, low) per bucket
+            cur_bucket = None
+            cur_hi = 0.0
+            cur_lo = float("inf")
+            for tk in atr_ticks:
+              px = float(tk.get("price") or 0)
+              if px <= 0:
+                continue
+              b = (int(tk["ts_ms"]) // bucket_ms) * bucket_ms
+              if cur_bucket is None:
+                cur_bucket = b
+              if b != cur_bucket:
+                if cur_hi > 0 and cur_lo < float("inf"):
+                  candles.append((cur_hi, cur_lo))
+                cur_bucket = b
+                cur_hi = px
+                cur_lo = px
+              else:
+                cur_hi = max(cur_hi, px)
+                cur_lo = min(cur_lo, px)
+            if cur_hi > 0 and cur_lo < float("inf"):
+              candles.append((cur_hi, cur_lo))
+            if len(candles) >= 3:
+              ranges = [h - l for h, l in candles[-14:]]
+              atr_usd = sum(ranges) / len(ranges)
+              atr_pct = atr_usd / float(last_mid)
+        except Exception:
+          pass
+
         metrics_cache = {
           **pm,
+          "atrPct": atr_pct,
           "cvd10s": cvd_10,
           "cvd30s": cvd_30,
           "cvd2m": cvd_120,
@@ -3738,8 +3784,8 @@ async def main():
           "open": bool(position_state.open),
           "side": position_state.side,
           "size": position_state.qty,
-          "entryPrice": position_state.entry_price,
-          "entryAt": position_state.entry_ts_ms,
+          "entryPrice": position_state.entry_price or current_trade_entry_price,
+          "entryAt": position_state.entry_ts_ms or current_trade_entry_ts,
           "ageSec": (
             max(0, int((now_ms - int(position_state.entry_ts_ms)) / 1000))
             if position_state.entry_ts_ms
