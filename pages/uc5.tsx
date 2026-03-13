@@ -944,6 +944,88 @@ export default function Uc5Page() {
                 </div>
               )}
             </div>
+
+            {/* PORTFOLIO + STATS — inside left column to fill space below charts */}
+            <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr", gap: 12 }}>
+              <div style={darkCard}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+                  <span style={sideCardLabel}>PORTFOLIO</span>
+                  <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", fontFamily: "ui-monospace, Menlo, monospace" }}>{shortAddr(cfg?.ownerAddress)}</span>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(portfolio?.portfolioValueUsd)}</div>
+                  <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL VALUE</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {([
+                    { k: "Available margin", v: fmtUsd(portfolio?.availableMarginUsd), c: undefined as string | undefined },
+                    { k: "Used margin", v: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, c: undefined as string | undefined },
+                    { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                    { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                    { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                  ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                    </div>
+                  ))}
+                  {portfolio?.startPortfolioValueUsd != null && portfolio.startPortfolioValueUsd > 0 && (() => {
+                    const startVal = portfolio.startPortfolioValueUsd!;
+                    const curVal = portfolio.portfolioValueUsd ?? 0;
+                    const startAt = portfolio.startPortfolioAt ?? 0;
+                    const totalReturnPct = curVal > 0 ? ((curVal - startVal) / startVal) * 100 : null;
+                    const daysSince = startAt > 0 ? (Date.now() - startAt) / 86400000 : 0;
+                    const annualizedPct = totalReturnPct != null && daysSince > 0
+                      ? (Math.pow(curVal / startVal, 365 / daysSince) - 1) * 100
+                      : null;
+                    return (
+                      <>
+                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 4, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                          <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.28)", marginBottom: 2 }}>PERFORMANCE</div>
+                          {([
+                            { k: "Start value", v: fmtUsd(startVal), c: undefined as string | undefined },
+                            { k: "Tracking since", v: startAt > 0 ? fmtDateTime(startAt) : "—", c: undefined as string | undefined },
+                            { k: "Total return", v: totalReturnPct != null ? `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%` : "—", c: totalReturnPct != null ? (totalReturnPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
+                            { k: "Annualized", v: annualizedPct != null ? `${annualizedPct >= 0 ? "+" : ""}${annualizedPct.toFixed(1)}%` : "—", c: annualizedPct != null ? (annualizedPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
+                          ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                              <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+              <div style={darkCard}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
+                  <span style={sideCardLabel}>TRADE STATS</span>
+                  <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>all-time</span>
+                </div>
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em" }}>{tradeSummary?.totalTrades ?? 0}</div>
+                  <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL TRADES</div>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  {([
+                    { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "#f59e0b" },
+                    { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "#22c55e" },
+                    { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "#ef4444" },
+                    { k: "Regime end exits", v: String(tradeSummary?.closedByRegimeEnd ?? 0), c: undefined as string | undefined },
+                    { k: "Regime flip exits", v: String(tradeSummary?.closedByRegimeFlip ?? 0), c: undefined as string | undefined },
+                    { k: "Risk loop exits", v: String(tradeSummary?.closedByRiskLoop ?? 0), c: undefined as string | undefined },
+                    { k: "Other / manual exits", v: String(tradeSummary?.closedByOther ?? 0), c: undefined as string | undefined },
+                  ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                      <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
 
           {/* Side column */}
@@ -1266,88 +1348,6 @@ export default function Uc5Page() {
           </div>
           <div style={{ marginLeft: isMobile ? 0 : "auto", width: isMobile ? "100%" : "auto" }}>
             <button style={{ ...btnDanger, padding: "10px 20px", fontWeight: 900, letterSpacing: "0.05em", width: isMobile ? "100%" : "auto" }} disabled={!isOwner || !!busy} onClick={() => void sendFlatten()}>■ FLATTEN NOW</button>
-          </div>
-        </div>
-
-        {/* PORTFOLIO + STATS */}
-        <div style={{ display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(360px, 1fr))", gap: 12 }}>
-          <div style={darkCard}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-              <span style={sideCardLabel}>PORTFOLIO</span>
-              <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", fontFamily: "ui-monospace, Menlo, monospace" }}>{shortAddr(cfg?.ownerAddress)}</span>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(portfolio?.portfolioValueUsd)}</div>
-              <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL VALUE</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {([
-                { k: "Available margin", v: fmtUsd(portfolio?.availableMarginUsd), c: undefined as string | undefined },
-                { k: "Used margin", v: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, c: undefined as string | undefined },
-                { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-              ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
-                </div>
-              ))}
-              {portfolio?.startPortfolioValueUsd != null && portfolio.startPortfolioValueUsd > 0 && (() => {
-                const startVal = portfolio.startPortfolioValueUsd!;
-                const curVal = portfolio.portfolioValueUsd ?? 0;
-                const startAt = portfolio.startPortfolioAt ?? 0;
-                const totalReturnPct = curVal > 0 ? ((curVal - startVal) / startVal) * 100 : null;
-                const daysSince = startAt > 0 ? (Date.now() - startAt) / 86400000 : 0;
-                const annualizedPct = totalReturnPct != null && daysSince > 0
-                  ? (Math.pow(curVal / startVal, 365 / daysSince) - 1) * 100
-                  : null;
-                return (
-                  <>
-                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 4, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.28)", marginBottom: 2 }}>PERFORMANCE</div>
-                      {([
-                        { k: "Start value", v: fmtUsd(startVal), c: undefined as string | undefined },
-                        { k: "Tracking since", v: startAt > 0 ? fmtDateTime(startAt) : "—", c: undefined as string | undefined },
-                        { k: "Total return", v: totalReturnPct != null ? `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%` : "—", c: totalReturnPct != null ? (totalReturnPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
-                        { k: "Annualized", v: annualizedPct != null ? `${annualizedPct >= 0 ? "+" : ""}${annualizedPct.toFixed(1)}%` : "—", c: annualizedPct != null ? (annualizedPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
-                      ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                        <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                          <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                          <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                );
-              })()}
-            </div>
-          </div>
-          <div style={darkCard}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 14 }}>
-              <span style={sideCardLabel}>TRADE STATS</span>
-              <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>all-time</span>
-            </div>
-            <div style={{ marginBottom: 14 }}>
-              <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em" }}>{tradeSummary?.totalTrades ?? 0}</div>
-              <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL TRADES</div>
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {([
-                { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "#f59e0b" },
-                { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "#22c55e" },
-                { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "#ef4444" },
-                { k: "Regime end exits", v: String(tradeSummary?.closedByRegimeEnd ?? 0), c: undefined as string | undefined },
-                { k: "Regime flip exits", v: String(tradeSummary?.closedByRegimeFlip ?? 0), c: undefined as string | undefined },
-                { k: "Risk loop exits", v: String(tradeSummary?.closedByRiskLoop ?? 0), c: undefined as string | undefined },
-                { k: "Other / manual exits", v: String(tradeSummary?.closedByOther ?? 0), c: undefined as string | undefined },
-              ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
-                  <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
-                </div>
-              ))}
-            </div>
           </div>
         </div>
 
