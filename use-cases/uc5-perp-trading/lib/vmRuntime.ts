@@ -83,6 +83,7 @@ export function defaultUc5Config(): Uc5Config {
     entryMinFillRatio: 0.5,
     stopLossPct: 0.003,
     stopLossAtrMult: null,
+    atrStopLossConfirmSec: 120,
     takeProfitPct: 0.006,
     takeProfitAtrMult: null,
     trailingStopPct: null,

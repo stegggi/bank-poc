@@ -189,6 +189,7 @@ function normalizeEdit(c: Uc5Config): Uc5Config {
     makerImproveOneTickOnWideSpread: c.makerImproveOneTickOnWideSpread ?? true,
     makerImproveMinSpreadTicks: c.makerImproveMinSpreadTicks ?? 3,
     entryMinFillRatio: c.entryMinFillRatio ?? 0.5,
+    atrStopLossConfirmSec: c.atrStopLossConfirmSec ?? 120,
   };
 }
 
@@ -1129,24 +1130,37 @@ export default function Uc5Page() {
                   status?.runtime ||
                   (cfg
                     ? {
-                        stopLossPct: cfg.stopLossPct,
-                        stopLossAtrMult: cfg.stopLossAtrMult,
-                        takeProfitPct: cfg.takeProfitPct,
-                        takeProfitAtrMult: cfg.takeProfitAtrMult,
-                      }
-                    : null) ||
-                  (edit
-                    ? {
-                        stopLossPct: edit.stopLossPct,
-                        stopLossAtrMult: edit.stopLossAtrMult,
-                        takeProfitPct: edit.takeProfitPct,
-                        takeProfitAtrMult: edit.takeProfitAtrMult,
-                      }
-                    : null);
+                      stopLossPct: cfg.stopLossPct,
+                      stopLossAtrMult: cfg.stopLossAtrMult,
+                      atrStopLossConfirmSec: cfg.atrStopLossConfirmSec,
+                      takeProfitPct: cfg.takeProfitPct,
+                      takeProfitAtrMult: cfg.takeProfitAtrMult,
+                    }
+                  : null) ||
+                (edit
+                  ? {
+                      stopLossPct: edit.stopLossPct,
+                      stopLossAtrMult: edit.stopLossAtrMult,
+                      atrStopLossConfirmSec: edit.atrStopLossConfirmSec,
+                      takeProfitPct: edit.takeProfitPct,
+                      takeProfitAtrMult: edit.takeProfitAtrMult,
+                    }
+                  : null);
                 const slFixedPct = firstPositiveNumber(runtimeCfg?.stopLossPct) ?? 0;
                 const tpFixedPct = firstPositiveNumber(runtimeCfg?.takeProfitPct) ?? 0;
                 const slAtrMult = firstPositiveNumber(runtimeCfg?.stopLossAtrMult) ?? 0;
                 const tpAtrMult = firstPositiveNumber(runtimeCfg?.takeProfitAtrMult) ?? 0;
+                const atrSlDebounceActive = Boolean(posRecord.atrStopLossDebounceActive ?? posRecord.atr_stop_loss_debounce_active);
+                const atrSlConfirmSecRaw = Number(
+                  posRecord.atrStopLossConfirmSec ?? posRecord.atr_stop_loss_confirm_sec ?? runtimeCfg?.atrStopLossConfirmSec ?? 0
+                );
+                const atrSlConfirmRemainingSecRaw = Number(
+                  posRecord.atrStopLossConfirmRemainingSec ?? posRecord.atr_stop_loss_confirm_remaining_sec
+                );
+                const atrSlConfirmSec = Number.isFinite(atrSlConfirmSecRaw) ? Math.max(0, Math.round(atrSlConfirmSecRaw)) : 0;
+                const atrSlConfirmRemainingSec = Number.isFinite(atrSlConfirmRemainingSecRaw)
+                  ? Math.max(0, Math.round(atrSlConfirmRemainingSecRaw))
+                  : null;
                 const isAtrBasedSl = fixedStopPrice == null && slFixedPct <= 0 && slAtrMult > 0 && atrPct > 0;
                 const isAtrBasedTp = fixedTakePrice == null && tpFixedPct <= 0 && tpAtrMult > 0 && atrPct > 0;
                 const slPctComputed = isAtrBasedSl ? slAtrMult * atrPct : slFixedPct;
@@ -1211,6 +1225,14 @@ export default function Uc5Page() {
                               {distToSlPct != null && distToSlAtr == null && (
                                 <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)", marginLeft: 4 }}>({distToSlPct.toFixed(2)}%)</span>
                               )}
+                            </span>
+                          </div>
+                        )}
+                        {atrSlDebounceActive && atrSlConfirmRemainingSec != null && (
+                          <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
+                            <span style={{ color: "rgba(239,68,68,0.75)" }}>SL confirm</span>
+                            <span style={{ fontFamily: "monospace", color: "#ef4444" }}>
+                              {fmtCountdown(atrSlConfirmRemainingSec)} / {fmtCountdown(atrSlConfirmSec)}
                             </span>
                           </div>
                         )}
@@ -1544,6 +1566,9 @@ export default function Uc5Page() {
                 </Field>
                 <Field label="stopLossAtrMult" help="ATR-based stop: SL = entry +/- N x ATR. Active when stopLossPct is null/0. Rec: 2.0." error={undefined}>
                   <input style={input} type="number" min={0} max={20} step={0.1} value={edit?.stopLossAtrMult ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, stopLossAtrMult: v === 0 ? null : v } : p)); }} />
+                </Field>
+                <Field label="atrStopLossConfirmSec" help="Only for ATR-based SL: price must stay beyond SL for this long before exit (spike protection). TP remains immediate." error={undefined}>
+                  <input style={input} type="number" min={0} max={900} step={1} value={edit?.atrStopLossConfirmSec ?? 120} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, atrStopLossConfirmSec: Number(e.target.value) } : p))} />
                 </Field>
                 <Field label="takeProfitPct" help="Fixed take profit (e.g. 0.006 = 0.6%). 0 = use ATR-based TP." error={undefined}>
                   <input style={input} type="number" min={0} max={1} step={0.001} value={edit?.takeProfitPct ?? 0} disabled={!isOwner} onChange={(e) => { const v = Number(e.target.value); setEdit((p) => (p ? { ...p, takeProfitPct: v === 0 ? null : v } : p)); }} />

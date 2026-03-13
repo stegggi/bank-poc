@@ -82,6 +82,7 @@ export const Uc5ConfigSchema = z.object({
 
   stopLossPct: z.number().positive().max(1).nullable().optional().default(0.003),
   stopLossAtrMult: z.number().positive().max(20).nullable().optional().default(null),
+  atrStopLossConfirmSec: z.number().int().min(0).max(900).optional().default(120),
   takeProfitPct: z.number().positive().max(1).nullable().optional().default(0.006),
   takeProfitAtrMult: z.number().positive().max(20).nullable().optional().default(null),
   trailingStopPct: z.number().positive().max(1).nullable().optional().default(null),
@@ -187,6 +188,7 @@ export type Uc5Status = {
     entryMinFillRatio?: number;
     stopLossPct?: number | null;
     stopLossAtrMult?: number | null;
+    atrStopLossConfirmSec?: number;
     takeProfitPct?: number | null;
     takeProfitAtrMult?: number | null;
     trailingStopPct?: number | null;
@@ -209,6 +211,10 @@ export type Uc5Status = {
     fixedTakePct?: number;
     fixedStopPrice?: number;
     fixedTakePrice?: number;
+    atrStopLossDebounceActive?: boolean;
+    atrStopLossConfirmSec?: number;
+    atrStopLossBreachSec?: number;
+    atrStopLossConfirmRemainingSec?: number;
     updatedAt?: number;
   };
   agent?: {

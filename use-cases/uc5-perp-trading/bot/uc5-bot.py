@@ -276,6 +276,7 @@ def default_runtime_config() -> Dict[str, Any]:
     "entryMinFillRatio": 0.50,
     "stopLossPct": 0.003,
     "stopLossAtrMult": None,
+    "atrStopLossConfirmSec": 120,
     "takeProfitPct": 0.006,
     "takeProfitAtrMult": None,
     "trailingStopPct": None,
@@ -309,6 +310,22 @@ def _to_opt_float(v: Any) -> Optional[float]:
     return float(v)
   except Exception:
     return None
+
+
+def _to_opt_bool(v: Any) -> Optional[bool]:
+  if v is None:
+    return None
+  if isinstance(v, bool):
+    return v
+  if isinstance(v, (int, float)):
+    return bool(v)
+  if isinstance(v, str):
+    txt = v.strip().lower()
+    if txt in ("true", "1", "yes", "on"):
+      return True
+    if txt in ("false", "0", "no", "off"):
+      return False
+  return None
 
 
 def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
@@ -432,6 +449,7 @@ def sanitize_runtime_config(raw: Any) -> Dict[str, Any]:
 
   base["stopLossPct"] = _to_opt_float(base.get("stopLossPct"))
   base["stopLossAtrMult"] = _to_opt_float(base.get("stopLossAtrMult"))
+  base["atrStopLossConfirmSec"] = clamp(_to_int(base.get("atrStopLossConfirmSec", 120), 120), 0, 900)
   base["takeProfitPct"] = _to_opt_float(base.get("takeProfitPct"))
   base["takeProfitAtrMult"] = _to_opt_float(base.get("takeProfitAtrMult"))
   base["trailingStopPct"] = _to_opt_float(base.get("trailingStopPct"))
@@ -2538,7 +2556,7 @@ def _parse_json_object(raw: Any) -> Dict[str, Any]:
   return {}
 
 
-def _extract_entry_risk_from_reason(reason_json: Any) -> Dict[str, Optional[float]]:
+def _extract_entry_risk_from_reason(reason_json: Any) -> Dict[str, Any]:
   payload = _parse_json_object(reason_json)
   return {
     "entry_atr_pct": _f(payload.get("entryAtrPct") or payload.get("entry_atr_pct")),
@@ -2546,6 +2564,11 @@ def _extract_entry_risk_from_reason(reason_json: Any) -> Dict[str, Optional[floa
     "fixed_take_pct": _f(payload.get("fixedTakePct") or payload.get("fixed_take_pct")),
     "fixed_stop_price": _f(payload.get("fixedStopPrice") or payload.get("fixed_stop_price")),
     "fixed_take_price": _f(payload.get("fixedTakePrice") or payload.get("fixed_take_price")),
+    "atr_stop_loss_is_atr": _to_opt_bool(
+      payload.get("atrStopLossIsAtr")
+      if "atrStopLossIsAtr" in payload
+      else payload.get("atr_stop_loss_is_atr")
+    ),
   }
 
 
@@ -2583,6 +2606,14 @@ def _ensure_frozen_risk_levels(position: PositionState, cfg: StrategyConfig, liv
   existing_take_pct = _f(position.fixed_take_pct)
   effective_stop_pct = existing_stop_pct if existing_stop_pct and existing_stop_pct > 0 else stop_pct_from_cfg
   effective_take_pct = existing_take_pct if existing_take_pct and existing_take_pct > 0 else take_pct_from_cfg
+  cfg_has_fixed_sl = cfg.stop_loss_pct is not None and float(cfg.stop_loss_pct) > 0
+  cfg_has_atr_sl = (
+    (not cfg_has_fixed_sl)
+    and cfg.stop_loss_atr_mult is not None
+    and float(cfg.stop_loss_atr_mult) > 0
+    and position.entry_atr_pct is not None
+    and float(position.entry_atr_pct) > 0
+  )
 
   if position.fixed_stop_pct is None and effective_stop_pct and effective_stop_pct > 0:
     position.fixed_stop_pct = float(effective_stop_pct)
@@ -2593,6 +2624,14 @@ def _ensure_frozen_risk_levels(position: PositionState, cfg: StrategyConfig, liv
     position.fixed_stop_price = float(entry * (1.0 - effective_stop_pct) if side == "LONG" else entry * (1.0 + effective_stop_pct))
   if position.fixed_take_price is None and effective_take_pct and effective_take_pct > 0:
     position.fixed_take_price = float(entry * (1.0 + effective_take_pct) if side == "LONG" else entry * (1.0 - effective_take_pct))
+  if position.stop_loss_is_atr_based is None:
+    if existing_stop_pct and stop_pct_from_cfg and stop_pct_from_cfg > 0:
+      tol = max(1e-10, abs(float(stop_pct_from_cfg)) * 0.05)
+      position.stop_loss_is_atr_based = bool(cfg_has_atr_sl and abs(float(existing_stop_pct) - float(stop_pct_from_cfg)) <= tol)
+    elif effective_stop_pct and effective_stop_pct > 0:
+      position.stop_loss_is_atr_based = bool(cfg_has_atr_sl)
+    else:
+      position.stop_loss_is_atr_based = False
 
 
 def _regime_from_runner_result(result: Dict[str, Any], now_ms: int) -> RegimeDecision:
@@ -2709,6 +2748,8 @@ async def main():
   current_trade_fixed_take_pct: Optional[float] = None
   current_trade_fixed_stop_price: Optional[float] = None
   current_trade_fixed_take_price: Optional[float] = None
+  current_trade_stop_loss_is_atr: Optional[bool] = None
+  atr_sl_breach_started_ms: Optional[int] = None
   # Restore entry price from DB in case bot restarted with an open position.
   # Without this, FLATTEN/risk-exit would compute pnl=None on restart.
   try:
@@ -2722,6 +2763,7 @@ async def main():
       current_trade_fixed_take_pct = _entry_risk.get("fixed_take_pct")
       current_trade_fixed_stop_price = _entry_risk.get("fixed_stop_price")
       current_trade_fixed_take_price = _entry_risk.get("fixed_take_price")
+      current_trade_stop_loss_is_atr = _entry_risk.get("atr_stop_loss_is_atr")
   except Exception as _e:
     print(f"[startup] Could not restore entry price from DB: {_e}")
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
@@ -2923,6 +2965,8 @@ async def main():
           position_state.fixed_stop_price = float(current_trade_fixed_stop_price)
         if current_trade_fixed_take_price and not position_state.fixed_take_price:
           position_state.fixed_take_price = float(current_trade_fixed_take_price)
+        if current_trade_stop_loss_is_atr is not None and position_state.stop_loss_is_atr_based is None:
+          position_state.stop_loss_is_atr_based = bool(current_trade_stop_loss_is_atr)
         if position_state.entry_ts_ms is None:
           open_leg = DB_MANAGER.query_open_leg_from_trades()
           if open_leg and open_leg.get("ts_ms"):
@@ -2941,6 +2985,8 @@ async def main():
         current_trade_fixed_take_pct = None
         current_trade_fixed_stop_price = None
         current_trade_fixed_take_price = None
+        current_trade_stop_loss_is_atr = None
+        atr_sl_breach_started_ms = None
       if was_open and not pos_open:
         last_close_ts_ms = now_ms
 
@@ -2955,6 +3001,8 @@ async def main():
         current_trade_fixed_take_pct = _f(position_state.fixed_take_pct) or current_trade_fixed_take_pct
         current_trade_fixed_stop_price = _f(position_state.fixed_stop_price) or current_trade_fixed_stop_price
         current_trade_fixed_take_price = _f(position_state.fixed_take_price) or current_trade_fixed_take_price
+        if position_state.stop_loss_is_atr_based is not None:
+          current_trade_stop_loss_is_atr = bool(position_state.stop_loss_is_atr_based)
 
       if position_state.open and last_mid:
         position_state = update_position_extremes(position_state, float(last_mid))
@@ -3125,6 +3173,7 @@ async def main():
                 exit_price=px,
               )
               last_close_ts_ms = now_ms
+              atr_sl_breach_started_ms = None
 
             updates.append({"id": cid, "status": "DONE", "result": {"ok": True, "flattened": True}})
 
@@ -3180,6 +3229,7 @@ async def main():
               exit_price=px,
             )
             last_close_ts_ms = now_ms
+            atr_sl_breach_started_ms = None
             last_action = {"type": "AUTO_FLATTEN_TRADING_OFF", "ok": True, "info": None}
           else:
             last_action = {
@@ -3198,7 +3248,36 @@ async def main():
             now_ms=now_ms,
             min_hold_enforced=False,
           )
-          if risk_result.should_exit and position_state.side and position_state.qty > 0:
+          atr_sl_confirm_sec = int(cfg.get("atrStopLossConfirmSec", 120))
+          allow_risk_exit = bool(risk_result.should_exit and position_state.side and position_state.qty > 0)
+          atr_sl_requires_confirm = bool(
+            allow_risk_exit
+            and risk_result.reason == "stop_loss"
+            and position_state.stop_loss_is_atr_based
+            and atr_sl_confirm_sec > 0
+          )
+          if atr_sl_requires_confirm:
+            if atr_sl_breach_started_ms is None:
+              atr_sl_breach_started_ms = now_ms
+            breached_sec = max(0, int((now_ms - int(atr_sl_breach_started_ms)) / 1000))
+            remaining_sec = max(0, int(atr_sl_confirm_sec - breached_sec))
+            if breached_sec < atr_sl_confirm_sec:
+              allow_risk_exit = False
+              last_action = {
+                "type": "RISK_WAIT_ATR_SL_CONFIRM",
+                "ok": True,
+                "info": {
+                  "rule": risk_result.rule,
+                  "reason": risk_result.reason,
+                  "breachSec": breached_sec,
+                  "confirmSec": atr_sl_confirm_sec,
+                  "remainingSec": remaining_sec,
+                },
+              }
+          else:
+            atr_sl_breach_started_ms = None
+
+          if allow_risk_exit:
             cerr = await ensure_client_ready()
             if not cerr and client is not None:
               if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
@@ -3280,6 +3359,7 @@ async def main():
                 exit_price=px,
               )
               last_close_ts_ms = now_ms
+              atr_sl_breach_started_ms = None
               last_action = {
                 "type": "RISK_EXIT",
                 "ok": True,
@@ -3562,6 +3642,7 @@ async def main():
                   "fixedTakePct": entry_risk_state.fixed_take_pct,
                   "fixedStopPrice": entry_risk_state.fixed_stop_price,
                   "fixedTakePrice": entry_risk_state.fixed_take_price,
+                  "atrStopLossIsAtr": bool(entry_risk_state.stop_loss_is_atr_based),
                 }
 
                 _entry_maker_pct = float(
@@ -3589,6 +3670,12 @@ async def main():
                 current_trade_fixed_take_pct = _f(entry_risk_state.fixed_take_pct)
                 current_trade_fixed_stop_price = _f(entry_risk_state.fixed_stop_price)
                 current_trade_fixed_take_price = _f(entry_risk_state.fixed_take_price)
+                current_trade_stop_loss_is_atr = (
+                  bool(entry_risk_state.stop_loss_is_atr_based)
+                  if entry_risk_state.stop_loss_is_atr_based is not None
+                  else None
+                )
+                atr_sl_breach_started_ms = None
                 if submitted_any:
                   last_order_ts.append(time.time())
 
@@ -3857,6 +3944,24 @@ async def main():
         last_regime_direction,
       )
 
+      atr_sl_confirm_sec_runtime = int(cfg.get("atrStopLossConfirmSec", 120))
+      atr_sl_debounce_active = bool(
+        position_state.open
+        and position_state.stop_loss_is_atr_based
+        and atr_sl_confirm_sec_runtime > 0
+        and atr_sl_breach_started_ms is not None
+      )
+      atr_sl_breach_sec = (
+        max(0, int((now_ms - int(atr_sl_breach_started_ms)) / 1000))
+        if atr_sl_debounce_active and atr_sl_breach_started_ms is not None
+        else None
+      )
+      atr_sl_remaining_sec = (
+        max(0, int(atr_sl_confirm_sec_runtime - int(atr_sl_breach_sec or 0)))
+        if atr_sl_debounce_active and atr_sl_breach_sec is not None
+        else None
+      )
+
       status_payload = {
         "updatedAt": int(time.time() * 1000),
         "bot": {
@@ -3898,6 +4003,7 @@ async def main():
           "entryMinFillRatio": float(cfg.get("entryMinFillRatio", 0.50)),
           "stopLossPct": _to_opt_float(cfg.get("stopLossPct")),
           "stopLossAtrMult": _to_opt_float(cfg.get("stopLossAtrMult")),
+          "atrStopLossConfirmSec": int(cfg.get("atrStopLossConfirmSec", 120)),
           "takeProfitPct": _to_opt_float(cfg.get("takeProfitPct")),
           "takeProfitAtrMult": _to_opt_float(cfg.get("takeProfitAtrMult")),
           "trailingStopPct": _to_opt_float(cfg.get("trailingStopPct")),
@@ -3940,6 +4046,10 @@ async def main():
           "fixedTakePct": _f(position_state.fixed_take_pct),
           "fixedStopPrice": _f(position_state.fixed_stop_price),
           "fixedTakePrice": _f(position_state.fixed_take_price),
+          "atrStopLossDebounceActive": atr_sl_debounce_active,
+          "atrStopLossConfirmSec": atr_sl_confirm_sec_runtime,
+          "atrStopLossBreachSec": atr_sl_breach_sec,
+          "atrStopLossConfirmRemainingSec": atr_sl_remaining_sec,
           "updatedAt": int(time.time() * 1000),
         },
         "agent": {

@@ -1851,6 +1851,21 @@ export default function Uc6Page() {
                 </div>
               </Uc6Card>
             )}
+
+            <Uc6Card title="Operations">
+              <OpsGrid
+                rebalancesToday={n(status?.ops?.rebalancesToday, 0)}
+                rebalances24h={n(status?.ops?.rebalances24h, 0)}
+                lastRebalanceAtIso={status?.ops?.lastRebalanceAtIso ?? null}
+                churnRatio={churnRatio ?? null}
+                churnProtectionEnabled={Boolean(status?.settings?.churnProtection?.enabled ?? status?.settings?.churnProtectionEnabled)}
+                compoundMode={status?.settings?.compoundMode ?? "threshold_harvest"}
+                harvestThresholdUsd={n(status?.settings?.harvestThresholdUsd, 0)}
+                cooldownRemaining={cooldownRemaining}
+                hodlGateAllowed={hodlGateAllowed}
+                hodlGateReason={hodlGateReason}
+              />
+            </Uc6Card>
           </div>
 
           {/* ZONE 3: Live Economics */}
@@ -1868,21 +1883,6 @@ export default function Uc6Page() {
                 hodlGateAllowed={hodlGateAllowed}
                 hodlGateReason={hodlGateReason}
                 alphaTodayUsd={n(status?.pnl?.netTodayUsd, 0)}
-              />
-            </Uc6Card>
-
-            <Uc6Card title="Operations">
-              <OpsGrid
-                rebalancesToday={n(status?.ops?.rebalancesToday, 0)}
-                rebalances24h={n(status?.ops?.rebalances24h, 0)}
-                lastRebalanceAtIso={status?.ops?.lastRebalanceAtIso ?? null}
-                churnRatio={churnRatio ?? null}
-                churnProtectionEnabled={Boolean(status?.settings?.churnProtection?.enabled ?? status?.settings?.churnProtectionEnabled)}
-                compoundMode={status?.settings?.compoundMode ?? "threshold_harvest"}
-                harvestThresholdUsd={n(status?.settings?.harvestThresholdUsd, 0)}
-                cooldownRemaining={cooldownRemaining}
-                hodlGateAllowed={hodlGateAllowed}
-                hodlGateReason={hodlGateReason}
               />
             </Uc6Card>
 
