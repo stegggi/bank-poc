@@ -3697,8 +3697,98 @@ class Uc6Bot {
       rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
       if (rec) this.positionRecordsById.set(tokenId, rec);
     }
+    if (!rec) {
+      rec = this.ensureActiveLifecycleRecordFromTrackedPosition();
+    }
     if (!rec || rec.status === "CLOSED") return null;
     return this.sanitizePositionRecordForPersist(rec);
+  }
+
+  ensureActiveLifecycleRecordFromTrackedPosition() {
+    const tokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
+    if (!tokenId) return null;
+    let rec = this.positionRecordsById.get(tokenId);
+    if (!rec && Array.isArray(this.positionRecords)) {
+      rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
+      if (rec) this.positionRecordsById.set(tokenId, rec);
+    }
+    if (rec) return rec;
+
+    const pos = this.state.position || {};
+    const venue = pos.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const latest = this.state.latest || {};
+    const primary = latest.primary || null;
+    const fallback = latest.fallback || null;
+    const activePool = venue === "uniswapv3" ? (fallback || primary) : (primary || fallback);
+    const tickLower = Number(pos.tickLower);
+    const tickUpper = Number(pos.tickUpper);
+    const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
+    const bandHalfBps = Number(pos.bandHalfBps || this.estimateBandHalfBpsFromTicks(tickLower, tickUpper) || this.settings.bandHalfBps || 0);
+    const selector = this.selectorForVenue(venue, activePool || null);
+    const now = nowIso();
+
+    rec = this.getLifecycleRecordById(tokenId, {
+      createFromEvent: {
+        tokenId,
+        venue,
+        poolAddress: activePool?.pool || (venue === "uniswapv3" ? this.uniswapPool : this.slipstreamPool),
+        atIso: now,
+        band: {
+          bandHalfBps,
+          tickLower: Number.isFinite(tickLower) ? tickLower : 0,
+          tickUpper: Number.isFinite(tickUpper) ? tickUpper : 0,
+        },
+        details: { selector },
+      },
+    });
+    if (!rec) return null;
+
+    let baselineWeth = 0;
+    let baselineUsdc = 0;
+    const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
+    if (hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96) {
+      const token0 = activePool?.token0 || this.weth;
+      const token1 = activePool?.token1 || this.usdc;
+      const amounts = this.lpAmountsFromLiquidity(
+        liquidityRaw,
+        tickLower,
+        tickUpper,
+        BigInt(activePool.sqrtPriceX96),
+        token0,
+        token1
+      );
+      baselineUsdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
+      baselineWeth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+    }
+
+    const spot = Number(this.getSpotUsdcPerWeth() || 0);
+    const entryValueUsd = baselineUsdc + (spot > 0 ? baselineWeth * spot : 0);
+    rec.status = "OPEN";
+    rec.tokenId = tokenId;
+    rec.venue = venue;
+    rec.poolAddress = activePool?.pool || rec.poolAddress || (venue === "uniswapv3" ? this.uniswapPool : this.slipstreamPool);
+    rec.selector = { ...rec.selector, ...selector };
+    rec.band = {
+      ...rec.band,
+      bandHalfBps,
+      tickLower: Number.isFinite(tickLower) ? tickLower : rec.band.tickLower,
+      tickUpper: Number.isFinite(tickUpper) ? tickUpper : rec.band.tickUpper,
+    };
+    rec.entry.openedAtIso = rec.entry.openedAtIso || now;
+    rec.entry.entrySnapshotAtIso = rec.entry.entrySnapshotAtIso || now;
+    rec.entry.entryTokens = { weth: baselineWeth, usdc: baselineUsdc };
+    rec.entry.entryValueUsd = entryValueUsd > 0 ? entryValueUsd : Number(rec.entry.entryValueUsd || 0);
+    rec.entry.spotPriceUsdcPerWeth = spot > 0 ? spot : Number(rec.entry.spotPriceUsdcPerWeth || 0);
+    rec.entry.entrySnapshotApprox = true;
+    rec.entry.entrySnapshotNote = "entry snapshot fallback (adopted active on-chain position)";
+    rec._internal.baselineWeth = baselineWeth;
+    rec._internal.baselineUsdc = baselineUsdc;
+    rec._internal.entryCaptured = Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0;
+    rec._internal.openPhaseDone = true;
+    this.appendLifecycleRecordNote(rec, "adopted active on-chain position after lifecycle gap");
+    this.recomputeLifecycleRecordDerived(rec);
+    this.persistPositionRecords().catch(() => {});
+    return rec;
   }
 
   async maybeEmitPendingEntrySnapshot() {
@@ -7084,6 +7174,9 @@ class Uc6Bot {
     if (!rec && Array.isArray(this.positionRecords)) {
       rec = this.positionRecords.find((r) => String(r?.tokenId || r?.id || "") === tokenId) || null;
       if (rec) this.positionRecordsById.set(tokenId, rec);
+    }
+    if (!rec) {
+      rec = this.ensureActiveLifecycleRecordFromTrackedPosition();
     }
     if (!rec || rec.status === "CLOSED") return null;
     return rec;
