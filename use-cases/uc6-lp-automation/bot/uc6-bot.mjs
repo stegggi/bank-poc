@@ -4627,8 +4627,15 @@ class Uc6Bot {
     }
     try {
       this.state.latest.collectableNow = await this.collectableNowSnapshot();
-    } catch {
-      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    } catch (err) {
+      this.setLastError(err);
+      const prev = this.state.latest?.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+      this.state.latest.collectableNow = {
+        usdc: Number(prev.usdc || 0),
+        weth: Number(prev.weth || 0),
+        usd: Number(prev.usd || 0),
+        isEstimated: true,
+      };
     } finally {
       this.markRefreshStamp("collectableMs", "collectableAtIso");
     }
@@ -5109,49 +5116,45 @@ class Uc6Bot {
       : this.state.latest?.primary || this.state.latest?.fallback || null;
     const token0 = getAddress(activePool?.token0 || this.weth);
     const token1 = getAddress(activePool?.token1 || this.usdc);
-    try {
-      const sim = await this.publicClient.simulateContract({
-        address: npm,
-        abi: NPM_POSITION_ABI,
-        functionName: "collect",
-        args: [
-          {
-            tokenId: BigInt(tokenId),
-            recipient: this.account.address,
-            amount0Max: UINT128_MAX,
-            amount1Max: UINT128_MAX,
-          },
-        ],
-        account: this.account.address,
-      });
-      const out0 = BigInt(
-        Array.isArray(sim.result)
-          ? sim.result[0]
-          : sim.result?.amount0 ?? sim.result?.[0] ?? 0n
-      );
-      const out1 = BigInt(
-        Array.isArray(sim.result)
-          ? sim.result[1]
-          : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
-      );
-      let usdcRaw = 0n;
-      let wethRaw = 0n;
-      if (sameAddress(token0, this.usdc)) usdcRaw = out0;
-      if (sameAddress(token1, this.usdc)) usdcRaw = out1;
-      if (sameAddress(token0, this.weth)) wethRaw = out0;
-      if (sameAddress(token1, this.weth)) wethRaw = out1;
-      const spot = this.getSpotUsdcPerWeth();
-      const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
-      const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
-      return {
-        usdc,
-        weth,
-        usd: usdc + weth * spot,
-        isEstimated: false,
-      };
-    } catch {
-      return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
-    }
+    const sim = await this.publicClient.simulateContract({
+      address: npm,
+      abi: NPM_POSITION_ABI,
+      functionName: "collect",
+      args: [
+        {
+          tokenId: BigInt(tokenId),
+          recipient: this.account.address,
+          amount0Max: UINT128_MAX,
+          amount1Max: UINT128_MAX,
+        },
+      ],
+      account: this.account.address,
+    });
+    const out0 = BigInt(
+      Array.isArray(sim.result)
+        ? sim.result[0]
+        : sim.result?.amount0 ?? sim.result?.[0] ?? 0n
+    );
+    const out1 = BigInt(
+      Array.isArray(sim.result)
+        ? sim.result[1]
+        : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
+    );
+    let usdcRaw = 0n;
+    let wethRaw = 0n;
+    if (sameAddress(token0, this.usdc)) usdcRaw = out0;
+    if (sameAddress(token1, this.usdc)) usdcRaw = out1;
+    if (sameAddress(token0, this.weth)) wethRaw = out0;
+    if (sameAddress(token1, this.weth)) wethRaw = out1;
+    const spot = this.getSpotUsdcPerWeth();
+    const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
+    const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+    return {
+      usdc,
+      weth,
+      usd: usdc + weth * spot,
+      isEstimated: false,
+    };
   }
 
   async readTokenBalance(tokenAddress) {
