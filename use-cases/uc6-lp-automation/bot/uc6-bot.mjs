@@ -108,7 +108,7 @@ const POOL_COMPARISON_STALE_MS = 24 * 60 * 60 * 1000;
 const TX_LOOKUP_PROVIDER_PREFERENCE = ["ankr_http", "base_public_http", "infura_http", "alchemy_http"];
 const INFURA_DAILY_RETRY_HOUR_UTC = 5;
 const MULTICALL_BATCH_SIZE = 50;
-const TOP_UP_FAILURE_COOLDOWN_SEC = 900;
+const TOP_UP_FAILURE_COOLDOWN_SEC = 60;
 
 const POOL_ABI = [
   {
