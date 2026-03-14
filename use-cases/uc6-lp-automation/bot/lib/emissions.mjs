@@ -394,7 +394,7 @@ export async function stakeNft(
       });
     }
     txHashes.push(approveTx);
-    await publicClient.waitForTransactionReceipt({ hash: approveTx });
+    await publicClient.waitForTransactionReceipt({ hash: approveTx, timeout: 60_000 });
     _log(`Approval tx: ${approveTx}`);
   }
 
@@ -411,6 +411,7 @@ export async function stakeNft(
   txHashes.push(depositTx);
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: depositTx,
+    timeout: 60_000,
   });
   _log(`Deposit tx: ${depositTx}`);
 
@@ -460,6 +461,7 @@ export async function unstakeNft(
   });
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: withdrawTx,
+    timeout: 60_000,
   });
   _log(`Withdraw tx: ${withdrawTx}`);
 
@@ -524,6 +526,7 @@ export async function claimRewards(
   });
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: claimTx,
+    timeout: 60_000,
   });
   _log(`Claim tx: ${claimTx}`);
 
