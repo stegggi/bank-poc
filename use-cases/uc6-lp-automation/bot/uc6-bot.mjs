@@ -2077,6 +2077,7 @@ class Uc6Bot {
       ).catch((err) => this.setLastError(err));
 
       console.log(`[UC6] [emissions] staked tokenId=${tokenId}, gasUsd=${gasUsd.toFixed(4)}`);
+      this.pushEvent({ type: "stake", reason: "auto_stake", gasUsd, txHashes: result.txHashes });
     }
   }
 
@@ -2092,15 +2093,22 @@ class Uc6Bot {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return false;
 
+    // Back off after a failed stake attempt (5 min cooldown)
+    const retryAt = Date.parse(em._autoStakeRetryAfterIso || "");
+    if (Number.isFinite(retryAt) && retryAt > Date.now()) return false;
+
     const venue = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const npmAddress = venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
 
     try {
       await this.autoStakeAfterMint(tokenId, npmAddress);
+      em._autoStakeRetryAfterIso = null;
       await this.persistState();
       return true;
     } catch (err) {
+      em._autoStakeRetryAfterIso = new Date(Date.now() + 300_000).toISOString();
       console.warn("[UC6] [emissions] auto-stake idle failed:", sanitizeErrorMessage(err));
+      this.pushEvent({ type: "error", reason: "auto_stake_failed", message: sanitizeErrorMessage(err) });
       return false;
     }
   }
@@ -2157,6 +2165,7 @@ class Uc6Bot {
       console.log(
         `[UC6] [emissions] unstaked for ${reason}, aeroClaimed=${result.aeroClaimed.toFixed(4)}, gasUsd=${gasUsd.toFixed(4)}`,
       );
+      this.pushEvent({ type: "unstake", reason, gasUsd, rewardsUsd: result.aeroClaimed * aeroPrice, txHashes: [result.txHash] });
     }
   }
 
@@ -2273,6 +2282,7 @@ class Uc6Bot {
               console.log(
                 `[UC6] [emissions] claimed ${result.aeroClaimed.toFixed(4)} AERO, gasUsd=${gasUsd.toFixed(4)}`,
               );
+              this.pushEvent({ type: "claim", reason: "auto_claim", gasUsd, rewardsUsd: result.aeroClaimed * aeroPrice, txHashes: [result.txHash] });
             }
           }
         } catch (err) {
@@ -2577,7 +2587,8 @@ class Uc6Bot {
     if (last && last.type === next.type && last.reason === next.reason) {
       const lastMs = Date.parse(last.atIso || "");
       const nextMs = Date.parse(next.atIso || "");
-      if (Number.isFinite(lastMs) && Number.isFinite(nextMs) && nextMs - lastMs < 15_000) {
+      const dedupWindowMs = next.type === "blocked" ? 120_000 : 15_000;
+      if (Number.isFinite(lastMs) && Number.isFinite(nextMs) && nextMs - lastMs < dedupWindowMs) {
         return;
       }
     }
@@ -5501,6 +5512,8 @@ class Uc6Bot {
   async collectableNowSnapshot() {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    // Can't simulate collect() while NFT is staked in gauge (gauge owns the NFT)
+    if (this.state.emissions?.staked) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
     const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
     const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const activePool = venueActive === "uniswapv3"
@@ -9711,6 +9724,7 @@ class Uc6Bot {
       } catch {}
 
       this.setDecision({ action: "settings_updated", by: this.ownerAddress });
+      this.pushEvent({ type: "action", reason: "settings_updated" });
       await this.persistState();
 
       return jsonResponse(res, 200, { ok: true, settings: this.settings });
@@ -9755,6 +9769,7 @@ class Uc6Bot {
 
       this.state.forceRebalanceRequestedAt = nowIso();
       this.setDecision({ action: "force_rebalance_requested", by: this.ownerAddress });
+      this.pushEvent({ type: "action", reason: "force_rebalance_requested" });
       await this.persistState();
 
       return jsonResponse(res, 200, {

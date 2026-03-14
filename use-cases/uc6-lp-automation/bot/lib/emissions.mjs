@@ -261,9 +261,13 @@ export async function readEmissionsMetrics(
       allowFailure: true,
     });
     if (results[0].status === "success") walletRaw = results[0].result;
-    if (results.length > 1 && results[1].status === "success")
-      claimableRaw = results[1].result;
-  } catch {
+    else console.warn("[emissions] multicall balanceOf failed:", results[0].error?.message || "unknown");
+    if (results.length > 1) {
+      if (results[1].status === "success") claimableRaw = results[1].result;
+      else console.warn("[emissions] multicall earned failed:", results[1].error?.message || "unknown");
+    }
+  } catch (mcErr) {
+    console.warn("[emissions] multicall threw, falling back to sequential:", mcErr?.message || "unknown");
     // fallback sequential
     try {
       walletRaw = await publicClient.readContract({
@@ -281,7 +285,9 @@ export async function readEmissionsMetrics(
           functionName: "earned",
           args: [account, BigInt(tokenId)],
         });
-      } catch {}
+      } catch (earnErr) {
+        console.warn("[emissions] sequential earned failed:", earnErr?.message || "unknown");
+      }
     }
   }
 

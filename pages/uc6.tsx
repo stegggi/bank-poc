@@ -1564,7 +1564,7 @@ export default function Uc6Page() {
   const decision = (status?.ops?.lastDecision || status?.lastDecision || {}) as Record<string, unknown>;
   const regimeStatus = status?.regime || null;
   const regimeDecisionView = status?.decision || null;
-  const events = (status?.events?.lastN || []).slice(-10).reverse();
+  const events = (status?.events?.lastN || []).slice(-15).reverse();
   const hasActiveLpPosition = Boolean(status?.position?.tokenId);
   const inRange = hasActiveLpPosition && Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
@@ -2675,13 +2675,60 @@ function OpsGrid({ rebalancesToday, rebalances24h, lastRebalanceAtIso, churnRati
   );
 }
 
-function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; message?: string; gasUsd?: number; feesCollectedUsd?: number; netUsd?: number }> }) {
-  const typeColor = (t?: string) => {
-    const s = (t||"").toUpperCase();
-    if (s.includes("HARVEST") || s.includes("COLLECT")) return "#22c55e";
-    if (s.includes("REBALANCE")) return "#06b6d4";
-    if (s.includes("ESCAPE") || s.includes("STOP")) return "#ef4444";
-    return "#f59e0b";
+function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; message?: string; gasUsd?: number; feesCollectedUsd?: number; rewardsUsd?: number; netUsd?: number; txHashes?: string[] }> }) {
+  const eventColor = (t?: string): string => {
+    switch (t) {
+      case "harvest": case "claim": return "#22c55e";
+      case "recenter": case "reentry": return "#06b6d4";
+      case "topup": case "gas_topup": return "#8b5cf6";
+      case "stake": case "unstake": return "#3b82f6";
+      case "trend_escape": case "liquidate": return "#ef4444";
+      case "action": return "#a78bfa";
+      case "blocked": return "rgba(232,232,240,0.35)";
+      case "error": return "#ef4444";
+      default: return "#f59e0b";
+    }
+  };
+  const eventLabel = (type?: string, reason?: string): string => {
+    const t = type || "";
+    const r = reason || "";
+    const key = `${t}:${r}`;
+    const labels: Record<string, string> = {
+      "recenter:no_position": "Rebalanced (no position)",
+      "recenter:edge_distance": "Rebalanced (edge distance)",
+      "recenter:time_threshold": "Rebalanced (time)",
+      "recenter:manual_force": "Rebalanced (manual)",
+      "recenter:recovery_retry": "Rebalanced (recovery)",
+      "reentry:mean_reversion_reentry": "Re-entered position",
+      "topup:idle_deploy": "Topped up liquidity",
+      "harvest:threshold": "Harvested fees",
+      "gas_topup:eth_wallet_low": "Topped up ETH gas",
+      "trend_escape:trend_escape": "Exited (trend escape)",
+      "liquidate:owner_liquidate_and_pause": "Liquidated & paused",
+      "stake:auto_stake": "Staked into gauge",
+      "unstake:close_position": "Unstaked for rebalance",
+      "unstake:top_up": "Unstaked for top-up",
+      "unstake:collect_fees": "Unstaked for fee harvest",
+      "unstake:owner_unstake": "Unstaked (manual)",
+      "claim:auto_claim": "Claimed AERO rewards",
+      "action:force_rebalance_requested": "Force rebalance requested",
+      "action:settings_updated": "Settings updated",
+      "blocked:kill_switch_active": "Blocked (kill switch)",
+      "blocked:trading_disabled": "Blocked (trading off)",
+      "error:idle_deploy_failed": "Top-up failed",
+      "error:harvest_failed": "Harvest failed",
+      "error:reentry_failed": "Re-entry failed",
+      "error:trend_escape_failed": "Trend escape failed",
+      "error:gas_topup_failed": "ETH top-up failed",
+      "error:auto_stake_failed": "Auto-stake failed",
+      "error:owner_liquidate_and_pause_failed": "Liquidation failed",
+    };
+    if (labels[key]) return labels[key];
+    for (const [k, v] of Object.entries(labels)) {
+      if (key.startsWith(k)) return v;
+    }
+    if (r.startsWith("failure_cooldown")) return "Waiting (cooldown)";
+    return t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()) + (r ? ` (${r})` : "");
   };
   const timeAgo = (iso?: string) => {
     if (!iso) return "\u2014";
@@ -2690,24 +2737,49 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
     const s = Math.round((Date.now() - ms) / 1000);
     if (s < 60) return `${s}s ago`;
     if (s < 3600) return `${Math.round(s/60)}m ago`;
-    return `${Math.round(s/3600)}h ago`;
+    if (s < 86400) return `${Math.round(s/3600)}h ago`;
+    return `${Math.round(s/86400)}d ago`;
+  };
+  const financialBadge = (ev: typeof evs[0]): string | null => {
+    const fees = Number(ev.feesCollectedUsd || 0);
+    const rewards = Number(ev.rewardsUsd || 0);
+    const gas = Number(ev.gasUsd || 0);
+    if (ev.type === "harvest" && fees > 0) return `+$${fees.toFixed(2)} fees`;
+    if (ev.type === "claim" && rewards > 0) return `+$${rewards.toFixed(2)}`;
+    if ((ev.type === "recenter" || ev.type === "reentry" || ev.type === "trend_escape") && gas > 0) return `gas $${gas.toFixed(2)}`;
+    if (ev.type === "topup" && gas > 0) return `gas $${gas.toFixed(2)}`;
+    if (ev.type === "stake" && gas > 0) return `gas $${gas.toFixed(4)}`;
+    if (ev.type === "unstake" && rewards > 0) return `+$${rewards.toFixed(2)} claimed`;
+    return null;
   };
   return (
     <div style={{ display:"grid", gap:6 }}>
-      {evs.map((ev, i) => (
-        <div key={i} style={{ display:"grid", gap:2 }}>
-          <div style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12 }}>
-            <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:60 }}>{timeAgo(ev.atIso)}</span>
-            <span style={{ color:typeColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{ev.type || "EVENT"}</span>
-            <span style={{ color:"rgba(232,232,240,0.5)" }}>{ev.reason || ""}</span>
-          </div>
-          {ev.type === "error" && ev.message && (
-            <div style={{ fontSize:11, color:"rgba(239,68,68,0.6)", paddingLeft:68, wordBreak:"break-word", maxWidth:360 }}>
-              {ev.message.length > 200 ? ev.message.slice(0, 200) + "…" : ev.message}
+      {evs.map((ev, i) => {
+        const badge = financialBadge(ev);
+        const txHash = ev.txHashes?.[0];
+        return (
+          <div key={i} style={{ display:"grid", gap:2 }}>
+            <div style={{ display:"flex", gap:8, alignItems:"baseline", fontSize:12 }}>
+              <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:54 }}>{timeAgo(ev.atIso)}</span>
+              <span style={{ color:eventColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{eventLabel(ev.type, ev.reason)}</span>
+              {badge && <span style={{ color:"rgba(232,232,240,0.4)", fontSize:11, whiteSpace:"nowrap" }}>{badge}</span>}
+              {txHash && (
+                <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer"
+                  style={{ color:"rgba(232,232,240,0.3)", fontSize:10, textDecoration:"none", whiteSpace:"nowrap" }}
+                  onMouseOver={e => (e.currentTarget.style.color = "#06b6d4")}
+                  onMouseOut={e => (e.currentTarget.style.color = "rgba(232,232,240,0.3)")}>
+                  tx
+                </a>
+              )}
             </div>
-          )}
-        </div>
-      ))}
+            {ev.type === "error" && ev.message && (
+              <div style={{ fontSize:11, color:"rgba(239,68,68,0.6)", paddingLeft:62, wordBreak:"break-word", maxWidth:360 }}>
+                {ev.message.length > 200 ? ev.message.slice(0, 200) + "\u2026" : ev.message}
+              </div>
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
