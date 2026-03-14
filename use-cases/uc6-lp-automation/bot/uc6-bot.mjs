@@ -2080,6 +2080,31 @@ class Uc6Bot {
     }
   }
 
+  /**
+   * Called in the main loop when in_band and no top-up was needed.
+   * Stakes the NFT into the gauge once all top-ups are complete.
+   */
+  async maybeAutoStakeIdle() {
+    if (!this.settings.emissions?.enabled) return false;
+    if (!this.settings.emissions?.autoStakeOnMint) return false;
+    const em = this.state.emissions;
+    if (em?.staked) return false;
+    const tokenId = this.state.position?.tokenId;
+    if (!tokenId) return false;
+
+    const venue = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    const npmAddress = venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
+
+    try {
+      await this.autoStakeAfterMint(tokenId, npmAddress);
+      await this.persistState();
+      return true;
+    } catch (err) {
+      console.warn("[UC6] [emissions] auto-stake idle failed:", sanitizeErrorMessage(err));
+      return false;
+    }
+  }
+
   async ensureUnstakedForNpmActions(reason) {
     if (!this.settings.emissions?.enabled) return;
     const em = this.state.emissions;
@@ -6466,21 +6491,8 @@ class Uc6Bot {
           }
         }
 
-        // ── Auto-stake into gauge after mint ──────────────────────────
-        if (
-          this.settings.emissions?.enabled &&
-          this.settings.emissions?.autoStakeOnMint &&
-          tokenId
-        ) {
-          try {
-            await this.autoStakeAfterMint(tokenId.toString(), npmAddress);
-          } catch (stakeErr) {
-            console.warn(
-              "[UC6] [emissions] auto-stake after mint failed:",
-              sanitizeErrorMessage(stakeErr),
-            );
-          }
-        }
+        // NOTE: auto-stake into gauge is deferred to the main loop (maybeAutoStakeIdle)
+        // so that top-ups can complete first — increaseLiquidity reverts on staked NFTs.
 
         return {
           tokenId: tokenId.toString(),
@@ -6878,6 +6890,16 @@ class Uc6Bot {
     const keepReserveTopUpRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
     const maxDeployRaw = parseUnits(this.settings.maxDeployUsdc.toFixed(6), USDC_DECIMALS);
     const minUsdcDeployRaw = parseUnits("1", USDC_DECIMALS);
+
+    // Unstake if needed — increaseLiquidity reverts on NFTs owned by the gauge
+    if (this.settings.emissions?.enabled && this.state.emissions?.staked) {
+      try {
+        await this.ensureUnstakedForNpmActions("top_up");
+      } catch (err) {
+        console.warn("[UC6] [emissions] auto-unstake before top-up failed:", sanitizeErrorMessage(err));
+        return false;
+      }
+    }
 
     this.beginAction("topup", "idle_deploy");
     try {
@@ -9019,6 +9041,9 @@ class Uc6Bot {
       if (trigger.reason === "in_band") {
         const toppedUp = await this.maybeTopUpLiquidity(primary);
         if (toppedUp) return;
+        // Auto-stake once all top-ups are done (can't increaseLiquidity while staked)
+        const staked = await this.maybeAutoStakeIdle();
+        if (staked) return;
       }
       const harvested = await this.maybeHarvestOnly();
       if (harvested) return;
