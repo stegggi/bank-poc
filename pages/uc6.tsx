@@ -1564,7 +1564,7 @@ export default function Uc6Page() {
   const decision = (status?.ops?.lastDecision || status?.lastDecision || {}) as Record<string, unknown>;
   const regimeStatus = status?.regime || null;
   const regimeDecisionView = status?.decision || null;
-  const events = (status?.events?.lastN || []).slice(-5).reverse();
+  const events = (status?.events?.lastN || []).slice(-10).reverse();
   const hasActiveLpPosition = Boolean(status?.position?.tokenId);
   const inRange = hasActiveLpPosition && Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
