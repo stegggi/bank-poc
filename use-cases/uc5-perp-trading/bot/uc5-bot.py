@@ -3763,12 +3763,17 @@ async def main():
                     maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
                 entry_px = float(epf if epf and epf > 0 else last_mid)
                 entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
+                entry_leverage = float(cfg.get("maxLeverage", 2.0))
+                entry_notional = opened_qty * entry_px if entry_px > 0 else 0.0
+                entry_margin_usd = (entry_notional / entry_leverage) if entry_leverage > 0 else entry_notional
                 entry_risk_state = PositionState(
                   open=True,
                   side=desired,
                   qty=opened_qty,
                   entry_price=entry_px,
                   entry_ts_ms=etsf or now_ms,
+                  margin_usd=entry_margin_usd,
+                  leverage=entry_leverage,
                 )
                 _ensure_frozen_risk_levels(
                   position=entry_risk_state,
@@ -4207,6 +4212,8 @@ async def main():
           "atrStopLossConfirmSec": atr_sl_confirm_sec_runtime,
           "atrStopLossBreachSec": atr_sl_breach_sec,
           "atrStopLossConfirmRemainingSec": atr_sl_remaining_sec,
+          "marginUsd": _f(position_state.margin_usd),
+          "leverage": _f(position_state.leverage),
           "updatedAt": int(time.time() * 1000),
         },
         "agent": {

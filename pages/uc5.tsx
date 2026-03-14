@@ -1195,6 +1195,8 @@ export default function Uc5Page() {
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                       {row("SIZE", `${pos.size?.toFixed(6) || "—"} BTC`)}
+                      {row("MARGIN", posRecord.marginUsd != null ? fmtUsd(Number(posRecord.marginUsd)) : (entryPrice && pos.size ? fmtUsd(pos.size * entryPrice / Number(posRecord.leverage || 2)) : "—"))}
+                      {row("LEVERAGE", posRecord.leverage != null ? `${Number(posRecord.leverage).toFixed(1)}×` : "—")}
                       {row("ENTRY", fmtUsd(entryPrice || null))}
                       {row("AGE", pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—")}
                       {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444")}

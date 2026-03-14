@@ -40,6 +40,8 @@ class PositionState:
   fixed_stop_price: Optional[float] = None
   fixed_take_price: Optional[float] = None
   stop_loss_is_atr_based: Optional[bool] = None
+  margin_usd: Optional[float] = None
+  leverage: Optional[float] = None
 
 
 @dataclass

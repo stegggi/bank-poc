@@ -2025,7 +2025,7 @@ class Uc6Bot {
   }
 
   async autoStakeAfterMint(tokenId, npmAddress) {
-    const poolAddress = ENV.poolAddress;
+    const poolAddress = this.slipstreamPool;
     const gauge = await resolveGauge(this.publicClient, poolAddress, this.settings);
     const eligibility = isAutoStakeEligible(gauge);
     const em = this.state.emissions;
@@ -2145,7 +2145,7 @@ class Uc6Bot {
       try {
         const gauge = await resolveGauge(
           this.publicClient,
-          ENV.poolAddress,
+          this.slipstreamPool,
           this.settings,
         );
         em.gaugeAddress = gauge.gaugeAddress;
@@ -9597,7 +9597,7 @@ class Uc6Bot {
     const walletAero = em.walletAero?.aero || 0;
     return {
       enabled: Boolean(s.enabled),
-      poolAddress: ENV.poolAddress,
+      poolAddress: this.slipstreamPool,
       gaugeAddress: em.gaugeAddress || null,
       gaugeAlive: em.gaugeAlive ?? null,
       gaugeMeta: em.gaugeMeta || null,

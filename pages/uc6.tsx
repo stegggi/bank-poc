@@ -1887,6 +1887,11 @@ export default function Uc6Page() {
         {error && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>{error}</div>}
         {statusError && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444", fontSize:13 }}>Status: {statusError}</div>}
         {hasMultipleActive && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>Multiple active LP positions detected ({activeLpCount}). Bot is blocked.</div>}
+        {status?.lastError && (
+          <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444", fontSize:13, wordBreak:"break-word" }}>
+            <strong>Last Error:</strong> {typeof status.lastError === "string" ? status.lastError : (status.ops?.lastError as { message?: string })?.message || JSON.stringify(status.lastError)}
+          </div>
+        )}
 
         {/* ZONES 2+3+4: Three-column grid */}
         <div style={{ display:"grid", gridTemplateColumns: isMobile ? "1fr" : isTablet ? "1fr 1fr" : "28fr 42fr 30fr", gap: isMobile ? 12 : 16, alignItems:"start" }}>
@@ -2670,7 +2675,7 @@ function OpsGrid({ rebalancesToday, rebalances24h, lastRebalanceAtIso, churnRati
   );
 }
 
-function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; gasUsd?: number; feesCollectedUsd?: number; netUsd?: number }> }) {
+function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; message?: string; gasUsd?: number; feesCollectedUsd?: number; netUsd?: number }> }) {
   const typeColor = (t?: string) => {
     const s = (t||"").toUpperCase();
     if (s.includes("HARVEST") || s.includes("COLLECT")) return "#22c55e";
@@ -2690,10 +2695,17 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   return (
     <div style={{ display:"grid", gap:6 }}>
       {evs.map((ev, i) => (
-        <div key={i} style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12 }}>
-          <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:60 }}>{timeAgo(ev.atIso)}</span>
-          <span style={{ color:typeColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{ev.type || "EVENT"}</span>
-          <span style={{ color:"rgba(232,232,240,0.5)" }}>{ev.reason || ""}</span>
+        <div key={i} style={{ display:"grid", gap:2 }}>
+          <div style={{ display:"flex", gap:8, alignItems:"flex-start", fontSize:12 }}>
+            <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:60 }}>{timeAgo(ev.atIso)}</span>
+            <span style={{ color:typeColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{ev.type || "EVENT"}</span>
+            <span style={{ color:"rgba(232,232,240,0.5)" }}>{ev.reason || ""}</span>
+          </div>
+          {ev.type === "error" && ev.message && (
+            <div style={{ fontSize:11, color:"rgba(239,68,68,0.6)", paddingLeft:68, wordBreak:"break-word", maxWidth:360 }}>
+              {ev.message.length > 200 ? ev.message.slice(0, 200) + "…" : ev.message}
+            </div>
+          )}
         </div>
       ))}
     </div>
