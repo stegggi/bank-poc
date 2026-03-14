@@ -2050,7 +2050,7 @@ class Uc6Bot {
       npmAddress,
       gauge.gaugeAddress,
       tokenId,
-      this.account.address,
+      this.account,
       this.settings.emissions.approvalMode,
       (msg) => console.log(`[UC6] [emissions] ${msg}`),
     );
@@ -2126,7 +2126,7 @@ class Uc6Bot {
       this.publicClient,
       gaugeAddress,
       em.stakedTokenId,
-      this.account.address,
+      this.account,
       (msg) => console.log(`[UC6] [emissions] ${msg}`),
     );
 
@@ -2243,7 +2243,7 @@ class Uc6Bot {
               this.publicClient,
               em.gaugeAddress,
               tokenId,
-              this.account.address,
+              this.account,
               (msg) => console.log(`[UC6] [emissions] ${msg}`),
             );
             if (result.success) {
@@ -10088,7 +10088,7 @@ class Uc6Bot {
         this.publicClient,
         gaugeAddress,
         tokenId,
-        this.account.address,
+        this.account,
         (msg) => console.log(`[UC6] [emissions] ${msg}`),
       );
 

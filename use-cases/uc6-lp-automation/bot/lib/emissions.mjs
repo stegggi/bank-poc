@@ -345,6 +345,7 @@ export async function stakeNft(
   const _log = log || (() => {});
   const txHashes = [];
   const tid = BigInt(tokenId);
+  const accountAddress = typeof account === "string" ? account : account.address;
 
   // Check existing approval
   let approved = false;
@@ -354,7 +355,7 @@ export async function stakeNft(
         address: npmAddress,
         abi: ERC721_ABI,
         functionName: "isApprovedForAll",
-        args: [account, gaugeAddress],
+        args: [accountAddress, gaugeAddress],
       });
     } else {
       const currentApproved = await publicClient.readContract({
@@ -438,6 +439,7 @@ export async function unstakeNft(
 ) {
   const _log = log || (() => {});
   const tid = BigInt(tokenId);
+  const accountAddress = typeof account === "string" ? account : account.address;
 
   // Record AERO balance before
   let aeroBefore = 0n;
@@ -446,7 +448,7 @@ export async function unstakeNft(
       address: AERO_ADDRESS,
       abi: erc20Abi,
       functionName: "balanceOf",
-      args: [account],
+      args: [accountAddress],
     });
   } catch {}
 
@@ -472,7 +474,7 @@ export async function unstakeNft(
       address: AERO_ADDRESS,
       abi: erc20Abi,
       functionName: "balanceOf",
-      args: [account],
+      args: [accountAddress],
     });
   } catch {}
 
@@ -503,6 +505,7 @@ export async function claimRewards(
 ) {
   const _log = log || (() => {});
   const tid = BigInt(tokenId);
+  const accountAddress = typeof account === "string" ? account : account.address;
 
   // Record AERO balance before
   let aeroBefore = 0n;
@@ -511,7 +514,7 @@ export async function claimRewards(
       address: AERO_ADDRESS,
       abi: erc20Abi,
       functionName: "balanceOf",
-      args: [account],
+      args: [accountAddress],
     });
   } catch {}
 
@@ -537,7 +540,7 @@ export async function claimRewards(
       address: AERO_ADDRESS,
       abi: erc20Abi,
       functionName: "balanceOf",
-      args: [account],
+      args: [accountAddress],
     });
   } catch {}
 
