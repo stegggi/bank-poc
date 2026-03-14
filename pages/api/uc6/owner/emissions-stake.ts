@@ -100,11 +100,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         },
         body: JSON.stringify({ message, signature, payload }),
       },
-      15_000
+      90_000
     );
 
     const text = await upstream.text();
-    let json: unknown = {};
+    let json: Record<string, unknown> = {};
     try {
       json = text ? JSON.parse(text) : {};
     } catch {
@@ -114,7 +114,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.setHeader("cache-control", "no-store");
     if (!upstream.ok) {
       return res.status(upstream.status).json({
-        error: "UC6 bot rejected emissions stake",
+        error: typeof json.error === "string" ? json.error : "UC6 bot rejected emissions stake",
         details: json,
       });
     }
