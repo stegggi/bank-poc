@@ -8315,8 +8315,14 @@ class Uc6Bot {
       inventory.ownerNftCount = Number.isFinite(owned) ? owned : 0;
 
       const scanCount = Math.min(inventory.ownerNftCount, 200);
-      if (scanCount > 0) {
-        const tokenIds = [];
+      // Always include staked tokenIds — they won't appear in balanceOf/tokenOfOwnerByIndex
+      // because the gauge owns them, but positions(tokenId) still works.
+      const stakedTokenIds = [];
+      if (this.state.emissions?.staked && this.state.emissions?.stakedTokenId) {
+        stakedTokenIds.push(BigInt(this.state.emissions.stakedTokenId));
+      }
+      if (scanCount > 0 || stakedTokenIds.length > 0) {
+        const tokenIds = [...stakedTokenIds];
         for (const batch of chunkArray(Array.from({ length: scanCount }, (_, i) => i), MULTICALL_BATCH_SIZE)) {
           let batchResults = null;
           try {
