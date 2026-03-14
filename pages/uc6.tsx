@@ -16,7 +16,7 @@ type EthereumProvider = Eip1193Provider & {
 
 type Uc6Venue = "slipstream" | "uniswapv3";
 type CompoundMode = "on_rebalance" | "threshold_harvest";
-type OwnerAction = "update_settings" | "force_rebalance" | "liquidate_and_pause";
+type OwnerAction = "update_settings" | "force_rebalance" | "liquidate_and_pause" | "emissions_stake" | "emissions_unstake" | "emissions_claim";
 
 type Uc6DraftSettings = {
   tradingEnabled: boolean;
@@ -662,6 +662,37 @@ type Uc6Status = {
       message?: string;
     }>;
   };
+  emissions?: {
+    enabled?: boolean;
+    poolAddress?: string | null;
+    gaugeAddress?: string | null;
+    gaugeAlive?: boolean | null;
+    gaugeMeta?: {
+      periodFinish?: number;
+      rewardRate?: string;
+      left?: string | null;
+      checkedAtIso?: string;
+    } | null;
+    staked?: boolean;
+    tokenId?: string | null;
+    autoStakeEligible?: boolean | null;
+    autoStakeBlockedReason?: string | null;
+    rewardToken?: { address?: string; symbol?: string; decimals?: number } | null;
+    claimable?: { aero?: number; usd?: number; updatedAtIso?: string | null };
+    walletBalance?: { aero?: number; usd?: number; updatedAtIso?: string | null };
+    price?: { aeroUsd?: number; updatedAtIso?: string | null; source?: string | null };
+    lastStakeAtIso?: string | null;
+    lastUnstakeAtIso?: string | null;
+    lastClaimAtIso?: string | null;
+    settings?: {
+      autoStakeOnMint?: boolean;
+      autoUnstakeOnRebalance?: boolean;
+      autoClaim?: boolean;
+      claimMinUsd?: number;
+      claimCooldownSec?: number;
+      approvalMode?: string;
+    };
+  };
   lastDecision?: unknown;
   lastError?: string | null;
 };
@@ -1305,7 +1336,7 @@ export default function Uc6Page() {
     }: {
       action: OwnerAction;
       payload: unknown;
-      endpoint: "/api/uc6/owner/settings" | "/api/uc6/owner/force-rebalance" | "/api/uc6/owner/liquidate-and-pause";
+      endpoint: string;
       successPrefix: string;
     }) => {
       if (!walletAddress) throw new Error("Connect MetaMask first.");
@@ -1460,6 +1491,60 @@ export default function Uc6Page() {
       setBusy("");
     }
   }, [status?.position?.tokenId, submitSignedOwnerAction]);
+
+  const stakeEmissions = useCallback(async () => {
+    setError("");
+    setNotice("");
+    setBusy("emissions-stake");
+    try {
+      await submitSignedOwnerAction({
+        action: "emissions_stake",
+        payload: {},
+        endpoint: "/api/uc6/owner/emissions-stake",
+        successPrefix: "NFT staked into gauge",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to stake into gauge.");
+    } finally {
+      setBusy("");
+    }
+  }, [submitSignedOwnerAction]);
+
+  const unstakeEmissions = useCallback(async () => {
+    setError("");
+    setNotice("");
+    setBusy("emissions-unstake");
+    try {
+      await submitSignedOwnerAction({
+        action: "emissions_unstake",
+        payload: {},
+        endpoint: "/api/uc6/owner/emissions-unstake",
+        successPrefix: "NFT unstaked from gauge",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to unstake from gauge.");
+    } finally {
+      setBusy("");
+    }
+  }, [submitSignedOwnerAction]);
+
+  const claimEmissions = useCallback(async () => {
+    setError("");
+    setNotice("");
+    setBusy("emissions-claim");
+    try {
+      await submitSignedOwnerAction({
+        action: "emissions_claim",
+        payload: {},
+        endpoint: "/api/uc6/owner/emissions-claim",
+        successPrefix: "AERO rewards claimed",
+      });
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to claim AERO rewards.");
+    } finally {
+      setBusy("");
+    }
+  }, [submitSignedOwnerAction]);
 
   const updateNumber = useCallback((key: keyof Uc6DraftSettings, value: string) => {
     const num = Number(value);
@@ -1866,6 +1951,105 @@ export default function Uc6Page() {
                 hodlGateReason={hodlGateReason}
               />
             </Uc6Card>
+
+            {status?.emissions?.enabled && (
+              <Uc6Card title="AERO Emissions">
+                <div style={{ display: "grid", gap: 8 }}>
+                  <Uc6Metric
+                    label="Status"
+                    value={
+                      <Pill
+                        label={status.emissions.staked ? "STAKED" : "NOT STAKED"}
+                        tone={status.emissions.staked ? "good" : "muted"}
+                      />
+                    }
+                  />
+                  <Uc6Metric
+                    label="Claimable AERO"
+                    value={`${(status.emissions.claimable?.aero ?? 0).toFixed(4)} AERO \u00b7 ${fmtUsd(status.emissions.claimable?.usd ?? 0)}`}
+                  />
+                  <Uc6Metric
+                    label="Wallet AERO"
+                    value={`${(status.emissions.walletBalance?.aero ?? 0).toFixed(4)} AERO \u00b7 ${fmtUsd(status.emissions.walletBalance?.usd ?? 0)}`}
+                  />
+                  <Uc6Metric
+                    label="AERO Price"
+                    value={fmtUsd(status.emissions.price?.aeroUsd ?? 0)}
+                  />
+                  {status.emissions.gaugeAlive === false && (
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontSize: 12 }}>
+                      Gauge is not alive
+                    </div>
+                  )}
+                  {status.emissions.autoStakeBlockedReason && !status.emissions.staked && (
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "#f59e0b", fontSize: 12 }}>
+                      Auto-stake blocked: {status.emissions.autoStakeBlockedReason}
+                    </div>
+                  )}
+                  {status.emissions.rewardToken?.symbol === "UNKNOWN" && (
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "#f59e0b", fontSize: 12 }}>
+                      Reward token is not AERO
+                    </div>
+                  )}
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, fontSize: 11, color: "#999" }}>
+                    <span>Auto-stake: {status.emissions.settings?.autoStakeOnMint ? "ON" : "OFF"}</span>
+                    <span>Auto-claim: {status.emissions.settings?.autoClaim ? "ON" : "OFF"}</span>
+                  </div>
+                  {isOwner && (
+                    <div style={{ display: "flex", gap: 8, marginTop: 4, flexWrap: "wrap" }}>
+                      <button
+                        onClick={stakeEmissions}
+                        disabled={!!busy || status.emissions.staked || status.emissions.gaugeAlive === false}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(6,182,212,0.4)",
+                          background: "rgba(6,182,212,0.1)",
+                          color: "#06b6d4",
+                          fontSize: 12,
+                          cursor: !!busy || status.emissions.staked || status.emissions.gaugeAlive === false ? "not-allowed" : "pointer",
+                          opacity: !!busy || status.emissions.staked || status.emissions.gaugeAlive === false ? 0.4 : 1,
+                        }}
+                      >
+                        {busy === "emissions-stake" ? "Staking\u2026" : "Stake"}
+                      </button>
+                      <button
+                        onClick={unstakeEmissions}
+                        disabled={!!busy || !status.emissions.staked}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(245,158,11,0.4)",
+                          background: "rgba(245,158,11,0.1)",
+                          color: "#f59e0b",
+                          fontSize: 12,
+                          cursor: !!busy || !status.emissions.staked ? "not-allowed" : "pointer",
+                          opacity: !!busy || !status.emissions.staked ? 0.4 : 1,
+                        }}
+                      >
+                        {busy === "emissions-unstake" ? "Unstaking\u2026" : "Unstake"}
+                      </button>
+                      <button
+                        onClick={claimEmissions}
+                        disabled={!!busy || !status.emissions.staked || (status.emissions.claimable?.aero ?? 0) <= 0}
+                        style={{
+                          padding: "6px 14px",
+                          borderRadius: 6,
+                          border: "1px solid rgba(34,197,94,0.4)",
+                          background: "rgba(34,197,94,0.1)",
+                          color: "#22c55e",
+                          fontSize: 12,
+                          cursor: !!busy || !status.emissions.staked || (status.emissions.claimable?.aero ?? 0) <= 0 ? "not-allowed" : "pointer",
+                          opacity: !!busy || !status.emissions.staked || (status.emissions.claimable?.aero ?? 0) <= 0 ? 0.4 : 1,
+                        }}
+                      >
+                        {busy === "emissions-claim" ? "Claiming\u2026" : "Claim AERO"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </Uc6Card>
+            )}
           </div>
 
           {/* ZONE 3: Live Economics */}

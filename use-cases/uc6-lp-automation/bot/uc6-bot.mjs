@@ -25,6 +25,19 @@ import { verifyMessage } from "ethers";
 import { createRegimeState, estimateOU, getRegimeAdvice, ingestSample } from "./lib/regime.mjs";
 import { redactSensitiveText, safeBearerMatch, sanitizeErrorMessage } from "./lib/security.mjs";
 import {
+  AERO_ADDRESS,
+  VOTER_ADDRESS,
+  resolveGauge,
+  isAutoStakeEligible,
+  checkStakedOnChain,
+  readEmissionsMetrics,
+  fetchAeroPrice,
+  stakeNft,
+  unstakeNft,
+  claimRewards as claimAeroRewards,
+  invalidateGaugeCache,
+} from "./lib/emissions.mjs";
+import {
   loadPoolComparisonCache as loadPoolComparisonCacheFile,
   runPoolComparisonJob,
 } from "./lib/pool_compare/job.mjs";
@@ -622,6 +635,22 @@ const DEFAULT_SETTINGS = {
     allowLowTvlInTable: true,
     rebalanceSwapNotionalPct: 0.1,
   },
+  emissions: {
+    enabled: true,
+    autoStakeOnMint: true,
+    autoUnstakeOnRebalance: true,
+    autoClaim: false,
+    claimMinUsd: 2.0,
+    claimCooldownSec: 21600,
+    approvalMode: "approve_token",
+    voterAddress: VOTER_ADDRESS,
+    gaugeOverrideByPool: {},
+    priceSource: {
+      provider: "geckoterminal",
+      tokenNetwork: "base",
+      refreshSec: 900,
+    },
+  },
 };
 
 function sleep(ms) {
@@ -705,6 +734,16 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       ? baseSettings.poolComparison
       : DEFAULT_SETTINGS.poolComparison;
   const srcPoolComparison = src.poolComparison && typeof src.poolComparison === "object" ? src.poolComparison : {};
+  const baseEmissions =
+    baseSettings.emissions && typeof baseSettings.emissions === "object"
+      ? baseSettings.emissions
+      : DEFAULT_SETTINGS.emissions;
+  const srcEmissions = src.emissions && typeof src.emissions === "object" ? src.emissions : {};
+  const basePriceSource =
+    baseEmissions.priceSource && typeof baseEmissions.priceSource === "object"
+      ? baseEmissions.priceSource
+      : DEFAULT_SETTINGS.emissions.priceSource;
+  const srcPriceSource = srcEmissions.priceSource && typeof srcEmissions.priceSource === "object" ? srcEmissions.priceSource : {};
   const killSwitch = toBool(src.killSwitch, baseSettings.killSwitch);
   const reserveMinUsdc = clamp(
     toNumber(src.reserveMinUsdc ?? src.keepUsdcReserve, baseSettings.reserveMinUsdc),
@@ -1010,6 +1049,38 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         1
       ),
     },
+    emissions: {
+      enabled: toBool(srcEmissions.enabled, baseEmissions.enabled),
+      autoStakeOnMint: toBool(srcEmissions.autoStakeOnMint, baseEmissions.autoStakeOnMint),
+      autoUnstakeOnRebalance: toBool(srcEmissions.autoUnstakeOnRebalance, baseEmissions.autoUnstakeOnRebalance),
+      autoClaim: toBool(srcEmissions.autoClaim, baseEmissions.autoClaim),
+      claimMinUsd: clamp(toNumber(srcEmissions.claimMinUsd, baseEmissions.claimMinUsd), 0, 1_000_000),
+      claimCooldownSec: clamp(
+        Math.round(toNumber(srcEmissions.claimCooldownSec, baseEmissions.claimCooldownSec)),
+        0,
+        604_800
+      ),
+      approvalMode:
+        srcEmissions.approvalMode === "approve_for_all"
+          ? "approve_for_all"
+          : "approve_token",
+      voterAddress: typeof srcEmissions.voterAddress === "string" && srcEmissions.voterAddress.startsWith("0x")
+        ? srcEmissions.voterAddress
+        : baseEmissions.voterAddress,
+      gaugeOverrideByPool:
+        srcEmissions.gaugeOverrideByPool && typeof srcEmissions.gaugeOverrideByPool === "object"
+          ? srcEmissions.gaugeOverrideByPool
+          : baseEmissions.gaugeOverrideByPool,
+      priceSource: {
+        provider: typeof srcPriceSource.provider === "string" ? srcPriceSource.provider : basePriceSource.provider,
+        tokenNetwork: typeof srcPriceSource.tokenNetwork === "string" ? srcPriceSource.tokenNetwork : basePriceSource.tokenNetwork,
+        refreshSec: clamp(
+          Math.round(toNumber(srcPriceSource.refreshSec, basePriceSource.refreshSec)),
+          60,
+          86_400
+        ),
+      },
+    },
   };
   if (out.regime.trendHalfLifeMinSec <= out.regime.mrHalfLifeMaxSec) {
     out.regime.trendHalfLifeMinSec = out.regime.mrHalfLifeMaxSec + 1;
@@ -1076,6 +1147,22 @@ function defaultState(accountAddress) {
       regime: null,
       regimeDecision: null,
       refresh: {},
+    },
+    emissions: {
+      gaugeAddress: null,
+      gaugeAlive: null,
+      gaugeMeta: null,
+      staked: false,
+      stakedTokenId: null,
+      lastStakeAtIso: null,
+      lastUnstakeAtIso: null,
+      lastClaimAtIso: null,
+      autoStakeEligible: null,
+      autoStakeBlockedReason: null,
+      aeroPrice: null,
+      rewardToken: null,
+      claimable: null,
+      walletAero: null,
     },
     events: [],
     ledgerEvents: [],
@@ -1804,6 +1891,13 @@ class Uc6Bot {
       this.setLastError(err);
     }
 
+    // Reconcile emissions staking state with on-chain truth
+    try {
+      await this.reconcileEmissionsState();
+    } catch (err) {
+      console.warn("[UC6] [emissions] reconcile error on startup:", sanitizeErrorMessage(err));
+    }
+
     this.resetRangeStatsSampler(Date.now());
 
     await this.persistState().catch((err) => {
@@ -1855,6 +1949,14 @@ class Uc6Bot {
         ...(parsed.latest || {}),
       },
     };
+    if (!this.state.emissions || typeof this.state.emissions !== "object") {
+      this.state.emissions = { ...baseState.emissions };
+    } else {
+      this.state.emissions = {
+        ...baseState.emissions,
+        ...this.state.emissions,
+      };
+    }
     if (!Array.isArray(this.state.events)) this.state.events = [];
     if (!Array.isArray(this.state.ledgerEvents)) this.state.ledgerEvents = Array.isArray(this.state.events) ? [...this.state.events] : [];
     if (!this.state.rangeStats || typeof this.state.rangeStats !== "object") {
@@ -1888,6 +1990,271 @@ class Uc6Bot {
   async persistState() {
     this.state.updatedAt = nowIso();
     await writeJsonAtomic(STATE_PATH, this.state);
+  }
+
+  async reconcileEmissionsState() {
+    if (!this.settings.emissions?.enabled) return;
+    const em = this.state.emissions;
+    if (!em) return;
+    const tokenId = em.stakedTokenId || this.state.position?.tokenId;
+    if (!tokenId) return;
+    const gaugeAddr = em.gaugeAddress;
+    if (!gaugeAddr) {
+      if (em.staked) {
+        console.log("[UC6] [emissions] state says staked but no gaugeAddress — clearing staked flag");
+        em.staked = false;
+        em.stakedTokenId = null;
+      }
+      return;
+    }
+    const onChainStaked = await checkStakedOnChain(
+      this.publicClient,
+      gaugeAddr,
+      this.account.address,
+      tokenId,
+    );
+    if (em.staked && !onChainStaked) {
+      console.log(`[UC6] [emissions] state says staked but chain says NOT staked (tokenId=${tokenId}) — fixing`);
+      em.staked = false;
+      em.stakedTokenId = null;
+    } else if (!em.staked && onChainStaked) {
+      console.log(`[UC6] [emissions] state says NOT staked but chain says staked (tokenId=${tokenId}) — fixing`);
+      em.staked = true;
+      em.stakedTokenId = tokenId;
+    }
+  }
+
+  async autoStakeAfterMint(tokenId, npmAddress) {
+    const poolAddress = ENV.poolAddress;
+    const gauge = await resolveGauge(this.publicClient, poolAddress, this.settings);
+    const eligibility = isAutoStakeEligible(gauge);
+    const em = this.state.emissions;
+    em.gaugeAddress = gauge.gaugeAddress;
+    em.gaugeAlive = gauge.gaugeAlive;
+    em.gaugeMeta = gauge.gaugeMeta;
+    em.rewardToken = gauge.rewardToken;
+    em.autoStakeEligible = eligibility.eligible;
+    em.autoStakeBlockedReason = eligibility.blockedReason;
+
+    if (!eligibility.eligible) {
+      console.log(
+        `[UC6] [emissions] auto-stake skipped: ${eligibility.blockedReason}`,
+      );
+      return;
+    }
+
+    console.log(`[UC6] [emissions] auto-staking tokenId=${tokenId} into gauge=${gauge.gaugeAddress}`);
+    const result = await stakeNft(
+      this.walletClient,
+      this.publicClient,
+      npmAddress,
+      gauge.gaugeAddress,
+      tokenId,
+      this.account.address,
+      this.settings.emissions.approvalMode,
+      (msg) => console.log(`[UC6] [emissions] ${msg}`),
+    );
+
+    if (result.success) {
+      em.staked = true;
+      em.stakedTokenId = tokenId;
+      em.lastStakeAtIso = nowIso();
+
+      const gasUsd =
+        Number(formatUnits(result.gasCostWei, 18)) * this.getSpotUsdcPerWeth();
+
+      await this.appendLifecycleEvent(
+        this.lifecycleCommonFields({
+          type: "EMISSIONS_STAKE",
+          tokenId,
+          txHashes: result.txHashes,
+          accounting: { gasUsd, isEstimated: false },
+          details: {
+            gaugeAddress: gauge.gaugeAddress,
+            approvalMode: this.settings.emissions.approvalMode,
+          },
+        }),
+      ).catch((err) => this.setLastError(err));
+
+      console.log(`[UC6] [emissions] staked tokenId=${tokenId}, gasUsd=${gasUsd.toFixed(4)}`);
+    }
+  }
+
+  async ensureUnstakedForNpmActions(reason) {
+    if (!this.settings.emissions?.enabled) return;
+    const em = this.state.emissions;
+    if (!em?.staked || !em.stakedTokenId) return;
+    const gaugeAddress = em.gaugeAddress;
+    if (!gaugeAddress) {
+      em.staked = false;
+      em.stakedTokenId = null;
+      return;
+    }
+
+    console.log(
+      `[UC6] [emissions] unstaking tokenId=${em.stakedTokenId} before ${reason}`,
+    );
+
+    const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+    const result = await unstakeNft(
+      this.walletClient,
+      this.publicClient,
+      gaugeAddress,
+      em.stakedTokenId,
+      this.account.address,
+      (msg) => console.log(`[UC6] [emissions] ${msg}`),
+    );
+
+    if (result.success) {
+      const gasUsd =
+        Number(formatUnits(result.gasCostWei, 18)) * this.getSpotUsdcPerWeth();
+      const rewardsUsd = result.aeroClaimed * aeroPrice;
+
+      em.staked = false;
+      em.lastUnstakeAtIso = nowIso();
+
+      await this.appendLifecycleEvent(
+        this.lifecycleCommonFields({
+          type: "EMISSIONS_UNSTAKE",
+          tokenId: em.stakedTokenId,
+          txHashes: [result.txHash],
+          accounting: { gasUsd, rewardsUsd, isEstimated: false },
+          details: {
+            reason,
+            gaugeAddress,
+            aeroClaimed: result.aeroClaimed,
+            aeroPrice,
+          },
+        }),
+      ).catch((err) => this.setLastError(err));
+
+      em.stakedTokenId = null;
+      console.log(
+        `[UC6] [emissions] unstaked for ${reason}, aeroClaimed=${result.aeroClaimed.toFixed(4)}, gasUsd=${gasUsd.toFixed(4)}`,
+      );
+    }
+  }
+
+  async refreshEmissionsMaybe() {
+    if (!this.settings.emissions?.enabled) return;
+    const em = this.state.emissions;
+    if (!em) return;
+
+    // Refresh gauge resolution every 15 min
+    if (this.isTtlDue("emissions_gauge", 900)) {
+      try {
+        const gauge = await resolveGauge(
+          this.publicClient,
+          ENV.poolAddress,
+          this.settings,
+        );
+        em.gaugeAddress = gauge.gaugeAddress;
+        em.gaugeAlive = gauge.gaugeAlive;
+        em.gaugeMeta = gauge.gaugeMeta;
+        em.rewardToken = gauge.rewardToken;
+        const eligibility = isAutoStakeEligible(gauge);
+        em.autoStakeEligible = eligibility.eligible;
+        em.autoStakeBlockedReason = eligibility.blockedReason;
+        this.markRefreshStamp("emissions_gauge", "emissionsGauge");
+      } catch (err) {
+        console.warn("[UC6] [emissions] gauge refresh error:", sanitizeErrorMessage(err));
+      }
+    }
+
+    // Refresh AERO price
+    const priceTtl = this.settings.emissions?.priceSource?.refreshSec ?? 900;
+    if (this.isTtlDue("emissions_price", priceTtl)) {
+      try {
+        em.aeroPrice = await fetchAeroPrice(this.settings);
+        this.markRefreshStamp("emissions_price", "emissionsPrice");
+      } catch (err) {
+        console.warn("[UC6] [emissions] price refresh error:", sanitizeErrorMessage(err));
+      }
+    }
+
+    // Refresh claimable + wallet AERO every 60s
+    if (this.isTtlDue("emissions_metrics", 60)) {
+      try {
+        const tokenId = em.stakedTokenId || this.state.position?.tokenId;
+        const metrics = await readEmissionsMetrics(
+          this.publicClient,
+          em.gaugeAddress,
+          this.account.address,
+          tokenId,
+          em.staked,
+        );
+        em.claimable = { aero: metrics.claimableAero, updatedAtIso: metrics.updatedAtIso };
+        em.walletAero = { aero: metrics.walletAero, updatedAtIso: metrics.updatedAtIso };
+        this.markRefreshStamp("emissions_metrics", "emissionsMetrics");
+      } catch (err) {
+        console.warn("[UC6] [emissions] metrics refresh error:", sanitizeErrorMessage(err));
+      }
+    }
+
+    // Auto-claim check
+    if (
+      this.settings.emissions.autoClaim &&
+      em.staked &&
+      em.gaugeAddress &&
+      em.claimable
+    ) {
+      const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      const claimableUsd = (em.claimable.aero || 0) * aeroPrice;
+      const cooldownOk =
+        !em.lastClaimAtIso ||
+        Date.now() - new Date(em.lastClaimAtIso).getTime() >=
+          (this.settings.emissions.claimCooldownSec || 21600) * 1000;
+
+      if (
+        claimableUsd >= (this.settings.emissions.claimMinUsd || 2) &&
+        cooldownOk
+      ) {
+        try {
+          const tokenId = em.stakedTokenId || this.state.position?.tokenId;
+          if (tokenId) {
+            console.log(`[UC6] [emissions] auto-claiming AERO (claimableUsd=${claimableUsd.toFixed(2)})`);
+            const result = await claimAeroRewards(
+              this.walletClient,
+              this.publicClient,
+              em.gaugeAddress,
+              tokenId,
+              this.account.address,
+              (msg) => console.log(`[UC6] [emissions] ${msg}`),
+            );
+            if (result.success) {
+              const gasUsd =
+                Number(formatUnits(result.gasCostWei, 18)) *
+                this.getSpotUsdcPerWeth();
+              em.lastClaimAtIso = nowIso();
+
+              await this.appendLifecycleEvent(
+                this.lifecycleCommonFields({
+                  type: "EMISSIONS_CLAIM",
+                  tokenId: String(tokenId),
+                  txHashes: [result.txHash],
+                  accounting: {
+                    gasUsd,
+                    rewardsUsd: result.aeroClaimed * aeroPrice,
+                    isEstimated: false,
+                  },
+                  details: {
+                    aeroClaimed: result.aeroClaimed,
+                    aeroPrice,
+                    gaugeAddress: em.gaugeAddress,
+                  },
+                }),
+              ).catch((err) => this.setLastError(err));
+
+              console.log(
+                `[UC6] [emissions] claimed ${result.aeroClaimed.toFixed(4)} AERO, gasUsd=${gasUsd.toFixed(4)}`,
+              );
+            }
+          }
+        } catch (err) {
+          console.warn("[UC6] [emissions] auto-claim error:", sanitizeErrorMessage(err));
+        }
+      }
+    }
   }
 
   ensureLatestRefreshMeta() {
@@ -6099,6 +6466,22 @@ class Uc6Bot {
           }
         }
 
+        // ── Auto-stake into gauge after mint ──────────────────────────
+        if (
+          this.settings.emissions?.enabled &&
+          this.settings.emissions?.autoStakeOnMint &&
+          tokenId
+        ) {
+          try {
+            await this.autoStakeAfterMint(tokenId.toString(), npmAddress);
+          } catch (stakeErr) {
+            console.warn(
+              "[UC6] [emissions] auto-stake after mint failed:",
+              sanitizeErrorMessage(stakeErr),
+            );
+          }
+        }
+
         return {
           tokenId: tokenId.toString(),
           liquidity: pos?.liquidity?.toString() || null,
@@ -6194,6 +6577,16 @@ class Uc6Bot {
   async closePosition({ npmAddress, tokenId, feeValueOverrideUsd = null, feeBreakdownOverride = null }) {
     if (!tokenId) return;
     await this.assertTxAllowed("close_position");
+
+    // Unstake from gauge before any NFT management operations
+    if (this.settings.emissions?.enabled && this.settings.emissions?.autoUnstakeOnRebalance) {
+      try {
+        await this.ensureUnstakedForNpmActions("close_position");
+      } catch (err) {
+        console.warn("[UC6] [emissions] auto-unstake before close failed:", sanitizeErrorMessage(err));
+      }
+    }
+
     const id = BigInt(tokenId);
 
     let posRaw;
@@ -6866,6 +7259,16 @@ class Uc6Bot {
   async collectPositionFees({ npmAddress, tokenId }) {
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0 };
     await this.assertTxAllowed("harvest_collect");
+
+    // Unstake from gauge before collect (gauge holds NFT while staked)
+    if (this.settings.emissions?.enabled && this.state.emissions?.staked) {
+      try {
+        await this.ensureUnstakedForNpmActions("collect_fees");
+      } catch (err) {
+        console.warn("[UC6] [emissions] auto-unstake before collect failed:", sanitizeErrorMessage(err));
+      }
+    }
+
     const id = BigInt(tokenId);
     const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const activePool = venueActive === "uniswapv3"
@@ -8776,6 +9179,7 @@ class Uc6Bot {
     this.updateCapitalStats(this.estimateAggregatedLpUsdValueFromLatest(), Date.now());
     this.updateRangeStats(Date.now());
 
+    await this.refreshEmissionsMaybe();
     await this.evaluateAndAct();
     this.maybeStartPoolComparisonJob();
   }
@@ -9179,8 +9583,51 @@ class Uc6Bot {
         canRebalanceNow: gate.allowed,
         reason: gate.reason,
       },
+      emissions: this.getEmissionsStatusPayload(),
       lastDecision: this.state.lastDecision,
       lastError: this.state.lastError,
+    };
+  }
+
+  getEmissionsStatusPayload() {
+    const em = this.state.emissions || {};
+    const s = this.settings.emissions || {};
+    const aeroUsd = em.aeroPrice?.aeroUsd || 0;
+    const claimableAero = em.claimable?.aero || 0;
+    const walletAero = em.walletAero?.aero || 0;
+    return {
+      enabled: Boolean(s.enabled),
+      poolAddress: ENV.poolAddress,
+      gaugeAddress: em.gaugeAddress || null,
+      gaugeAlive: em.gaugeAlive ?? null,
+      gaugeMeta: em.gaugeMeta || null,
+      staked: Boolean(em.staked),
+      tokenId: em.stakedTokenId || null,
+      autoStakeEligible: em.autoStakeEligible ?? null,
+      autoStakeBlockedReason: em.autoStakeBlockedReason || null,
+      rewardToken: em.rewardToken || null,
+      claimable: {
+        aero: claimableAero,
+        usd: claimableAero * aeroUsd,
+        updatedAtIso: em.claimable?.updatedAtIso || null,
+      },
+      walletBalance: {
+        aero: walletAero,
+        usd: walletAero * aeroUsd,
+        updatedAtIso: em.walletAero?.updatedAtIso || null,
+      },
+      price: em.aeroPrice || { aeroUsd: 0, updatedAtIso: null, source: null },
+      lastStakeAtIso: em.lastStakeAtIso || null,
+      lastUnstakeAtIso: em.lastUnstakeAtIso || null,
+      lastClaimAtIso: em.lastClaimAtIso || null,
+      settings: {
+        autoStakeOnMint: Boolean(s.autoStakeOnMint),
+        autoUnstakeOnRebalance: Boolean(s.autoUnstakeOnRebalance),
+        autoClaim: Boolean(s.autoClaim),
+        claimMinUsd: Number(s.claimMinUsd || 0),
+        claimCooldownSec: Number(s.claimCooldownSec || 0),
+        approvalMode: s.approvalMode || "approve_token",
+      },
     };
   }
 
@@ -9448,6 +9895,216 @@ class Uc6Bot {
     }
   }
 
+  async handleOwnerEmissionsStake(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerActionRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+
+    const auth = String(req.headers.authorization || "");
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
+
+    try {
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
+      const message = String(body.message || "");
+      const signature = String(body.signature || "");
+      const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+
+      if (!message || !signature) {
+        return jsonResponse(res, 400, { error: "Missing message or signature" });
+      }
+
+      const parsed = verifyOwnerSignature({
+        ownerAddress: this.ownerAddress,
+        message,
+        signature,
+        payload,
+        expectedAction: "emissions_stake",
+      });
+
+      this.pruneUsedNonces();
+      if (this.ownerNonceUsed.has(parsed.nonce)) {
+        return jsonResponse(res, 409, { error: "Owner nonce already used" });
+      }
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+
+      if (this.settings.killSwitch || !this.settings.tradingEnabled) {
+        return jsonResponse(res, 409, { error: "Trading disabled or kill switch active" });
+      }
+      if (!this.settings.emissions?.enabled) {
+        return jsonResponse(res, 409, { error: "Emissions feature not enabled" });
+      }
+
+      const tokenId = this.state.position?.tokenId;
+      if (!tokenId) {
+        return jsonResponse(res, 409, { error: "No active position to stake" });
+      }
+      if (this.state.emissions?.staked) {
+        return jsonResponse(res, 409, { error: "Position already staked" });
+      }
+
+      const venue = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+      const npmAddress = venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
+
+      await this.autoStakeAfterMint(tokenId, npmAddress);
+      await this.persistState();
+
+      return jsonResponse(res, 200, {
+        ok: true,
+        emissions: this.getEmissionsStatusPayload(),
+      });
+    } catch (err) {
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
+    }
+  }
+
+  async handleOwnerEmissionsUnstake(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerActionRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+
+    const auth = String(req.headers.authorization || "");
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
+
+    try {
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
+      const message = String(body.message || "");
+      const signature = String(body.signature || "");
+      const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+
+      if (!message || !signature) {
+        return jsonResponse(res, 400, { error: "Missing message or signature" });
+      }
+
+      const parsed = verifyOwnerSignature({
+        ownerAddress: this.ownerAddress,
+        message,
+        signature,
+        payload,
+        expectedAction: "emissions_unstake",
+      });
+
+      this.pruneUsedNonces();
+      if (this.ownerNonceUsed.has(parsed.nonce)) {
+        return jsonResponse(res, 409, { error: "Owner nonce already used" });
+      }
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+
+      // Unstake is allowed even if killSwitch (recovery action)
+      if (!this.state.emissions?.staked) {
+        return jsonResponse(res, 409, { error: "Position is not staked" });
+      }
+
+      await this.ensureUnstakedForNpmActions("owner_unstake");
+      await this.persistState();
+
+      return jsonResponse(res, 200, {
+        ok: true,
+        emissions: this.getEmissionsStatusPayload(),
+      });
+    } catch (err) {
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
+    }
+  }
+
+  async handleOwnerEmissionsClaim(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerActionRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+
+    const auth = String(req.headers.authorization || "");
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
+
+    try {
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
+      const message = String(body.message || "");
+      const signature = String(body.signature || "");
+      const payload = body.payload && typeof body.payload === "object" ? body.payload : {};
+
+      if (!message || !signature) {
+        return jsonResponse(res, 400, { error: "Missing message or signature" });
+      }
+
+      const parsed = verifyOwnerSignature({
+        ownerAddress: this.ownerAddress,
+        message,
+        signature,
+        payload,
+        expectedAction: "emissions_claim",
+      });
+
+      this.pruneUsedNonces();
+      if (this.ownerNonceUsed.has(parsed.nonce)) {
+        return jsonResponse(res, 409, { error: "Owner nonce already used" });
+      }
+      const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
+      this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+
+      // Claim is allowed even if killSwitch (recovery action)
+      const em = this.state.emissions;
+      if (!em?.staked) {
+        return jsonResponse(res, 409, { error: "Position is not staked — cannot claim" });
+      }
+      const gaugeAddress = em.gaugeAddress;
+      if (!gaugeAddress) {
+        return jsonResponse(res, 409, { error: "No gauge address available" });
+      }
+      const tokenId = em.stakedTokenId || this.state.position?.tokenId;
+      if (!tokenId) {
+        return jsonResponse(res, 409, { error: "No token ID for claim" });
+      }
+
+      const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      const result = await claimAeroRewards(
+        this.walletClient,
+        this.publicClient,
+        gaugeAddress,
+        tokenId,
+        this.account.address,
+        (msg) => console.log(`[UC6] [emissions] ${msg}`),
+      );
+
+      if (result.success) {
+        const gasUsd =
+          Number(formatUnits(result.gasCostWei, 18)) * this.getSpotUsdcPerWeth();
+        em.lastClaimAtIso = nowIso();
+
+        await this.appendLifecycleEvent(
+          this.lifecycleCommonFields({
+            type: "EMISSIONS_CLAIM",
+            tokenId: String(tokenId),
+            txHashes: [result.txHash],
+            accounting: {
+              gasUsd,
+              rewardsUsd: result.aeroClaimed * aeroPrice,
+              isEstimated: false,
+            },
+            details: {
+              aeroClaimed: result.aeroClaimed,
+              aeroPrice,
+              gaugeAddress,
+              trigger: "owner_manual",
+            },
+          }),
+        ).catch((err) => this.setLastError(err));
+      }
+
+      await this.persistState();
+
+      return jsonResponse(res, 200, {
+        ok: true,
+        aeroClaimed: result.aeroClaimed,
+        emissions: this.getEmissionsStatusPayload(),
+      });
+    } catch (err) {
+      const msg = sanitizeErrorMessage(err, "Bad request");
+      return jsonResponse(res, requestErrorStatus(msg), { error: msg });
+    }
+  }
+
   async handleHttp(req, res) {
     if (!req.url) return jsonResponse(res, 404, { error: "Not found" });
     const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -9485,6 +10142,15 @@ class Uc6Bot {
       }
       if (req.method === "POST" && u.pathname === "/owner/liquidate-and-pause") {
         return await this.handleOwnerLiquidateAndPause(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/emissions/stake") {
+        return await this.handleOwnerEmissionsStake(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/emissions/unstake") {
+        return await this.handleOwnerEmissionsUnstake(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/emissions/claim") {
+        return await this.handleOwnerEmissionsClaim(req, res);
       }
       return jsonResponse(res, 405, { error: "Method not allowed" });
     }
