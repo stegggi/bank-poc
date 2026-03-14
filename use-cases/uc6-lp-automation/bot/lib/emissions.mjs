@@ -1,7 +1,7 @@
 import { erc20Abi, formatUnits, parseAbi } from "viem";
 
 // ── Constants ────────────────────────────────────────────────────────────────
-export const AERO_ADDRESS = "0x940181a94A35A4569E4529A3CDFb74e38FD98631";
+export const AERO_ADDRESS = "0x940181a94A35A4569E4529A3CDfB74e38FD98631";
 export const VOTER_ADDRESS = "0x16613524e02ad97eDfeF371bC883F2F5d6C480A5";
 
 // ── Minimal ABIs ─────────────────────────────────────────────────────────────
