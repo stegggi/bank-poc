@@ -12,5 +12,6 @@ pnpm-debug.log*
 .vercel/
 
 
+__pycache__/
 .vscode/
 .idea/
