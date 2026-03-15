@@ -73,7 +73,9 @@ export function ingestSample(state, sample) {
   return true;
 }
 
-export function estimateOU(state) {
+export function estimateOU(state, { mrHalfLifeMaxSec: _mrHL = 180, trendHalfLifeMinSec: _trHL = 900 } = {}) {
+  const mrHalfLifeMaxSec = Math.max(10, Number(_mrHL) || 180);
+  const trendHalfLifeMinSec = Math.max(mrHalfLifeMaxSec + 1, Number(_trHL) || 900);
   const unknown = {
     ok: false,
     theta: 0,
@@ -205,16 +207,28 @@ export function estimateOU(state) {
   if (b >= 1 || b <= 0) {
     label = "trending";
   } else if (Number.isFinite(halfLifeSec)) {
-    if (halfLifeSec <= 180) label = "mean_reverting";
-    else if (halfLifeSec >= 900) label = "trending";
+    if (halfLifeSec <= mrHalfLifeMaxSec) label = "mean_reverting";
+    else if (halfLifeSec >= trendHalfLifeMinSec) label = "trending";
+  }
+
+  // Continuous "Stein Signal": 1.0 = strong mean-reversion, 0.0 = trending.
+  // Interpolates linearly across the former "unknown" dead zone.
+  let thetaStrength = 0;
+  if (b >= 1 || b <= 0) {
+    thetaStrength = 0; // trending
+  } else if (Number.isFinite(halfLifeSec) && theta > 0) {
+    const range = trendHalfLifeMinSec - mrHalfLifeMaxSec;
+    thetaStrength = range > 0
+      ? clamp(1 - (halfLifeSec - mrHalfLifeMaxSec) / range, 0, 1)
+      : (halfLifeSec <= mrHalfLifeMaxSec ? 1 : 0);
   }
 
   const sampleScore = clamp(n / Math.max(practicalMinSamples * 2, 1), 0, 1);
   const fitScore = clamp(Number.isFinite(r2) ? Math.max(r2, 0) : 0, 0, 1);
   const bScore = clamp(1 - Math.min(Math.abs(1 - b), 1), 0, 1);
-  let confidence = 0.15 + 0.45 * sampleScore + 0.3 * fitScore + 0.1 * bScore;
+  // Confidence measures estimation quality (R²-heavy), separate from regime strength (thetaStrength).
+  let confidence = 0.10 + 0.30 * sampleScore + 0.45 * fitScore + 0.15 * bScore;
   if (!Number.isFinite(confidence)) confidence = 0;
-  if (!(Number.isFinite(theta) && theta > 0) && label !== "trending") confidence *= 0.4;
   confidence = clamp(confidence, 0, 1);
 
   const out = {
@@ -224,6 +238,7 @@ export function estimateOU(state) {
     sigma: Number.isFinite(sigma) ? sigma : 0,
     halfLifeSec: Number.isFinite(halfLifeSec) ? halfLifeSec : Number.POSITIVE_INFINITY,
     label,
+    thetaStrength,
     confidence,
     intercept: a,
     slope: b,
@@ -252,8 +267,10 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
   const trendHalfLifeMinSec = Math.max(mrHalfLifeMaxSec + 1, Number(regimeCfg.trendHalfLifeMinSec || 900));
   const maxEdgeAdj = Math.max(0, Number(regimeCfg.maxEdgeAdj || 0.1));
   const maxBandAdjBps = Math.max(0, Number(regimeCfg.maxBandAdjBps || 50));
+  const maxBandNarrowBps = Math.max(0, Number(regimeCfg.maxBandNarrowBps || 20));
   const maxCooldownAdjSec = Math.max(0, Number(regimeCfg.maxCooldownAdjSec || 900));
   const conf = clamp(Number(est.confidence || 0), 0, 1);
+  const thetaStrength = clamp(Number(est.thetaStrength || 0), 0, 1);
 
   const feesPerHour = Math.max(0, Number(fees.trailingFeesPerHourUsd || 0));
   const expectedActionCostUsd = Math.max(0, Number(costs.estimatedActionCostUsd || 0));
@@ -269,18 +286,22 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
   let reasons = [];
 
   if (est.label === "trending") {
+    // Trending: lower edge threshold (more eager to rebalance), shorten cooldown, widen band
     const strength = conf;
     edgeAdj = -maxEdgeAdj * (0.5 + 0.5 * strength);
     cooldownAdj = -Math.round(maxCooldownAdjSec * (0.3 + 0.4 * strength));
     bandAdjBps = Math.round(maxBandAdjBps * (0.5 + 0.5 * strength));
     reasons.push("trending_regime");
-  } else if (est.label === "mean_reverting") {
-    const strength = conf;
-    edgeAdj = maxEdgeAdj * (0.4 + 0.6 * strength);
-    cooldownAdj = Math.round(maxCooldownAdjSec * (0.4 + 0.6 * strength));
-    // keep band stable in v1 to avoid frequent width thrash in mean reversion
-    bandAdjBps = 0;
-    reasons.push("mean_reverting_regime");
+  } else if (thetaStrength > 0) {
+    // Continuous "laziness boundary" — thetaStrength scales adjustments proportionally.
+    // Covers both "mean_reverting" and former "unknown" zone with smooth interpolation.
+    const laziness = thetaStrength * conf;
+    edgeAdj = maxEdgeAdj * (0.3 + 0.7 * laziness);
+    cooldownAdj = Math.round(maxCooldownAdjSec * (0.3 + 0.7 * laziness));
+    // Narrow band only when thetaStrength is above 0.5 (strong mean-reversion)
+    const narrowStrength = clamp(thetaStrength - 0.5, 0, 0.5) * 2;
+    bandAdjBps = -Math.round(maxBandNarrowBps * narrowStrength * conf);
+    reasons.push(est.label === "mean_reverting" ? "mean_reverting_regime" : "interpolated_regime");
   } else {
     reasons.push("uncertain_regime");
   }
@@ -289,7 +310,7 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
     // Prefer waiting when expected near-term fees do not cover the action cost.
     edgeAdj = Math.max(edgeAdj, maxEdgeAdj * 0.5);
     cooldownAdj = Math.max(cooldownAdj, Math.round(maxCooldownAdjSec * 0.5));
-    if (!severeOutOfRange) bandAdjBps = 0;
+    if (!severeOutOfRange) bandAdjBps = Math.max(bandAdjBps, 0);
     reasons.push("cost_gate_wait");
   }
 
@@ -299,15 +320,14 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
 
   const effectiveEdge = clamp(baseEdge + edgeAdj, 0.6, 0.98);
   const effectiveCooldown = clamp(baseCooldown + cooldownAdj, 60, 7200);
-  // Widen-only policy: regime may widen the user-selected base band, never narrow it.
-  // Also cap widening by maxBandAdjBps to keep adjustments predictable.
-  const requestedBandAdjBps = Number.isFinite(Number(bandAdjBps)) ? Math.round(Number(bandAdjBps)) : 0;
-  const wideningAdjBps = clamp(Math.max(0, requestedBandAdjBps), 0, Math.round(maxBandAdjBps));
-  const effectiveBand = clamp(baseBand + wideningAdjBps, baseBand, 5000);
+  // Allow both widening (trending) and narrowing (strong mean-reversion) with bounded floors.
+  const minBandHalfBps = Math.max(30, Math.round(baseBand * 0.7));
+  const effectiveBand = clamp(baseBand + bandAdjBps, minBandHalfBps, baseBand + maxBandAdjBps);
 
   return {
     ok: true,
     label: est.label,
+    thetaStrength,
     halfLifeSec: Number.isFinite(est.halfLifeSec) ? est.halfLifeSec : Number.POSITIVE_INFINITY,
     confidence: conf,
     waitRecommended: costGateWait,

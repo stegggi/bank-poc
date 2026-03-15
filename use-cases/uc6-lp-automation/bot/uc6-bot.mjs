@@ -569,10 +569,15 @@ const DEFAULT_SETTINGS = {
     windowSec: 1800,
     sampleEverySec: 12,
     minSamples: 60,
+    fastWindowSec: 300,
+    fastSampleEverySec: 6,
+    fastMinSamples: 30,
+    fastWeight: 0.4,
     mrHalfLifeMaxSec: 180,
     trendHalfLifeMinSec: 900,
     maxEdgeAdj: 0.1,
     maxBandAdjBps: 50,
+    maxBandNarrowBps: 20,
     maxCooldownAdjSec: 900,
   },
   hodlGate: {
@@ -5077,6 +5082,10 @@ class Uc6Bot {
       windowSec: Math.max(60, Math.round(Number(cfg.windowSec || DEFAULT_SETTINGS.regime.windowSec))),
       sampleEverySec: Math.max(1, Math.round(Number(cfg.sampleEverySec || DEFAULT_SETTINGS.regime.sampleEverySec))),
       minSamples: Math.max(5, Math.round(Number(cfg.minSamples || DEFAULT_SETTINGS.regime.minSamples))),
+      fastWindowSec: Math.max(30, Math.round(Number(cfg.fastWindowSec || DEFAULT_SETTINGS.regime.fastWindowSec))),
+      fastSampleEverySec: Math.max(1, Math.round(Number(cfg.fastSampleEverySec || DEFAULT_SETTINGS.regime.fastSampleEverySec))),
+      fastMinSamples: Math.max(5, Math.round(Number(cfg.fastMinSamples || DEFAULT_SETTINGS.regime.fastMinSamples))),
+      fastWeight: clamp(Number(cfg.fastWeight ?? DEFAULT_SETTINGS.regime.fastWeight), 0, 0.8),
       mrHalfLifeMaxSec: Math.max(10, Math.round(Number(cfg.mrHalfLifeMaxSec || DEFAULT_SETTINGS.regime.mrHalfLifeMaxSec))),
       trendHalfLifeMinSec: Math.max(
         11,
@@ -5087,6 +5096,11 @@ class Uc6Bot {
         Math.round(Number(cfg.maxBandAdjBps || DEFAULT_SETTINGS.regime.maxBandAdjBps)),
         0,
         500
+      ),
+      maxBandNarrowBps: clamp(
+        Math.round(Number(cfg.maxBandNarrowBps ?? DEFAULT_SETTINGS.regime.maxBandNarrowBps)),
+        0,
+        100
       ),
       maxCooldownAdjSec: clamp(
         Math.round(Number(cfg.maxCooldownAdjSec || DEFAULT_SETTINGS.regime.maxCooldownAdjSec)),
@@ -5227,7 +5241,7 @@ class Uc6Bot {
     const regimeLabel = String(latestRegime?.label || "unknown");
     const hasUsableMu =
       regimeOk &&
-      regimeLabel === "mean_reverting" &&
+      (regimeLabel === "mean_reverting" || Number(latestRegime?.thetaStrength || 0) > 0.3) &&
       Number.isFinite(Number(latestRegime?.mu)) &&
       Number.isFinite(Number(latestRegime?.theta)) &&
       Number(latestRegime.theta) > 0;
@@ -5313,6 +5327,17 @@ class Uc6Bot {
         mrHalfLifeMaxSec: cfg.mrHalfLifeMaxSec,
         trendHalfLifeMinSec: cfg.trendHalfLifeMinSec,
       };
+      // Fast window for quicker regime-shift detection (dual-window estimation).
+      this.regimeStateFast = createRegimeState({
+        windowSec: cfg.fastWindowSec,
+        sampleEverySec: cfg.fastSampleEverySec,
+        minSamples: cfg.fastMinSamples,
+      });
+      this.regimeStateFast.config = {
+        ...this.regimeStateFast.config,
+        mrHalfLifeMaxSec: cfg.mrHalfLifeMaxSec,
+        trendHalfLifeMinSec: cfg.trendHalfLifeMinSec,
+      };
       this.regimeStateConfigKey = key;
     }
     return cfg;
@@ -5333,10 +5358,11 @@ class Uc6Bot {
     const tick = Number(snapshot?.tick);
     if (!Number.isFinite(tick)) return false;
     try {
-      return ingestSample(this.regimeState, {
-        tsSec: Math.floor(Date.now() / 1000),
-        tick,
-      });
+      const sample = { tsSec: Math.floor(Date.now() / 1000), tick };
+      const slowOk = ingestSample(this.regimeState, sample);
+      // Also feed the fast window (separate cadence, so ingestSample handles dedup).
+      if (this.regimeStateFast) ingestSample(this.regimeStateFast, sample);
+      return slowOk;
     } catch (err) {
       this.warnRegimeRateLimited(err instanceof Error ? err.message : String(err || "ingest failed"));
       return false;
@@ -5362,6 +5388,7 @@ class Uc6Bot {
         enabled: false,
         ok: false,
         label: "unknown",
+        thetaStrength: 0,
         theta: null,
         halfLifeSec: null,
         sigma: null,
@@ -5372,6 +5399,7 @@ class Uc6Bot {
         requiredMinSamples: cfg.minSamples,
         feasibleSamples: null,
         windowSec: cfg.windowSec,
+        fast: null,
       };
       latest.regimeDecision = baseDecisionView;
       this.state.latest = latest;
@@ -5384,7 +5412,25 @@ class Uc6Bot {
     }
 
     try {
-      const est = estimateOU(this.regimeState);
+      const ouOpts = { mrHalfLifeMaxSec: cfg.mrHalfLifeMaxSec, trendHalfLifeMinSec: cfg.trendHalfLifeMinSec };
+      const estSlow = estimateOU(this.regimeState, ouOpts);
+      const estFast = this.regimeStateFast ? estimateOU(this.regimeStateFast, ouOpts) : null;
+
+      // Blend fast + slow estimates: use fast window for quicker regime-shift detection.
+      const fw = clamp(Number(cfg.fastWeight || 0), 0, 0.8);
+      const est = { ...estSlow };
+      if (estFast?.ok && estSlow.ok && fw > 0) {
+        // Blend theta and thetaStrength; keep slow-window label for gate compatibility.
+        if (estFast.theta > 0 && estSlow.theta > 0) {
+          est.theta = (1 - fw) * estSlow.theta + fw * estFast.theta;
+          est.halfLifeSec = est.theta > 0 ? Math.log(2) / est.theta : Number.POSITIVE_INFINITY;
+        }
+        est.thetaStrength = (1 - fw) * (estSlow.thetaStrength || 0) + fw * (estFast.thetaStrength || 0);
+        // Use fast window's label if it detects trending (faster escape).
+        if (estFast.label === "trending" && estSlow.label !== "trending") {
+          est.label = "trending";
+        }
+      }
       const now = Date.now();
       const stats24h = this.summarizeEvents(this.getEventsSince(now - 24 * 60 * 60 * 1000));
       const recentRebalanceCostUsd =
@@ -5420,20 +5466,19 @@ class Uc6Bot {
           60,
           7200
         );
-        const requestedBandAdjBps = Math.max(0, Number(advice.bandHalfBpsAdj || 0));
-        const maxBandAdjBps = Math.max(0, Number(cfg.maxBandAdjBps || 0));
-        const cappedBandAdjBps = Math.min(requestedBandAdjBps, maxBandAdjBps);
-        const maxBandHalfBps = Math.min(5000, Math.round(baseThresholds.bandHalfBps + cappedBandAdjBps));
+        // Allow both widening and narrowing from regime advice.
+        const bandAdj = Number(advice.bandHalfBpsAdj || 0);
+        const minBandHalfBps = Math.max(30, Math.round(baseThresholds.bandHalfBps * 0.7));
         effective.bandHalfBps = clamp(
-          Math.round(baseThresholds.bandHalfBps + cappedBandAdjBps),
-          baseThresholds.bandHalfBps,
-          maxBandHalfBps
+          Math.round(baseThresholds.bandHalfBps + bandAdj),
+          minBandHalfBps,
+          Math.round(baseThresholds.bandHalfBps + Math.max(0, Number(cfg.maxBandAdjBps || 0)))
         );
       }
       const estOk = Boolean(est?.ok);
       const hasUsableMu =
         estOk &&
-        est?.label === "mean_reverting" &&
+        (est?.label === "mean_reverting" || (Number(est?.thetaStrength || 0) > 0.3)) &&
         Number.isFinite(Number(est?.mu)) &&
         Number.isFinite(Number(est?.theta)) &&
         Number(est?.theta) > 0;
@@ -5441,6 +5486,7 @@ class Uc6Bot {
         enabled: true,
         ok: estOk,
         label: est?.label || "unknown",
+        thetaStrength: estOk ? Number(est?.thetaStrength || 0) : 0,
         theta: estOk && Number.isFinite(Number(est?.theta)) ? Number(est.theta) : null,
         halfLifeSec: estOk && Number.isFinite(Number(est?.halfLifeSec)) ? Number(est.halfLifeSec) : null,
         sigma: estOk && Number.isFinite(Number(est?.sigma)) ? Number(est.sigma) : null,
@@ -5451,6 +5497,15 @@ class Uc6Bot {
         requiredMinSamples: Number.isFinite(Number(est?.requiredMinSamples)) ? Number(est.requiredMinSamples) : cfg.minSamples,
         feasibleSamples: Number.isFinite(Number(est?.feasibleSamples)) ? Number(est.feasibleSamples) : null,
         windowSec: cfg.windowSec,
+        fast: estFast?.ok ? {
+          theta: Number.isFinite(Number(estFast.theta)) ? Number(estFast.theta) : null,
+          thetaStrength: Number(estFast.thetaStrength || 0),
+          halfLifeSec: Number.isFinite(Number(estFast.halfLifeSec)) ? Number(estFast.halfLifeSec) : null,
+          label: estFast.label || "unknown",
+          confidence: Number(estFast.confidence || 0),
+          sampleCount: Array.isArray(this.regimeStateFast?.samples) ? this.regimeStateFast.samples.length : 0,
+          windowSec: cfg.fastWindowSec,
+        } : null,
       };
       latest.regimeDecision = {
         baseThresholds,
@@ -5471,6 +5526,7 @@ class Uc6Bot {
         enabled: true,
         ok: false,
         label: "unknown",
+        thetaStrength: 0,
         theta: null,
         halfLifeSec: null,
         sigma: null,
@@ -5481,6 +5537,7 @@ class Uc6Bot {
         requiredMinSamples: cfg.minSamples,
         feasibleSamples: null,
         windowSec: cfg.windowSec,
+        fast: null,
       };
       latest.regimeDecision = {
         ...baseDecisionView,

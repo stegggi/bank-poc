@@ -50,10 +50,15 @@ type Uc6DraftSettings = {
   regimeWindowSec: number;
   regimeSampleEverySec: number;
   regimeMinSamples: number;
+  regimeFastWindowSec: number;
+  regimeFastSampleEverySec: number;
+  regimeFastMinSamples: number;
+  regimeFastWeight: number;
   regimeMrHalfLifeMaxSec: number;
   regimeTrendHalfLifeMinSec: number;
   regimeMaxEdgeAdj: number;
   regimeMaxBandAdjBps: number;
+  regimeMaxBandNarrowBps: number;
   regimeMaxCooldownAdjSec: number;
   trendEscapeEnabled: boolean;
   trendEscapeMinRegimeConfidence: number;
@@ -108,10 +113,15 @@ type OwnerPayload = {
     windowSec: number;
     sampleEverySec: number;
     minSamples: number;
+    fastWindowSec: number;
+    fastSampleEverySec: number;
+    fastMinSamples: number;
+    fastWeight: number;
     mrHalfLifeMaxSec: number;
     trendHalfLifeMinSec: number;
     maxEdgeAdj: number;
     maxBandAdjBps: number;
+    maxBandNarrowBps: number;
     maxCooldownAdjSec: number;
   };
   trendEscape: {
@@ -346,10 +356,15 @@ type Uc6Status = {
       windowSec?: number;
       sampleEverySec?: number;
       minSamples?: number;
+      fastWindowSec?: number;
+      fastSampleEverySec?: number;
+      fastMinSamples?: number;
+      fastWeight?: number;
       mrHalfLifeMaxSec?: number;
       trendHalfLifeMinSec?: number;
       maxEdgeAdj?: number;
       maxBandAdjBps?: number;
+      maxBandNarrowBps?: number;
       maxCooldownAdjSec?: number;
     };
     trendEscape?: {
@@ -489,6 +504,7 @@ type Uc6Status = {
     enabled?: boolean;
     ok?: boolean;
     label?: "mean_reverting" | "trending" | "unknown" | string;
+    thetaStrength?: number;
     theta?: number | null;
     halfLifeSec?: number | null;
     sigma?: number | null;
@@ -497,6 +513,15 @@ type Uc6Status = {
     updatedAtIso?: string | null;
     sampleCount?: number;
     windowSec?: number;
+    fast?: {
+      theta?: number | null;
+      thetaStrength?: number;
+      halfLifeSec?: number | null;
+      label?: string;
+      confidence?: number;
+      sampleCount?: number;
+      windowSec?: number;
+    } | null;
   };
   strategyMode?: "LP_ACTIVE" | "HOLD_WETH" | "HOLD_USDC" | "HOLD_50_50" | string;
   trend?: {
@@ -743,10 +768,15 @@ function defaultDraft(): Uc6DraftSettings {
     regimeWindowSec: 1800,
     regimeSampleEverySec: 12,
     regimeMinSamples: 60,
+    regimeFastWindowSec: 300,
+    regimeFastSampleEverySec: 6,
+    regimeFastMinSamples: 30,
+    regimeFastWeight: 0.4,
     regimeMrHalfLifeMaxSec: 180,
     regimeTrendHalfLifeMinSec: 900,
     regimeMaxEdgeAdj: 0.1,
     regimeMaxBandAdjBps: 50,
+    regimeMaxBandNarrowBps: 20,
     regimeMaxCooldownAdjSec: 900,
     trendEscapeEnabled: true,
     trendEscapeMinRegimeConfidence: 0.6,
@@ -819,10 +849,15 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     regimeWindowSec: n(regime.windowSec, d.regimeWindowSec),
     regimeSampleEverySec: n(regime.sampleEverySec, d.regimeSampleEverySec),
     regimeMinSamples: n(regime.minSamples, d.regimeMinSamples),
+    regimeFastWindowSec: n(regime.fastWindowSec, d.regimeFastWindowSec),
+    regimeFastSampleEverySec: n(regime.fastSampleEverySec, d.regimeFastSampleEverySec),
+    regimeFastMinSamples: n(regime.fastMinSamples, d.regimeFastMinSamples),
+    regimeFastWeight: n(regime.fastWeight, d.regimeFastWeight),
     regimeMrHalfLifeMaxSec: n(regime.mrHalfLifeMaxSec, d.regimeMrHalfLifeMaxSec),
     regimeTrendHalfLifeMinSec: n(regime.trendHalfLifeMinSec, d.regimeTrendHalfLifeMinSec),
     regimeMaxEdgeAdj: n(regime.maxEdgeAdj, d.regimeMaxEdgeAdj),
     regimeMaxBandAdjBps: n(regime.maxBandAdjBps, d.regimeMaxBandAdjBps),
+    regimeMaxBandNarrowBps: n(regime.maxBandNarrowBps, d.regimeMaxBandNarrowBps),
     regimeMaxCooldownAdjSec: n(regime.maxCooldownAdjSec, d.regimeMaxCooldownAdjSec),
     trendEscapeEnabled: Boolean(trendEscape.enabled ?? d.trendEscapeEnabled),
     trendEscapeMinRegimeConfidence: n(trendEscape.minRegimeConfidence, d.trendEscapeMinRegimeConfidence),
@@ -900,10 +935,15 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
       windowSec: draft.regimeWindowSec,
       sampleEverySec: draft.regimeSampleEverySec,
       minSamples: draft.regimeMinSamples,
+      fastWindowSec: draft.regimeFastWindowSec,
+      fastSampleEverySec: draft.regimeFastSampleEverySec,
+      fastMinSamples: draft.regimeFastMinSamples,
+      fastWeight: draft.regimeFastWeight,
       mrHalfLifeMaxSec: draft.regimeMrHalfLifeMaxSec,
       trendHalfLifeMinSec: draft.regimeTrendHalfLifeMinSec,
       maxEdgeAdj: draft.regimeMaxEdgeAdj,
       maxBandAdjBps: draft.regimeMaxBandAdjBps,
+      maxBandNarrowBps: draft.regimeMaxBandNarrowBps,
       maxCooldownAdjSec: draft.regimeMaxCooldownAdjSec,
     },
     trendEscape: {
@@ -2111,6 +2151,7 @@ export default function Uc6Page() {
             <Uc6Card title="Regime">
               <RegimeGauge
                 label={regimeStatus?.label ?? null}
+                thetaStrength={regimeStatus?.thetaStrength ?? 0}
                 confidencePct={regimeConfidencePct}
                 halfLifeLabel={regimeHalfLifeLabel}
                 theta={regimeStatus?.theta ?? null}
@@ -2123,6 +2164,7 @@ export default function Uc6Page() {
                 effectiveEdgePct={regimeEffectiveEdgePct}
                 baseBandBps={regimeBaseBandBps}
                 effectiveBandBps={regimeEffectiveBandBps}
+                fast={regimeStatus?.fast ?? null}
               />
             </Uc6Card>
 
@@ -2287,13 +2329,18 @@ export default function Uc6Page() {
                 <summary style={cmdSectionStyle}>REGIME ENGINE</summary>
                 <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="regime.enabled" value={draft.regimeEnabled ? "true" : "false"} onChange={(v) => updateBool("regimeEnabled", v === "true")} options={["false", "true"]} />
-                  <NumberField label="regime.windowSec" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
+                  <NumberField label="regime.windowSec (slow)" value={draft.regimeWindowSec} onChange={(v) => updateNumber("regimeWindowSec", v)} />
                   <NumberField label="regime.sampleEverySec" value={draft.regimeSampleEverySec} onChange={(v) => updateNumber("regimeSampleEverySec", v)} />
                   <NumberField label="regime.minSamples" value={draft.regimeMinSamples} onChange={(v) => updateNumber("regimeMinSamples", v)} />
+                  <NumberField label="regime.fastWindowSec" value={draft.regimeFastWindowSec} onChange={(v) => updateNumber("regimeFastWindowSec", v)} />
+                  <NumberField label="regime.fastSampleEverySec" value={draft.regimeFastSampleEverySec} onChange={(v) => updateNumber("regimeFastSampleEverySec", v)} />
+                  <NumberField label="regime.fastMinSamples" value={draft.regimeFastMinSamples} onChange={(v) => updateNumber("regimeFastMinSamples", v)} />
+                  <NumberField label="regime.fastWeight" value={draft.regimeFastWeight} step="0.05" onChange={(v) => updateNumber("regimeFastWeight", v)} />
                   <NumberField label="regime.mrHalfLifeMaxSec" value={draft.regimeMrHalfLifeMaxSec} onChange={(v) => updateNumber("regimeMrHalfLifeMaxSec", v)} />
                   <NumberField label="regime.trendHalfLifeMinSec" value={draft.regimeTrendHalfLifeMinSec} onChange={(v) => updateNumber("regimeTrendHalfLifeMinSec", v)} />
                   <NumberField label="regime.maxEdgeAdj" value={draft.regimeMaxEdgeAdj} step="0.01" onChange={(v) => updateNumber("regimeMaxEdgeAdj", v)} />
-                  <NumberField label="regime.maxBandAdjBps (widen-only)" value={draft.regimeMaxBandAdjBps} onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)} />
+                  <NumberField label="regime.maxBandAdjBps (widen)" value={draft.regimeMaxBandAdjBps} onChange={(v) => updateNumber("regimeMaxBandAdjBps", v)} />
+                  <NumberField label="regime.maxBandNarrowBps" value={draft.regimeMaxBandNarrowBps} onChange={(v) => updateNumber("regimeMaxBandNarrowBps", v)} />
                   <NumberField label="regime.maxCooldownAdjSec" value={draft.regimeMaxCooldownAdjSec} onChange={(v) => updateNumber("regimeMaxCooldownAdjSec", v)} />
                 </div>
               </details>
@@ -2842,8 +2889,8 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   );
 }
 
-function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps }: {
-  label: string|null; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number;
+function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps, fast }: {
+  label: string|null; thetaStrength: number; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number; fast?: { theta?: number|null; thetaStrength?: number; halfLifeSec?: number|null; label?: string; confidence?: number; sampleCount?: number; windowSec?: number } | null;
 }) {
   if (!enabled) {
     return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"16px 0" }}>Regime engine disabled</div>;
@@ -2876,7 +2923,22 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPric
         {theta != null && <Uc6Metric label="Mean-Revert Speed" value={theta.toFixed(4)} />}
         {sigma != null && <Uc6Metric label="Volatility" value={sigma.toFixed(4)} />}
         {muPrice != null && <Uc6Metric label="Mean Price" value={fmtUsd(muPrice)} />}
+        <Uc6Metric label="Theta Strength" value={
+          <span style={{ color: thetaStrength >= 0.7 ? "#22c55e" : thetaStrength >= 0.3 ? "#f59e0b" : "rgba(232,232,240,0.5)" }}>
+            {(thetaStrength * 100).toFixed(0)}%
+          </span>
+        } />
       </div>
+      {fast && (
+        <div style={{ borderTop:"1px solid rgba(255,255,255,0.05)", paddingTop:8, marginTop:4 }}>
+          <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.3)", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Fast window ({fast.windowSec ?? 300}s)</div>
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4 }}>
+            <Uc6Metric label="Label" value={<span style={{ color: fast.label === "mean_reverting" ? "#06b6d4" : fast.label === "trending" ? "#f59e0b" : "rgba(232,232,240,0.4)", fontSize:11 }}>{fast.label || "?"}</span>} />
+            <Uc6Metric label="Theta Str" value={`${((fast.thetaStrength ?? 0) * 100).toFixed(0)}%`} />
+            <Uc6Metric label="Conf" value={`${((fast.confidence ?? 0) * 100).toFixed(0)}%`} />
+          </div>
+        </div>
+      )}
 
       {/* Threshold adjustments — show configured vs what regime is actually using */}
       <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:10, display:"grid", gap:6 }}>
@@ -2896,8 +2958,8 @@ function RegimeGauge({ label, confidencePct, halfLifeLabel, theta, sigma, muPric
                 {!sameVal && (
                   <>
                     <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"→"}</span>
-                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#ef4444", fontWeight:700 }}>{"±"}{effPct}%</span>
-                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#ef4444" }}>
+                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{"±"}{effPct}%</span>
+                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#06b6d4" }}>
                       ({adjBps > 0 ? "+" : ""}{adjBps} bps)
                     </span>
                   </>
