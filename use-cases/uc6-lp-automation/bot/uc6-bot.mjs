@@ -154,6 +154,7 @@ const POOL_ABI = [
     outputs: [{ type: "uint256" }],
   },
   {
+    // Slipstream CLPool ticks() — has extra stakedLiquidityNet + rewardGrowthOutsideX128 vs Uniswap V3.
     name: "ticks",
     type: "function",
     stateMutability: "view",
@@ -161,8 +162,10 @@ const POOL_ABI = [
     outputs: [
       { name: "liquidityGross", type: "uint128" },
       { name: "liquidityNet", type: "int128" },
+      { name: "stakedLiquidityNet", type: "int128" },
       { name: "feeGrowthOutside0X128", type: "uint256" },
       { name: "feeGrowthOutside1X128", type: "uint256" },
+      { name: "rewardGrowthOutsideX128", type: "uint256" },
       { name: "tickCumulativeOutside", type: "int56" },
       { name: "secondsPerLiquidityOutsideX128", type: "uint160" },
       { name: "secondsOutside", type: "uint32" },
@@ -5667,10 +5670,11 @@ class Uc6Bot {
         const currentTick = Number(slot0.tick ?? slot0[1]);
         const fg0 = BigInt(feeGlobal0);
         const fg1 = BigInt(feeGlobal1);
-        const fgOutLower0 = BigInt(tickLowerData.feeGrowthOutside0X128 ?? tickLowerData[2] ?? 0n);
-        const fgOutLower1 = BigInt(tickLowerData.feeGrowthOutside1X128 ?? tickLowerData[3] ?? 0n);
-        const fgOutUpper0 = BigInt(tickUpperData.feeGrowthOutside0X128 ?? tickUpperData[2] ?? 0n);
-        const fgOutUpper1 = BigInt(tickUpperData.feeGrowthOutside1X128 ?? tickUpperData[3] ?? 0n);
+        // Slipstream ticks(): [liquidityGross, liquidityNet, stakedLiquidityNet, feeGrowthOutside0X128, feeGrowthOutside1X128, ...]
+        const fgOutLower0 = BigInt(tickLowerData.feeGrowthOutside0X128 ?? tickLowerData[3] ?? 0n);
+        const fgOutLower1 = BigInt(tickLowerData.feeGrowthOutside1X128 ?? tickLowerData[4] ?? 0n);
+        const fgOutUpper0 = BigInt(tickUpperData.feeGrowthOutside0X128 ?? tickUpperData[3] ?? 0n);
+        const fgOutUpper1 = BigInt(tickUpperData.feeGrowthOutside1X128 ?? tickUpperData[4] ?? 0n);
         // Compute fee growth inside the tick range (modular uint256 arithmetic).
         const Q256 = 1n << 256n;
         const mod = (v) => ((v % Q256) + Q256) % Q256;
