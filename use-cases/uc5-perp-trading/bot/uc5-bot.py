@@ -1283,19 +1283,19 @@ def fetch_portfolio_snapshot(eth_base: str, sub_id: str) -> Dict[str, Any]:
 
       used = first_num(
         row,
-        ["usedMarginUsd", "usedMargin", "marginUsed", "used", "initialMargin", "lockedMargin"],
+        ["totalUsed", "usedMarginUsd", "usedMargin", "marginUsed", "used", "initialMargin", "lockedMargin"],
       )
       if used is None:
-        used = first_num(margin_obj, ["usedMarginUsd", "usedMargin", "marginUsed", "initialMargin"])
+        used = first_num(margin_obj, ["totalUsed", "usedMarginUsd", "usedMargin", "marginUsed", "initialMargin"])
       if used is None:
         used = 0.0
 
       pv = first_num(
         row,
-        ["portfolioValueUsd", "portfolioValue", "equityUsd", "equity", "balanceUsd", "balance", "netAssetValue"],
+        ["portfolioValueUsd", "portfolioValue", "equityUsd", "equity", "balanceUsd", "balance", "amount", "netAssetValue"],
       )
       if pv is None:
-        pv = first_num(margin_obj, ["portfolioValueUsd", "equityUsd", "equity"])
+        pv = first_num(margin_obj, ["portfolioValueUsd", "equityUsd", "equity", "amount"])
       if pv is None and avail is not None:
         pv = avail + used
       if avail is None and pv is not None:
