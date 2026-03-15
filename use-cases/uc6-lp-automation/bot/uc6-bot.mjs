@@ -75,7 +75,7 @@ const ENV = {
   privateKey: process.env.UC6_PRIVATE_KEY || "",
   adminToken: process.env.UC6_ADMIN_TOKEN || "",
   ownerAddress: process.env.UC6_OWNER_ADDRESS || "",
-  host: process.env.UC6_HTTP_HOST || "0.0.0.0",
+  host: process.env.UC6_HTTP_HOST || "127.0.0.1",
   port: Number(process.env.UC6_HTTP_PORT || 8797),
   dataDir: process.env.UC6_DATA_DIR || "/opt/uc6-bot",
 
@@ -99,6 +99,8 @@ const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
 const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
 const POOL_RANKINGS_PATH = path.join(ENV.dataDir, "pool_rankings.json");
 const POOL_TVL_HISTORY_PATH = path.join(ENV.dataDir, "pool_tvl_history.jsonl");
+const USED_NONCES_PATH = path.join(ENV.dataDir, "used_nonces.jsonl");
+const OWNER_AUDIT_PATH = path.join(ENV.dataDir, "owner_audit.jsonl");
 const POSITION_SUMMARY_LIMIT = 20;
 const POSITION_PAGE_SIZE_DEFAULT = 10;
 const POSITION_PAGE_SIZE_MAX = 100;
@@ -1920,6 +1922,13 @@ class Uc6Bot {
       this.setPoolComparisonError(err);
     }
 
+    // Restore persisted nonces so replay protection survives restarts.
+    try {
+      await this.loadUsedNonces();
+    } catch (err) {
+      console.warn("[UC6] [security] failed to load persisted nonces:", sanitizeErrorMessage(err));
+    }
+
     try {
       if (this.settings.wsEnabled) await this.wsHeadWatcher.start();
       await this.refreshSnapshots({ forceSlot0: true, forceBalances: true, headSeen: true });
@@ -2542,6 +2551,60 @@ class Uc6Bot {
     const now = Date.now();
     for (const [nonce, expiresAt] of this.ownerNonceUsed.entries()) {
       if (expiresAt < now) this.ownerNonceUsed.delete(nonce);
+    }
+  }
+
+  async loadUsedNonces() {
+    const lines = await readJsonLinesIfExists(USED_NONCES_PATH);
+    const now = Date.now();
+    let loaded = 0;
+    for (const entry of lines) {
+      if (entry && typeof entry.nonce === "string" && typeof entry.expiresAt === "number" && entry.expiresAt > now) {
+        this.ownerNonceUsed.set(entry.nonce, entry.expiresAt);
+        loaded += 1;
+      }
+    }
+    if (loaded > 0) console.log(`[security] loaded ${loaded} unexpired nonces from disk`);
+    // Rewrite file with only unexpired entries.
+    await this.compactUsedNoncesFile();
+  }
+
+  async persistUsedNonce(nonce, expiresAt) {
+    try {
+      await appendJsonLineAtomic(USED_NONCES_PATH, { nonce, expiresAt });
+    } catch (err) {
+      console.warn("[security] failed to persist nonce:", sanitizeErrorMessage(err));
+    }
+  }
+
+  async auditOwnerAction(action, req, details = {}) {
+    try {
+      const ip = req?.socket?.remoteAddress || "unknown";
+      await appendJsonLineAtomic(OWNER_AUDIT_PATH, {
+        ts: new Date().toISOString(),
+        action,
+        owner: this.ownerAddress,
+        ip,
+        ...details,
+      });
+    } catch (err) {
+      console.warn("[security] failed to write audit log:", sanitizeErrorMessage(err));
+    }
+  }
+
+  async compactUsedNoncesFile() {
+    const now = Date.now();
+    const live = [];
+    for (const [nonce, expiresAt] of this.ownerNonceUsed.entries()) {
+      if (expiresAt > now) live.push({ nonce, expiresAt });
+    }
+    try {
+      const text = live.map((e) => JSON.stringify(e)).join("\n") + (live.length ? "\n" : "");
+      const tmp = `${USED_NONCES_PATH}.tmp-${process.pid}-${Date.now()}`;
+      await fsp.writeFile(tmp, text, { encoding: "utf8", mode: 0o600 });
+      await fsp.rename(tmp, USED_NONCES_PATH);
+    } catch (err) {
+      console.warn("[security] failed to compact nonces file:", sanitizeErrorMessage(err));
     }
   }
 
@@ -5476,7 +5539,6 @@ class Uc6Bot {
           est.label = "trending";
         }
       }
-      console.log(`[regime-blend] fw=${fw} slow: ok=${estSlow.ok} b=${estSlow.slope?.toFixed(6)} theta=${estSlow.theta?.toFixed(6)} tStr=${estSlow.thetaStrength?.toFixed(4)} label=${estSlow.label} | fast: ok=${estFast?.ok} b=${estFast?.slope?.toFixed(6)} theta=${estFast?.theta?.toFixed(6)} tStr=${estFast?.thetaStrength?.toFixed(4)} label=${estFast?.label} | blended: theta=${est.theta?.toFixed(6)} tStr=${est.thetaStrength?.toFixed(4)} label=${est.label}`);
       const now = Date.now();
       const stats24h = this.summarizeEvents(this.getEventsSince(now - 24 * 60 * 60 * 1000));
       const recentRebalanceCostUsd =
@@ -5781,11 +5843,14 @@ class Uc6Bot {
     if (allowance >= amount) return;
     await this.assertTxAllowed("approve");
 
+    // Approve only what's needed (2x buffer to reduce re-approval frequency).
+    const scopedAmount = amount * 2n;
+    console.log(`[security] scoped ERC20 approval: token=${tokenAddress} spender=${spender} amount=${scopedAmount}`);
     const hash = await this.walletClient.writeContract({
       address: tokenAddress,
       abi: erc20Abi,
       functionName: "approve",
-      args: [spender, maxUint256],
+      args: [spender, scopedAmount],
       account: this.account,
     });
     const receipt = await this.publicClient.waitForTransactionReceipt({ hash });
@@ -5949,6 +6014,18 @@ class Uc6Bot {
     const quotedOutForMin = quoterQuote.amountOut > BigInt(0) ? quoterQuote.amountOut : estimatedOut;
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
 
+    // Compute sqrtPriceLimitX96 from current pool price ± slippage for sandwich protection.
+    // sqrt(1 ± bps/10000) ≈ 1 ± bps/20000 for small slippage values.
+    let priceLimitX96 = 0n;
+    const snapshotSqrt = snapshot?.sqrtPriceX96 ? BigInt(snapshot.sqrtPriceX96) : 0n;
+    if (snapshotSqrt > 0n && slippageBps > 0) {
+      const bps = BigInt(Math.min(Number(slippageBps), 2000));
+      const swapsToken0ForToken1 = snapshot?.token0 && sameAddress(tokenIn, snapshot.token0);
+      priceLimitX96 = swapsToken0ForToken1
+        ? (snapshotSqrt * (20000n - bps)) / 20000n   // price decreases
+        : (snapshotSqrt * (20000n + bps)) / 20000n;  // price increases
+    }
+
     const candidatesBase = [
       {
         abi: ROUTER_ABI_FEE,
@@ -5960,7 +6037,7 @@ class Uc6Bot {
           deadline,
           amountIn,
           amountOutMinimum: 0n,
-          sqrtPriceLimitX96: 0n,
+          sqrtPriceLimitX96: priceLimitX96,
         },
       },
       {
@@ -5973,7 +6050,7 @@ class Uc6Bot {
           deadline,
           amountIn,
           amountOutMinimum: 0n,
-          sqrtPriceLimitX96: 0n,
+          sqrtPriceLimitX96: priceLimitX96,
         },
       },
     ];
@@ -9910,6 +9987,7 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       const nextSettings = normalizeSettings(payload, this.settings);
       if (this.settings.killSwitch && !nextSettings.killSwitch) {
@@ -9936,6 +10014,7 @@ class Uc6Bot {
       this.setDecision({ action: "settings_updated", by: this.ownerAddress });
       this.pushEvent({ type: "action", reason: "settings_updated" });
       await this.persistState();
+      this.auditOwnerAction("update_settings", req, { changes: Object.keys(payload || {}) });
 
       return jsonResponse(res, 200, { ok: true, settings: this.settings });
     } catch (err) {
@@ -9976,11 +10055,13 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       this.state.forceRebalanceRequestedAt = nowIso();
       this.setDecision({ action: "force_rebalance_requested", by: this.ownerAddress });
       this.pushEvent({ type: "action", reason: "force_rebalance_requested" });
       await this.persistState();
+      this.auditOwnerAction("force_rebalance", req);
 
       return jsonResponse(res, 200, {
         ok: true,
@@ -10024,6 +10105,7 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       await this.loadSettings(false);
       const tokenId = this.state.position?.tokenId || null;
@@ -10132,6 +10214,7 @@ class Uc6Bot {
         tokenId,
       });
       await this.persistState();
+      this.auditOwnerAction("liquidate_and_pause", req, { liquidated, tokenId });
 
       return jsonResponse(res, 200, {
         ok: true,
@@ -10177,6 +10260,7 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       if (this.settings.killSwitch || !this.settings.tradingEnabled) {
         return jsonResponse(res, 409, { error: "Trading disabled or kill switch active" });
@@ -10198,6 +10282,7 @@ class Uc6Bot {
 
       await this.autoStakeAfterMint(tokenId, npmAddress);
       await this.persistState();
+      this.auditOwnerAction("emissions_stake", req, { tokenId: String(tokenId) });
 
       return jsonResponse(res, 200, {
         ok: true,
@@ -10241,6 +10326,7 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       // Unstake is allowed even if killSwitch (recovery action)
       if (!this.state.emissions?.staked) {
@@ -10249,6 +10335,7 @@ class Uc6Bot {
 
       await this.ensureUnstakedForNpmActions("owner_unstake");
       await this.persistState();
+      this.auditOwnerAction("emissions_unstake", req);
 
       return jsonResponse(res, 200, {
         ok: true,
@@ -10292,6 +10379,7 @@ class Uc6Bot {
       }
       const nonceExpiry = Date.parse(parsed.expiresAt) + 60_000;
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
+      this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
       // Claim is allowed even if killSwitch (recovery action)
       const em = this.state.emissions;
@@ -10343,6 +10431,7 @@ class Uc6Bot {
       }
 
       await this.persistState();
+      this.auditOwnerAction("emissions_claim", req, { aeroClaimed: result.aeroClaimed });
 
       return jsonResponse(res, 200, {
         ok: true,
