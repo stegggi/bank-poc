@@ -1857,16 +1857,29 @@ def _realized_pnl(side: Optional[str], entry_price: Optional[float], exit_price:
   return None
 
 
+def _normalize_side_str(side_val) -> str:
+  """Normalize side to 'BUY' or 'SELL' string, handling int (0=BUY, 1=SELL) and string forms."""
+  if isinstance(side_val, (int, float)):
+    return "BUY" if int(side_val) == 0 else "SELL"
+  s = str(side_val or "").strip().upper()
+  if s in ("BUY", "BID", "LONG", "0"):
+    return "BUY"
+  if s in ("SELL", "ASK", "SHORT", "1"):
+    return "SELL"
+  return s
+
+
 def _fills_vwap(fills, expected_side=None):
   """Quantity-weighted average fill price. Returns None if no usable fills."""
   total_qty = 0.0
   total_notional = 0.0
+  norm_expected = _normalize_side_str(expected_side) if expected_side else None
   for f in (fills or []):
     p = _f(f.get("price"))
     q = _f(f.get("qty"))
     if not p or not q or p <= 0 or q <= 0:
       continue
-    if expected_side and str(f.get("side") or "").upper() != expected_side.upper():
+    if norm_expected and _normalize_side_str(f.get("side")) != norm_expected:
       continue
     total_qty += q
     total_notional += p * q
@@ -3660,6 +3673,7 @@ async def main():
                 )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts("EXIT_RISK", exec_result)
+              last_exit_fill_audit = None
               try:
                 last_exit_fill_audit = await fetch_fills_audit(
                   client,
@@ -3680,6 +3694,8 @@ async def main():
               )
               _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
               _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+              if not _exit_vwap:
+                print(f"[WARN] EXIT_RISK: fills VWAP unavailable, falling back to last_mid={last_mid}")
               px = float(_exit_vwap) if _exit_vwap else float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
               DB_MANAGER.insert_trade_event(
@@ -3926,6 +3942,7 @@ async def main():
               pos_final = fetch_active_position(eth_base, sub_id, product_id)
               of, sf, szf, _, epf, etsf = parse_position(pos_final)
               opened_qty = abs(float(szf)) if of and sf == desired else 0.0
+              last_entry_fill_audit = None
               try:
                 last_entry_fill_audit = await fetch_fills_audit(
                   client,
@@ -3983,6 +4000,8 @@ async def main():
                   (last_entry_fill_audit or {}).get("fills", []),
                   expected_side=_entry_side_str(desired),
                 )
+                if not _entry_vwap:
+                  print(f"[WARN] ENTRY: fills VWAP unavailable, using epf={epf} or last_mid={last_mid}")
                 entry_px = float(_entry_vwap or epf or last_mid)
                 entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
                 entry_leverage = float(cfg.get("maxLeverage", 2.0))
@@ -4225,6 +4244,7 @@ async def main():
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts(f"EXIT_{regime_exit_reason}", exec_result)
               last_order_ts.append(time.time())
+              last_exit_fill_audit = None
               try:
                 last_exit_fill_audit = await fetch_fills_audit(
                   client,
@@ -4246,6 +4266,8 @@ async def main():
               )
               _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
               _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+              if not _exit_vwap:
+                print(f"[WARN] EXIT_{regime_exit_reason}: fills VWAP unavailable, falling back to last_mid={last_mid}")
               px = float(_exit_vwap) if _exit_vwap else float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
               close_tag = "regime_flip" if regime_exit_reason == "REGIME_FLIP" else "regime_end"
