@@ -2610,6 +2610,92 @@ async def execute_maker_chase(
   }
 
 
+async def execute_market_immediate(
+  *,
+  client: AsyncRESTClient,
+  eth_base: str,
+  sub_id: str,
+  product_id: str,
+  ticker: str,
+  sender: str,
+  subaccount: str,
+  order_side_int: int,
+  target_qty: float,
+  lot_size: Optional[float] = None,
+  position_mode: str = "entry",
+  expected_side: Optional[str] = None,
+  reduce_only: bool = False,
+) -> Dict[str, Any]:
+  """Submit a MARKET order for immediate fill — no maker chase, no repricing."""
+  start_ms = int(time.time() * 1000)
+  qty = quantize_qty_to_lot(target_qty, lot_size)
+  if qty <= 0:
+    return {
+      "startMs": start_ms, "endMs": start_ms, "targetQty": target_qty,
+      "filledQty": 0.0, "remainingQty": target_qty, "attempts": [],
+      "attemptCount": 0, "submittedCount": 0, "replaceCount": 0,
+      "cancelCount": 0, "keepCount": 0, "marketSafetyUsed": True,
+      "acceptedPartial": False, "partialFillRatio": 0.0,
+      "firstFillMs": None, "timeToFirstFillMs": None,
+      "lastWorkingPrice": None, "lastWorkingQuoteBid": None, "lastWorkingQuoteAsk": None,
+      "timedOut": True, "errors": [f"qty rounds to 0 (target={target_qty}, lot={lot_size})"],
+      "lastOrderSubmitMs": start_ms,
+    }
+  errors = []
+  try:
+    await place_market(client, ticker, order_side_int, qty, sender, subaccount, lot_size)
+  except Exception as e:
+    errors.append(str(e)[:200])
+  try:
+    await cancel_open_orders(client, ticker, sender, subaccount)
+  except Exception:
+    pass
+  await asyncio.sleep(0.5)
+  filled = 0.0
+  remaining = qty
+  try:
+    pos_now = fetch_active_position(eth_base, sub_id, product_id)
+    o, s, sz, _, _, _ = parse_position(pos_now)
+    abs_sz = abs(float(sz)) if sz is not None else 0.0
+    if position_mode == "entry":
+      if o and s == expected_side:
+        filled = abs_sz
+      else:
+        filled = 0.0
+      remaining = max(0.0, qty - filled)
+    else:
+      remaining = abs_sz if (o and s == expected_side) else 0.0
+      filled = max(0.0, qty - remaining)
+  except Exception as e:
+    errors.append(f"position verify failed: {str(e)[:100]}")
+  end_ms = int(time.time() * 1000)
+  fill_ms = end_ms if filled > 0 else None
+  return {
+    "startMs": start_ms,
+    "endMs": end_ms,
+    "targetQty": qty,
+    "filledQty": quantize_qty_to_lot(max(0.0, filled), lot_size),
+    "remainingQty": quantize_qty_to_lot(max(0.0, remaining), lot_size),
+    "attempts": [],
+    "attemptCount": 1 if not errors else 0,
+    "submittedCount": 1 if not errors else 0,
+    "replaceCount": 0,
+    "cancelCount": 0,
+    "keepCount": 0,
+    "marketSafetyUsed": True,
+    "acceptedPartial": False,
+    "partialFillRatio": (float(filled) / float(qty)) if qty > 0 else 0.0,
+    "firstFillMs": fill_ms,
+    "timeToFirstFillMs": ((fill_ms - start_ms) if fill_ms is not None else None),
+    "lastWorkingPrice": None,
+    "lastWorkingQuoteBid": None,
+    "lastWorkingQuoteAsk": None,
+    "timedOut": bool(remaining > 0),
+    "errors": errors[-5:],
+    "lastOrderSubmitMs": end_ms,
+  }
+
+
 async def process_link_signer(cfg: Dict[str, Any], cmd: Dict[str, Any]) -> Dict[str, Any]:
   eth_base = cfg["etherealApiBase"]
   payload = cmd["payload"]
@@ -3524,36 +3610,54 @@ async def main():
                 else 999.0
               )
               exit_side_int = _exit_side_int(position_state.side)
-              exec_result = await execute_maker_chase(
-                client=client,
-                eth_base=eth_base,
-                sub_id=sub_id,
-                product_id=product_id,
-                ticker=ticker,
-                sender=owner_addr,
-                subaccount=subaccount_name,
-                order_side_int=exit_side_int,
-                target_qty=position_state.qty,
-                lot_size=cached_lot_size,
-                tick_size=cached_tick_size,
-                last_mid=last_mid,
-                last_bid=last_bid,
-                last_ask=last_ask,
-                quote_cache=ws_quote_cache,
-                chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 350)),
-                gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
-                last_order_submit_ms=last_order_submit_ms,
-                order_guard_ms=int(cfg.get("orderGuardMs", 200)),
-                position_mode="exit",
-                expected_side=position_state.side,
-                reduce_only=True,
-                allow_market_safety=True,
-                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
-                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
-                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
-                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
-              )
+              fast_fill = bool(cfg.get("fastFillEnabled", True))
+              if fast_fill:
+                exec_result = await execute_market_immediate(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=exit_side_int,
+                  target_qty=position_state.qty,
+                  lot_size=cached_lot_size,
+                  position_mode="exit",
+                  expected_side=position_state.side,
+                  reduce_only=True,
+                )
+              else:
+                exec_result = await execute_maker_chase(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=exit_side_int,
+                  target_qty=position_state.qty,
+                  lot_size=cached_lot_size,
+                  tick_size=cached_tick_size,
+                  last_mid=last_mid,
+                  last_bid=last_bid,
+                  last_ask=last_ask,
+                  quote_cache=ws_quote_cache,
+                  chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
+                  reprice_ms=int(cfg.get("executionRepriceMs", 350)),
+                  gtd_sec=int(cfg.get("makerOrderGtdSec", 2)),
+                  last_order_submit_ms=last_order_submit_ms,
+                  order_guard_ms=int(cfg.get("orderGuardMs", 200)),
+                  position_mode="exit",
+                  expected_side=position_state.side,
+                  reduce_only=True,
+                  allow_market_safety=True,
+                  min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                  replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                  improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                  improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+                )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts("EXIT_RISK", exec_result)
               try:
@@ -3762,37 +3866,55 @@ async def main():
                 await asyncio.sleep(0.2)
 
               side_int = _side_to_int(desired)
-              exec_result = await execute_maker_chase(
-                client=client,
-                eth_base=eth_base,
-                sub_id=sub_id,
-                product_id=product_id,
-                ticker=ticker,
-                sender=owner_addr,
-                subaccount=subaccount_name,
-                order_side_int=side_int,
-                target_qty=qty,
-                lot_size=cached_lot_size,
-                tick_size=cached_tick_size,
-                last_mid=last_mid,
-                last_bid=last_bid,
-                last_ask=last_ask,
-                quote_cache=ws_quote_cache,
-                chase_max_sec=float(cfg.get("entryChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
-                gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
-                last_order_submit_ms=last_order_submit_ms,
-                order_guard_ms=guard_ms,
-                position_mode="entry",
-                expected_side=desired,
-                reduce_only=False,
-                allow_market_safety=False,
-                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
-                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
-                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
-                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
-                entry_min_fill_ratio=float(cfg.get("entryMinFillRatio", 0.50)),
-              )
+              fast_fill = bool(cfg.get("fastFillEnabled", True))
+              if fast_fill:
+                exec_result = await execute_market_immediate(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=side_int,
+                  target_qty=qty,
+                  lot_size=cached_lot_size,
+                  position_mode="entry",
+                  expected_side=desired,
+                  reduce_only=False,
+                )
+              else:
+                exec_result = await execute_maker_chase(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=side_int,
+                  target_qty=qty,
+                  lot_size=cached_lot_size,
+                  tick_size=cached_tick_size,
+                  last_mid=last_mid,
+                  last_bid=last_bid,
+                  last_ask=last_ask,
+                  quote_cache=ws_quote_cache,
+                  chase_max_sec=float(cfg.get("entryChaseMaxSec", 5.0)),
+                  reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                  gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
+                  last_order_submit_ms=last_order_submit_ms,
+                  order_guard_ms=guard_ms,
+                  position_mode="entry",
+                  expected_side=desired,
+                  reduce_only=False,
+                  allow_market_safety=False,
+                  min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                  replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                  improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                  improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+                  entry_min_fill_ratio=float(cfg.get("entryMinFillRatio", 0.50)),
+                )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts(f"ENTRY_{desired}", exec_result)
               maker_entry_chases += 1
@@ -4052,36 +4174,54 @@ async def main():
                 await asyncio.sleep(0.2)
 
               exit_side_int = _exit_side_int(position_state.side)
-              exec_result = await execute_maker_chase(
-                client=client,
-                eth_base=eth_base,
-                sub_id=sub_id,
-                product_id=product_id,
-                ticker=ticker,
-                sender=owner_addr,
-                subaccount=subaccount_name,
-                order_side_int=exit_side_int,
-                target_qty=position_state.qty,
-                lot_size=cached_lot_size,
-                tick_size=cached_tick_size,
-                last_mid=last_mid,
-                last_bid=last_bid,
-                last_ask=last_ask,
-                quote_cache=ws_quote_cache,
-                chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
-                reprice_ms=int(cfg.get("executionRepriceMs", 200)),
-                gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
-                last_order_submit_ms=last_order_submit_ms,
-                order_guard_ms=guard_ms,
-                position_mode="exit",
-                expected_side=position_state.side,
-                reduce_only=True,
-                allow_market_safety=True,
-                min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
-                replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
-                improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
-                improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
-              )
+              fast_fill = bool(cfg.get("fastFillEnabled", True))
+              if fast_fill:
+                exec_result = await execute_market_immediate(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=exit_side_int,
+                  target_qty=position_state.qty,
+                  lot_size=cached_lot_size,
+                  position_mode="exit",
+                  expected_side=position_state.side,
+                  reduce_only=True,
+                )
+              else:
+                exec_result = await execute_maker_chase(
+                  client=client,
+                  eth_base=eth_base,
+                  sub_id=sub_id,
+                  product_id=product_id,
+                  ticker=ticker,
+                  sender=owner_addr,
+                  subaccount=subaccount_name,
+                  order_side_int=exit_side_int,
+                  target_qty=position_state.qty,
+                  lot_size=cached_lot_size,
+                  tick_size=cached_tick_size,
+                  last_mid=last_mid,
+                  last_bid=last_bid,
+                  last_ask=last_ask,
+                  quote_cache=ws_quote_cache,
+                  chase_max_sec=float(cfg.get("exitChaseMaxSec", 5.0)),
+                  reprice_ms=int(cfg.get("executionRepriceMs", 200)),
+                  gtd_sec=int(cfg.get("makerOrderGtdSec", 4)),
+                  last_order_submit_ms=last_order_submit_ms,
+                  order_guard_ms=guard_ms,
+                  position_mode="exit",
+                  expected_side=position_state.side,
+                  reduce_only=True,
+                  allow_market_safety=True,
+                  min_rest_ms=int(cfg.get("makerMinRestMs", 700)),
+                  replace_only_on_touch_move=bool(cfg.get("makerReplaceOnlyOnTouchMove", True)),
+                  improve_one_tick_on_wide_spread=bool(cfg.get("makerImproveOneTickOnWideSpread", True)),
+                  improve_min_spread_ticks=float(cfg.get("makerImproveMinSpreadTicks", 3.0)),
+                )
               last_order_submit_ms = int(exec_result.get("lastOrderSubmitMs") or last_order_submit_ms)
               _print_chase_attempts(f"EXIT_{regime_exit_reason}", exec_result)
               last_order_ts.append(time.time())
@@ -4379,9 +4519,10 @@ async def main():
           "ticksCount": ticks_count,
         },
         "execution": {
-          "makerOnlyEntry": True,
-          "makerFirstExitWithMarketSafety": True,
-          "exitMarketSafetyAfterSec": float(cfg.get("exitChaseMaxSec", 5.0)),
+          "fastFillEnabled": bool(cfg.get("fastFillEnabled", True)),
+          "makerOnlyEntry": not bool(cfg.get("fastFillEnabled", True)),
+          "makerFirstExitWithMarketSafety": not bool(cfg.get("fastFillEnabled", True)),
+          "exitMarketSafetyAfterSec": float(cfg.get("exitChaseMaxSec", 5.0)) if not bool(cfg.get("fastFillEnabled", True)) else 0.0,
           "quoteSource": (
             "ws_bookdepth"
             if (

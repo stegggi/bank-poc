@@ -62,6 +62,7 @@ export const Uc5ConfigSchema = z.object({
   slippageBufferBps: z.number().min(0).max(100).default(4),
   minExpectedMoveBps: z.number().min(0).max(500).default(0),
   edgeCostMultiplier: z.number().min(0).max(5).default(0),
+  fastFillEnabled: z.boolean().default(true),
   entryMakerPreferred: z.boolean().default(true),
   entryMarketFallbackEnabled: z.boolean().default(false),
   entryMarketFallbackMinProb: z.number().min(0.5).max(0.99).default(0.9),
@@ -264,6 +265,7 @@ export type Uc5Status = {
     info?: unknown;
   };
   execution?: {
+    fastFillEnabled?: boolean;
     makerOnlyEntry?: boolean;
     makerFirstExitWithMarketSafety?: boolean;
     exitMarketSafetyAfterSec?: number;
