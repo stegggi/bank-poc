@@ -5616,8 +5616,10 @@ class Uc6Bot {
           ? sim.result[1]
           : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
       );
-    } catch {
+      if (staked) console.log(`[UC6] [collectable] gauge sim OK  tokenId=${tokenId} out0=${out0} out1=${out1}`);
+    } catch (simErr) {
       // Gauge simulation failed — fall back to positions() tokensOwed (lower bound).
+      if (staked) console.log(`[UC6] [collectable] gauge sim FAILED tokenId=${tokenId} gauge=${gaugeAddr} err=${simErr?.shortMessage || simErr?.message || simErr}`);
       if (!staked) throw new Error("collect simulation failed for non-staked position");
       try {
         const pos = await this.publicClient.readContract({
@@ -5629,6 +5631,7 @@ class Uc6Bot {
         out0 = BigInt(pos.tokensOwed0 ?? pos[10] ?? 0n);
         out1 = BigInt(pos.tokensOwed1 ?? pos[11] ?? 0n);
         estimated = true;
+        console.log(`[UC6] [collectable] positions fallback tokenId=${tokenId} tokensOwed0=${out0} tokensOwed1=${out1}`);
       } catch {
         return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
       }
