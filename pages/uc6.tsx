@@ -2722,7 +2722,7 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
         </div>
       </div>
       <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
-        <div style={brkStyle}><span style={brkLabel}>Fees collected</span><span style={brkVal(feesCollectedUsd)}>{fmtUsd(feesCollectedUsd)}</span></div>
+        <div style={brkStyle}><span style={brkLabel}>Fees</span><span style={brkVal(feesCollectedUsd)}>{fmtUsd(feesCollectedUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>AERO rewards</span><span style={brkVal(rewardsClaimedUsd)}>{fmtUsd(rewardsClaimedUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>Costs</span><span style={brkVal(totalCostsUsd, true)}>-{fmtUsd(totalCostsUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>Divergence vs HODL</span><span style={brkVal(divVsHodlLiveUsd)}>{fmtSignedUsd(divVsHodlLiveUsd)}</span></div>
