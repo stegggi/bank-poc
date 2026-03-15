@@ -139,6 +139,36 @@ const POOL_ABI = [
     inputs: [],
     outputs: [{ type: "uint24" }],
   },
+  {
+    name: "feeGrowthGlobal0X128",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    name: "feeGrowthGlobal1X128",
+    type: "function",
+    stateMutability: "view",
+    inputs: [],
+    outputs: [{ type: "uint256" }],
+  },
+  {
+    name: "ticks",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "tick", type: "int24" }],
+    outputs: [
+      { name: "liquidityGross", type: "uint128" },
+      { name: "liquidityNet", type: "int128" },
+      { name: "feeGrowthOutside0X128", type: "uint256" },
+      { name: "feeGrowthOutside1X128", type: "uint256" },
+      { name: "tickCumulativeOutside", type: "int56" },
+      { name: "secondsPerLiquidityOutsideX128", type: "uint160" },
+      { name: "secondsOutside", type: "uint32" },
+      { name: "initialized", type: "bool" },
+    ],
+  },
 ];
 
 const SLOT0_ABI_V7 = [
@@ -5582,16 +5612,12 @@ class Uc6Bot {
       : this.state.latest?.primary || this.state.latest?.fallback || null;
     const token0 = getAddress(activePool?.token0 || this.weth);
     const token1 = getAddress(activePool?.token1 || this.usdc);
-    // When staked, simulate collect() from the gauge address (gauge owns the NFT).
-    // Falls back to positions() tokensOwed if gauge simulation fails.
     const staked = Boolean(this.state.emissions?.staked);
-    const gaugeAddr = staked ? this.state.emissions?.gaugeAddress : null;
-    const caller = staked ? gaugeAddr : this.account.address;
-    if (staked && !gaugeAddr) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
     let out0 = 0n;
     let out1 = 0n;
     let estimated = false;
-    try {
+    if (!staked) {
+      // Not staked: simulate collect() from our address (standard approach).
       const sim = await this.publicClient.simulateContract({
         address: npm,
         abi: NPM_POSITION_ABI,
@@ -5599,12 +5625,12 @@ class Uc6Bot {
         args: [
           {
             tokenId: BigInt(tokenId),
-            recipient: caller,
+            recipient: this.account.address,
             amount0Max: UINT128_MAX,
             amount1Max: UINT128_MAX,
           },
         ],
-        account: caller,
+        account: this.account.address,
       });
       out0 = BigInt(
         Array.isArray(sim.result)
@@ -5616,23 +5642,56 @@ class Uc6Bot {
           ? sim.result[1]
           : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
       );
-      if (staked) console.log(`[UC6] [collectable] gauge sim OK  tokenId=${tokenId} out0=${out0} out1=${out1}`);
-    } catch (simErr) {
-      // Gauge simulation failed — fall back to positions() tokensOwed (lower bound).
-      if (staked) console.log(`[UC6] [collectable] gauge sim FAILED tokenId=${tokenId} gauge=${gaugeAddr} err=${simErr?.shortMessage || simErr?.message || simErr}`);
-      if (!staked) throw new Error("collect simulation failed for non-staked position");
+    } else {
+      // Staked: compute uncollected fees from pool feeGrowth state (same math as Aerodrome UI).
+      // Slipstream's collect() simulation returns 0 for staked positions, so we must compute directly.
+      const poolAddress = activePool?.pool || this.slipstreamPool;
       try {
-        const pos = await this.publicClient.readContract({
-          address: npm,
-          abi: NPM_POSITION_ABI,
-          functionName: "positions",
-          args: [BigInt(tokenId)],
-        });
-        out0 = BigInt(pos.tokensOwed0 ?? pos[10] ?? 0n);
-        out1 = BigInt(pos.tokensOwed1 ?? pos[11] ?? 0n);
+        // Step 1: read position + pool globals in parallel.
+        const [pos, feeGlobal0, feeGlobal1, slot0] = await Promise.all([
+          this.publicClient.readContract({ address: npm, abi: NPM_POSITION_ABI, functionName: "positions", args: [BigInt(tokenId)] }),
+          this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "feeGrowthGlobal0X128" }),
+          this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "feeGrowthGlobal1X128" }),
+          this.readSlot0(poolAddress),
+        ]);
+        // Step 2: read tick data (needs tickLower/tickUpper from position).
+        const [tickLowerData, tickUpperData] = await Promise.all([
+          this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "ticks", args: [Number(pos.tickLower ?? pos[5])] }),
+          this.publicClient.readContract({ address: poolAddress, abi: POOL_ABI, functionName: "ticks", args: [Number(pos.tickUpper ?? pos[6])] }),
+        ]);
+        const liquidity = BigInt(pos.liquidity ?? pos[7] ?? 0n);
+        const fgInside0Last = BigInt(pos.feeGrowthInside0LastX128 ?? pos[8] ?? 0n);
+        const fgInside1Last = BigInt(pos.feeGrowthInside1LastX128 ?? pos[9] ?? 0n);
+        const tickLower = Number(pos.tickLower ?? pos[5]);
+        const tickUpper = Number(pos.tickUpper ?? pos[6]);
+        const currentTick = Number(slot0.tick ?? slot0[1]);
+        const fg0 = BigInt(feeGlobal0);
+        const fg1 = BigInt(feeGlobal1);
+        const fgOutLower0 = BigInt(tickLowerData.feeGrowthOutside0X128 ?? tickLowerData[2] ?? 0n);
+        const fgOutLower1 = BigInt(tickLowerData.feeGrowthOutside1X128 ?? tickLowerData[3] ?? 0n);
+        const fgOutUpper0 = BigInt(tickUpperData.feeGrowthOutside0X128 ?? tickUpperData[2] ?? 0n);
+        const fgOutUpper1 = BigInt(tickUpperData.feeGrowthOutside1X128 ?? tickUpperData[3] ?? 0n);
+        // Compute fee growth inside the tick range (modular uint256 arithmetic).
+        const Q256 = 1n << 256n;
+        const mod = (v) => ((v % Q256) + Q256) % Q256;
+        const fgBelow0 = currentTick >= tickLower ? fgOutLower0 : mod(fg0 - fgOutLower0);
+        const fgBelow1 = currentTick >= tickLower ? fgOutLower1 : mod(fg1 - fgOutLower1);
+        const fgAbove0 = currentTick < tickUpper ? fgOutUpper0 : mod(fg0 - fgOutUpper0);
+        const fgAbove1 = currentTick < tickUpper ? fgOutUpper1 : mod(fg1 - fgOutUpper1);
+        const fgInside0 = mod(fg0 - fgBelow0 - fgAbove0);
+        const fgInside1 = mod(fg1 - fgBelow1 - fgAbove1);
+        // Uncollected fees = delta(feeGrowthInside) * liquidity / 2^128, plus any tokensOwed.
+        const Q128 = 1n << 128n;
+        const uncollected0 = mod(fgInside0 - fgInside0Last) * liquidity / Q128;
+        const uncollected1 = mod(fgInside1 - fgInside1Last) * liquidity / Q128;
+        const tokensOwed0 = BigInt(pos.tokensOwed0 ?? pos[10] ?? 0n);
+        const tokensOwed1 = BigInt(pos.tokensOwed1 ?? pos[11] ?? 0n);
+        out0 = uncollected0 + tokensOwed0;
+        out1 = uncollected1 + tokensOwed1;
         estimated = true;
-        console.log(`[UC6] [collectable] positions fallback tokenId=${tokenId} tokensOwed0=${out0} tokensOwed1=${out1}`);
-      } catch {
+        console.log(`[UC6] [collectable] feeGrowth compute tokenId=${tokenId} out0=${out0} out1=${out1} liq=${liquidity} tick=${currentTick} range=[${tickLower},${tickUpper}]`);
+      } catch (err) {
+        console.log(`[UC6] [collectable] feeGrowth compute FAILED tokenId=${tokenId} err=${err?.shortMessage || err?.message || err}`);
         return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
       }
     }
