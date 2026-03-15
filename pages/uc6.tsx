@@ -522,6 +522,16 @@ type Uc6Status = {
     meanRevertConfirmSec?: number;
     distanceFromMuPct?: number | null;
     eligibleAtIso?: string | null;
+    holdElapsedSec?: number;
+    holdRequiredSec?: number;
+    escapeCooldownUntilIso?: string | null;
+    reEntryCooldownUntilIso?: string | null;
+    regimeLabel?: string;
+    regimeConfidence?: number;
+    requiredRegimeLabel?: string;
+    requiredMinConfidence?: number;
+    requiredMeanRevertConfirmSec?: number;
+    maxDistanceFromMuPct?: number;
   };
   decision?: {
     baseThresholds?: {
@@ -546,6 +556,9 @@ type Uc6Status = {
     requiredFeesToBeatHodlLiveUsd?: number;
     collectableNowUsd?: number;
     totalCostsToDateUsd?: number;
+    feesCollectedUsd?: number;
+    rewardsClaimedUsd?: number;
+    claimableAeroUsd?: number;
     outOfRangeDurationSec?: number;
     distanceBeyondEdgePct?: number;
     lastGateDecision?: {
@@ -2072,6 +2085,10 @@ export default function Uc6Page() {
                 hodlGateAllowed={hodlGateAllowed}
                 hodlGateReason={hodlGateReason}
                 alphaTodayUsd={n(status?.pnl?.netTodayUsd, 0)}
+                feesCollectedUsd={n(hodlGateView?.feesCollectedUsd, 0)}
+                rewardsClaimedUsd={n(hodlGateView?.rewardsClaimedUsd, 0)}
+                claimableAeroUsd={n(hodlGateView?.claimableAeroUsd, 0)}
+                totalCostsUsd={n(hodlGateView?.totalCostsToDateUsd, 0)}
               />
             </Uc6Card>
 
@@ -2122,6 +2139,18 @@ export default function Uc6Page() {
                 reasonIfBlocked={reEntryView?.reasonIfBlocked ?? null}
                 eligibleAtIso={reEntryView?.eligibleAtIso ?? null}
                 distanceFromMuPct={distanceFromMuPctDisplay}
+                strategyMode={strategyMode}
+                holdElapsedSec={Number(reEntryView?.holdElapsedSec || 0)}
+                holdRequiredSec={Number(reEntryView?.holdRequiredSec || 0)}
+                escapeCooldownUntilIso={reEntryView?.escapeCooldownUntilIso ?? null}
+                reEntryCooldownUntilIso={reEntryView?.reEntryCooldownUntilIso ?? null}
+                regimeLabel={String(reEntryView?.regimeLabel || "unknown")}
+                regimeConfidence={Number(reEntryView?.regimeConfidence || 0)}
+                requiredRegimeLabel={String(reEntryView?.requiredRegimeLabel || "mean_reverting")}
+                requiredMinConfidence={Number(reEntryView?.requiredMinConfidence || 0)}
+                meanRevertConfirmSec={Number(reEntryView?.meanRevertConfirmSec || 0)}
+                requiredMeanRevertConfirmSec={Number(reEntryView?.requiredMeanRevertConfirmSec || 0)}
+                maxDistanceFromMuPct={Number(reEntryView?.maxDistanceFromMuPct || 0)}
               />
             </Uc6Card>
 
@@ -2175,7 +2204,7 @@ export default function Uc6Page() {
               ) : (
                 <>
                   <DarkTable
-                    headers={["Opened", "Duration", "Band", "Entry $", "Exit $", "Fees", "Costs", "Net", "Alpha vs HODL", "Reason"]}
+                    headers={["Opened", "Duration", "Band", "Entry $", "Exit $", "Fees", "Rewards", "Costs", "Net", "Alpha vs HODL", "Reason"]}
                     rows={closedPositionRecords.map((rec) => [
                       fmtIsoLocal(rec.entry?.openedAtIso),
                       rec.duration?.human || fmtDurationCompact(rec.duration?.secondsInPosition),
@@ -2183,6 +2212,7 @@ export default function Uc6Page() {
                       fmtUsd(rec.entry?.entryValueUsd),
                       fmtUsd(rec.exit?.exitValueUsd),
                       fmtUsd(rec.performance?.feesCollectedUsd),
+                      fmtUsd(rec.performance?.rewardsUsd),
                       fmtUsd(rec.performance?.totalCostsUsd),
                       fmtSignedUsd(rec.performance?.feesNetUsd),
                       fmtSignedUsd(rec.performance?.alphaVsHodlUsd),
@@ -2605,8 +2635,11 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   );
 }
 
-function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd }: {
+function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd,
+  feesCollectedUsd, rewardsClaimedUsd, claimableAeroUsd, totalCostsUsd,
+}: {
   alphaLiveUsd: number; feesNetLiveUsd: number; divVsHodlLiveUsd: number; requiredFeesToBeatHodlLiveUsd: number; hodlGateAllowed: boolean; hodlGateReason: string; alphaTodayUsd: number;
+  feesCollectedUsd: number; rewardsClaimedUsd: number; claimableAeroUsd: number; totalCostsUsd: number;
 }) {
   const beating = alphaLiveUsd >= 0;
   const fillPct = requiredFeesToBeatHodlLiveUsd > 0
@@ -2614,6 +2647,10 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
     : beating
       ? 100
       : 0;
+  const totalRewardsUsd = rewardsClaimedUsd + claimableAeroUsd;
+  const brkStyle: CSSProperties = { display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0" };
+  const brkLabel: CSSProperties = { color:"rgba(232,232,240,0.45)" };
+  const brkVal = (v: number, invert = false): CSSProperties => ({ fontFamily:"monospace", color: invert ? (v > 0 ? "#ef4444" : "#22c55e") : (v >= 0 ? "#22c55e" : "#ef4444") });
   return (
     <div style={{ display:"grid", gap:12 }}>
       <div style={{ textAlign:"center" }}>
@@ -2625,14 +2662,16 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
           {fmtSignedUsd(alphaTodayUsd)} today
         </div>
       </div>
+      <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+        <div style={brkStyle}><span style={brkLabel}>Fees collected</span><span style={brkVal(feesCollectedUsd)}>{fmtUsd(feesCollectedUsd)}</span></div>
+        <div style={brkStyle}><span style={brkLabel}>AERO rewards</span><span style={brkVal(totalRewardsUsd)}>{fmtUsd(totalRewardsUsd)}{claimableAeroUsd > 0 ? ` (${fmtUsd(claimableAeroUsd)} pending)` : ""}</span></div>
+        <div style={brkStyle}><span style={brkLabel}>Costs</span><span style={brkVal(totalCostsUsd, true)}>-{fmtUsd(totalCostsUsd)}</span></div>
+        <div style={brkStyle}><span style={brkLabel}>Divergence vs HODL</span><span style={brkVal(divVsHodlLiveUsd)}>{fmtSignedUsd(divVsHodlLiveUsd)}</span></div>
+      </div>
       <div>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:4 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:6 }}>
           <span>Required to beat HODL</span>
           <span style={{ fontFamily:"monospace" }}>{fmtUsd(requiredFeesToBeatHodlLiveUsd)}</span>
-        </div>
-        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.45)", marginBottom:6 }}>
-          <span>Live divergence vs HODL</span>
-          <span style={{ fontFamily:"monospace", color: divVsHodlLiveUsd >= 0 ? "#22c55e" : "#ef4444" }}>{fmtSignedUsd(divVsHodlLiveUsd)}</span>
         </div>
         <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.08)" }}>
           <div style={{ height:"100%", width:`${Math.max(0, fillPct)}%`, borderRadius:4, background: beating ? "#22c55e" : "#f59e0b" }} />
@@ -2898,18 +2937,87 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
   );
 }
 
-function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distanceFromMuPct }: {
+function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distanceFromMuPct,
+  strategyMode, holdElapsedSec, holdRequiredSec, escapeCooldownUntilIso, reEntryCooldownUntilIso,
+  regimeLabel, regimeConfidence, requiredRegimeLabel, requiredMinConfidence,
+  meanRevertConfirmSec, requiredMeanRevertConfirmSec, maxDistanceFromMuPct,
+}: {
   enabled: boolean; eligible: boolean; reasonIfBlocked: string|null; eligibleAtIso: string|null; distanceFromMuPct: number|null;
+  strategyMode: string; holdElapsedSec: number; holdRequiredSec: number;
+  escapeCooldownUntilIso: string|null; reEntryCooldownUntilIso: string|null;
+  regimeLabel: string; regimeConfidence: number; requiredRegimeLabel: string; requiredMinConfidence: number;
+  meanRevertConfirmSec: number; requiredMeanRevertConfirmSec: number; maxDistanceFromMuPct: number;
 }) {
   if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
+
+  // Mode A: position active — gate is irrelevant
+  if (!strategyMode.startsWith("HOLD_")) {
+    return <div style={{ color:"rgba(232,232,240,0.3)", fontSize:12, textAlign:"center", padding:"10px 0" }}>N/A — Position active</div>;
+  }
+
+  // Mode B: hold mode — show condition checklist
+  const nowMs = Date.now();
+  const fmtSec = (s: number) => {
+    const r = Math.round(s);
+    if (r < 60) return `${r}s`;
+    const m = Math.floor(r / 60);
+    if (m < 60) return `${m}m ${r % 60}s`;
+    return `${Math.floor(m / 60)}h ${m % 60}m`;
+  };
+  const isoInPast = (iso: string | null) => !iso || Date.parse(iso) <= nowMs;
+
+  const holdOk = holdElapsedSec >= holdRequiredSec;
+  const escapeOk = isoInPast(escapeCooldownUntilIso);
+  const reentryOk = isoInPast(reEntryCooldownUntilIso);
+  const cooldownOk = escapeOk && reentryOk;
+  const regimeOk = regimeLabel === requiredRegimeLabel && regimeConfidence >= requiredMinConfidence;
+  const confirmOk = meanRevertConfirmSec >= requiredMeanRevertConfirmSec;
+  const distOk = distanceFromMuPct != null && maxDistanceFromMuPct > 0 && distanceFromMuPct <= maxDistanceFromMuPct * 100;
+
+  const condRowStyle: CSSProperties = { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.04)" };
+  const labelStyle: CSSProperties = { fontSize:11, color:"rgba(232,232,240,0.5)" };
+  const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" });
+
   return (
-    <div style={{ display:"grid", gap:8 }}>
-      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "#f59e0b" }}>
+    <div style={{ display:"grid", gap:6 }}>
+      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "#f59e0b", marginBottom:2 }}>
         {eligible ? "READY" : "WAITING"}
       </div>
-      {!eligible && reasonIfBlocked && <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reasonIfBlocked}</div>}
-      {eligibleAtIso && <Uc6Metric label="Eligible at" value={fmtIsoLocal(eligibleAtIso)} />}
-      {distanceFromMuPct != null && <Uc6Metric label="Distance from Mean" value={`${distanceFromMuPct.toFixed(2)}%`} />}
+
+      <div style={condRowStyle}>
+        <span style={labelStyle}>Hold timer</span>
+        <span style={valStyle(holdOk)}>{holdOk ? `${fmtSec(holdElapsedSec)} elapsed` : `${fmtSec(holdElapsedSec)} / ${fmtSec(holdRequiredSec)}`}</span>
+      </div>
+
+      <div style={condRowStyle}>
+        <span style={labelStyle}>Cooldowns</span>
+        <span style={valStyle(cooldownOk)}>{cooldownOk ? "expired" : !escapeOk ? `escape til ${fmtIsoLocal(escapeCooldownUntilIso)}` : `reentry til ${fmtIsoLocal(reEntryCooldownUntilIso)}`}</span>
+      </div>
+
+      <div style={condRowStyle}>
+        <span style={labelStyle}>Regime</span>
+        <span style={{ ...valStyle(regimeOk), color: regimeOk ? "#22c55e" : "#ef4444" }}>
+          {regimeLabel === "unknown" ? "no data" : `${regimeLabel} (${(regimeConfidence * 100).toFixed(0)}%)`}
+        </span>
+      </div>
+
+      <div style={condRowStyle}>
+        <span style={labelStyle}>Mean-revert confirmed</span>
+        <span style={valStyle(confirmOk)}>{confirmOk ? `${fmtSec(meanRevertConfirmSec)}` : `${fmtSec(meanRevertConfirmSec)} / ${fmtSec(requiredMeanRevertConfirmSec)}`}</span>
+      </div>
+
+      <div style={condRowStyle}>
+        <span style={labelStyle}>Distance from mean</span>
+        <span style={{ ...valStyle(distOk), color: distanceFromMuPct == null ? "rgba(232,232,240,0.3)" : distOk ? "#22c55e" : "#ef4444" }}>
+          {distanceFromMuPct != null ? `${distanceFromMuPct.toFixed(2)}%${maxDistanceFromMuPct > 0 ? ` / ${(maxDistanceFromMuPct * 100).toFixed(1)}%` : ""}` : "no data"}
+        </span>
+      </div>
+
+      {eligibleAtIso && !isoInPast(eligibleAtIso) && (
+        <div style={{ marginTop:4 }}>
+          <Uc6Metric label="Eligible at" value={fmtIsoLocal(eligibleAtIso)} />
+        </div>
+      )}
     </div>
   );
 }

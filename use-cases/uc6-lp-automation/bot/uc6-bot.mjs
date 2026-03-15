@@ -7684,9 +7684,13 @@ class Uc6Bot {
     const collectableNowUsd = Number(latest?.collectableNow?.usd || 0);
     const totalCostsToDateUsd = Number(rec?.performance?.totalCostsUsd || 0);
     const feesCollectedUsd = Number(rec?.performance?.feesCollectedUsd || 0);
+    const rewardsClaimedUsd = Number(rec?.performance?.rewardsUsd || 0);
+    const claimableAeroUsd = this.getClaimableAeroUsd();
     const feesNetLiveUsd =
       feesCollectedUsd +
-      (gateCfg.useUncollectedFees ? collectableNowUsd : 0) -
+      rewardsClaimedUsd +
+      (gateCfg.useUncollectedFees ? collectableNowUsd : 0) +
+      claimableAeroUsd -
       totalCostsToDateUsd;
 
     const spot = this.getSpotUsdcPerWeth();
@@ -7744,6 +7748,9 @@ class Uc6Bot {
       lpNowUsd,
       collectableNowUsd,
       totalCostsToDateUsd,
+      feesCollectedUsd,
+      rewardsClaimedUsd,
+      claimableAeroUsd,
       outOfRange: dist.outOfRange,
       outOfRangeDurationSec,
       distanceBeyondEdgePct: dist.distanceBeyondEdgePct,
@@ -7904,6 +7911,18 @@ class Uc6Bot {
       distanceFromMuPct:
         Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
       eligibleAtIso: Number.isFinite(eligibleAtMs) && eligibleAtMs > 0 ? new Date(eligibleAtMs).toISOString() : null,
+      holdElapsedSec: Number.isFinite(holdStartedAtMs)
+        ? Math.max(0, (Date.now() - holdStartedAtMs) / 1000)
+        : 0,
+      holdRequiredSec: cfg.minHoldSec,
+      escapeCooldownUntilIso: this.state.escapeCooldownUntilIso || null,
+      reEntryCooldownUntilIso: this.state.reEntryCooldownUntilIso || null,
+      regimeLabel: String(trendCtx?.regimeLabel || "unknown"),
+      regimeConfidence: Number(trendCtx?.regimeConfidence || 0),
+      requiredRegimeLabel: cfg.requireRegimeLabel,
+      requiredMinConfidence: cfg.minRegimeConfidence,
+      requiredMeanRevertConfirmSec: cfg.minMeanRevertConfirmSec,
+      maxDistanceFromMuPct: cfg.maxDistanceFromMuPct,
     };
   }
 
@@ -9545,6 +9564,16 @@ class Uc6Bot {
             ? null
             : Number(reEntryEval.distanceFromMuPct),
         eligibleAtIso: reEntryEval.eligibleAtIso || null,
+        holdElapsedSec: Number(reEntryEval.holdElapsedSec || 0),
+        holdRequiredSec: Number(reEntryEval.holdRequiredSec || 0),
+        escapeCooldownUntilIso: reEntryEval.escapeCooldownUntilIso || null,
+        reEntryCooldownUntilIso: reEntryEval.reEntryCooldownUntilIso || null,
+        regimeLabel: String(reEntryEval.regimeLabel || "unknown"),
+        regimeConfidence: Number(reEntryEval.regimeConfidence || 0),
+        requiredRegimeLabel: String(reEntryEval.requiredRegimeLabel || "mean_reverting"),
+        requiredMinConfidence: Number(reEntryEval.requiredMinConfidence || 0),
+        requiredMeanRevertConfirmSec: Number(reEntryEval.requiredMeanRevertConfirmSec || 0),
+        maxDistanceFromMuPct: Number(reEntryEval.maxDistanceFromMuPct || 0),
       },
       hodlGate: {
         enabled: Boolean(hodlGateSnapshot.enabled),
@@ -9561,6 +9590,9 @@ class Uc6Bot {
         lpNowUsd: Number(hodlGateSnapshot.lpNowUsd || 0),
         collectableNowUsd: Number(hodlGateSnapshot.collectableNowUsd || 0),
         totalCostsToDateUsd: Number(hodlGateSnapshot.totalCostsToDateUsd || 0),
+        feesCollectedUsd: Number(hodlGateSnapshot.feesCollectedUsd || 0),
+        rewardsClaimedUsd: Number(hodlGateSnapshot.rewardsClaimedUsd || 0),
+        claimableAeroUsd: Number(hodlGateSnapshot.claimableAeroUsd || 0),
         outOfRangeDurationSec: Number(hodlGateSnapshot.outOfRangeDurationSec || 0),
         distanceBeyondEdgePct: Number(hodlGateSnapshot.distanceBeyondEdgePct || 0),
         lastGateDecision: {
@@ -9631,6 +9663,13 @@ class Uc6Bot {
       lastDecision: this.state.lastDecision,
       lastError: this.state.lastError,
     };
+  }
+
+  getClaimableAeroUsd() {
+    const em = this.state.emissions || {};
+    const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+    const claimableAero = em.claimable?.aero || 0;
+    return claimableAero * aeroPrice;
   }
 
   getEmissionsStatusPayload() {
