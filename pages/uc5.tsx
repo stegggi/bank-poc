@@ -236,6 +236,9 @@ type TradeRow = {
   exit_price?: number | null;
   pnl?: number | null;
   fees?: number | null;
+  slippage_bps?: number | null;
+  mid_at_entry?: number | null;
+  mid_at_exit?: number | null;
   duration_sec?: number | null;
   close_reason?: string | null;
   note?: string | null;
@@ -964,6 +967,7 @@ export default function Uc5Page() {
                     { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
                     { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
                     { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                    { k: "Net PnL (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
                   ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
                     <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
                       <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
@@ -1014,6 +1018,9 @@ export default function Uc5Page() {
                     { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "#f59e0b" },
                     { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "#22c55e" },
                     { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "#ef4444" },
+                    { k: "Total fees", v: fmtUsd(tradeSummary?.totalFeesUsd), c: "#ef4444" },
+                    { k: "Net P&L (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                    { k: "Avg slippage", v: tradeSummary?.avgSlippageBps != null ? `${tradeSummary.avgSlippageBps.toFixed(1)} bps` : "—", c: tradeSummary?.avgSlippageBps != null ? (tradeSummary.avgSlippageBps < 2 ? "#22c55e" : tradeSummary.avgSlippageBps < 5 ? "#f59e0b" : "#ef4444") : undefined },
                     { k: "Regime end exits", v: String(tradeSummary?.closedByRegimeEnd ?? 0), c: undefined as string | undefined },
                     { k: "Regime flip exits", v: String(tradeSummary?.closedByRegimeFlip ?? 0), c: undefined as string | undefined },
                     { k: "Risk loop exits", v: String(tradeSummary?.closedByRiskLoop ?? 0), c: undefined as string | undefined },
@@ -1393,7 +1400,7 @@ export default function Uc5Page() {
                 <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
                   <thead>
                     <tr>
-                      {(["Side", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Fees", "Duration", "Reason", "Fill"] as string[]).map((h) => (
+                      {(["Side", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Fees", "Slip", "Duration", "Reason"] as string[]).map((h) => (
                         <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(232,232,240,0.3)", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
@@ -1411,9 +1418,9 @@ export default function Uc5Page() {
                           <td style={{ padding: "6px 8px", color: "#e8e8f0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.exit_price)}</td>
                           <td style={{ padding: "6px 8px", fontWeight: 700, color: pnlColor, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.pnl != null ? fmtUsd(t.pnl) : "—"}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.fees != null ? fmtUsd(t.fees) : "—"}</td>
+                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", fontSize: 11, fontWeight: 600, color: t.slippage_bps == null ? "rgba(232,232,240,0.3)" : t.slippage_bps < 2 ? "#22c55e" : t.slippage_bps < 5 ? "#f59e0b" : "#ef4444" }}>{t.slippage_bps != null ? `${t.slippage_bps.toFixed(1)} bp` : "—"}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap" }}>{fmtDuration(t.duration_sec)}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.6)", whiteSpace: "nowrap", fontSize: 11 }}>{closeReasonTag(t.close_reason)}</td>
-                          <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.5)", whiteSpace: "nowrap", fontSize: 11 }}>{t.note || "—"}</td>
                         </tr>
                       );
                     })}

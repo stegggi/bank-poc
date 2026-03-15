@@ -280,6 +280,11 @@ export type VmTradesSummary = {
   avgLoss: number;
   realizedPnlTotal: number;
   realizedPnlToday: number;
+  totalFeesUsd: number;
+  feesTodayUsd: number;
+  netPnlTotal: number;
+  netPnlToday: number;
+  avgSlippageBps: number | null;
   closedByRegimeEnd: number;
   closedByRegimeFlip: number;
   closedByConfidence: number;
@@ -336,6 +341,11 @@ export async function getVmTradesSummaryCached(ttlMs = 5_000): Promise<VmTradesS
     avgLoss: 0,
     realizedPnlTotal: 0,
     realizedPnlToday: 0,
+    totalFeesUsd: 0,
+    feesTodayUsd: 0,
+    netPnlTotal: 0,
+    netPnlToday: 0,
+    avgSlippageBps: null,
     closedByRegimeEnd: 0,
     closedByRegimeFlip: 0,
     closedByConfidence: 0,

@@ -92,7 +92,9 @@ CREATE TABLE IF NOT EXISTS trades (
   reason_json TEXT,
   fees REAL,
   slippage_bps REAL,
-  note TEXT
+  note TEXT,
+  mid_at_entry REAL,
+  mid_at_exit REAL
 );
 
 CREATE INDEX IF NOT EXISTS idx_trades_ts ON trades(ts_ms);
@@ -413,6 +415,8 @@ class DailyDbManager:
     exit_ts: Optional[int] = None,
     entry_price: Optional[float] = None,
     exit_price: Optional[float] = None,
+    mid_at_entry: Optional[float] = None,
+    mid_at_exit: Optional[float] = None,
   ) -> None:
     day = _utc_day_key(ts_ms)
     conn = self._get_conn_for_day(day)
@@ -420,8 +424,9 @@ class DailyDbManager:
       """
       INSERT OR REPLACE INTO trades(
         id, ts_ms, entry_ts, exit_ts, event_type, side, qty,
-        entry_price, exit_price, price, pnl, tag, reason_json, fees, slippage_bps, note
-      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+        entry_price, exit_price, price, pnl, tag, reason_json, fees, slippage_bps, note,
+        mid_at_entry, mid_at_exit
+      ) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       """,
       (
         str(trade_id),
@@ -440,6 +445,8 @@ class DailyDbManager:
         fees,
         slippage_bps,
         note,
+        mid_at_entry,
+        mid_at_exit,
       ),
     )
     conn.commit()
@@ -802,12 +809,12 @@ class DailyDbManager:
     }
 
   def query_trades_summary(self) -> Dict[str, Any]:
-    rows: List[Tuple[int, str, Optional[str], Optional[float], Optional[float], Optional[float], Optional[str], Optional[str]]] = []
+    rows: List[Tuple] = []
     for _, conn in self._iter_all_connections():
       try:
         cur = conn.execute(
           """
-          SELECT ts_ms, event_type, side, qty, price, pnl, tag, reason_json
+          SELECT ts_ms, event_type, side, qty, price, pnl, tag, reason_json, fees, slippage_bps
           FROM trades
           WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
           ORDER BY ts_ms ASC
@@ -834,6 +841,8 @@ class DailyDbManager:
             float(_row_get(r, 5)) if _row_get(r, 5) is not None else None,
             str(_row_get(r, 6, "") or "") if _row_get(r, 6) is not None else None,
             str(_row_get(r, 7, "") or "") if _row_get(r, 7) is not None else None,
+            float(_row_get(r, 8)) if _row_get(r, 8) is not None else None,
+            float(_row_get(r, 9)) if _row_get(r, 9) is not None else None,
           )
         )
 
@@ -842,8 +851,11 @@ class DailyDbManager:
     open_leg: Optional[Dict[str, Any]] = None
     closed: List[Tuple[int, Optional[float]]] = []
     close_reasons: List[str] = []
+    all_fees: List[float] = []
+    all_slippage: List[float] = []
+    fees_with_ts: List[Tuple[int, float]] = []
 
-    for ts_ms, et, side, qty, price, pnl, tag, reason_json in rows:
+    for ts_ms, et, side, qty, price, pnl, tag, reason_json, fees, slip_bps in rows:
       if et == "ENTRY":
         open_leg = {
           "ts_ms": ts_ms,
@@ -868,6 +880,11 @@ class DailyDbManager:
 
       closed.append((ts_ms, realized))
       close_reasons.append(_classify_close_reason(tag, reason_json))
+      if fees is not None:
+        all_fees.append(float(fees))
+        fees_with_ts.append((ts_ms, float(fees)))
+      if slip_bps is not None:
+        all_slippage.append(float(slip_bps))
       open_leg = None
 
     pnls = [float(p) for (_, p) in closed if p is not None]
@@ -877,6 +894,8 @@ class DailyDbManager:
     now_ms = int(time.time() * 1000)
     day_ago = now_ms - 24 * 60 * 60 * 1000
     realized_24h = sum(float(p or 0.0) for (ts, p) in closed if ts >= day_ago and p is not None)
+    fees_24h = sum(f for (ts, f) in fees_with_ts if ts >= day_ago)
+    total_fees = sum(all_fees) if all_fees else 0.0
     closed_by_confidence = sum(1 for r in close_reasons if r == "confidence_change")
     closed_by_regime_end = sum(1 for r in close_reasons if r == "regime_end")
     closed_by_regime_flip = sum(1 for r in close_reasons if r == "regime_flip")
@@ -890,6 +909,11 @@ class DailyDbManager:
       "avgLoss": (sum(losses) / len(losses)) if losses else 0.0,
       "realizedPnlTotal": sum(pnls) if pnls else 0.0,
       "realizedPnlToday": realized_24h,
+      "totalFeesUsd": total_fees,
+      "feesTodayUsd": fees_24h,
+      "netPnlTotal": (sum(pnls) - total_fees) if pnls else 0.0,
+      "netPnlToday": realized_24h - fees_24h,
+      "avgSlippageBps": (sum(all_slippage) / len(all_slippage)) if all_slippage else None,
       "closedByConfidence": closed_by_confidence,
       "closedByRegimeEnd": closed_by_regime_end,
       "closedByRegimeFlip": closed_by_regime_flip,
@@ -1045,7 +1069,7 @@ class DailyDbManager:
         """
         SELECT id, ts_ms, entry_ts, exit_ts, side, qty,
                entry_price, exit_price, pnl, fees, slippage_bps,
-               tag, reason_json, note
+               tag, reason_json, note, mid_at_entry, mid_at_exit
         FROM trades
         WHERE event_type IN ('EXIT', 'FLATTEN')
         """
@@ -1071,6 +1095,8 @@ class DailyDbManager:
           "tag": str(r[11] or "") if r[11] else None,
           "close_reason": _classify_close_reason(r[11], r[12]),
           "note": str(r[13] or "") if r[13] else None,
+          "mid_at_entry": float(r[14]) if r[14] is not None else None,
+          "mid_at_exit": float(r[15]) if r[15] is not None else None,
           "duration_sec": duration_sec,
         })
 
@@ -1134,6 +1160,8 @@ class DailyDbManager:
       "qty": "REAL",
       "side": "TEXT",
       "event_type": "TEXT",
+      "mid_at_entry": "REAL",
+      "mid_at_exit": "REAL",
     }
     for col, ddl in expected.items():
       if col not in cols:

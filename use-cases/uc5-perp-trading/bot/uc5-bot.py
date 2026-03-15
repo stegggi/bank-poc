@@ -1857,6 +1857,50 @@ def _realized_pnl(side: Optional[str], entry_price: Optional[float], exit_price:
   return None
 
 
+def _fills_vwap(fills, expected_side=None):
+  """Quantity-weighted average fill price. Returns None if no usable fills."""
+  total_qty = 0.0
+  total_notional = 0.0
+  for f in (fills or []):
+    p = _f(f.get("price"))
+    q = _f(f.get("qty"))
+    if not p or not q or p <= 0 or q <= 0:
+      continue
+    if expected_side and str(f.get("side") or "").upper() != expected_side.upper():
+      continue
+    total_qty += q
+    total_notional += p * q
+  return (total_notional / total_qty) if total_qty > 0 else None
+
+
+def _fills_total_fees(audit):
+  """Extract totalFeesUsd from fill audit summary."""
+  try:
+    v = (audit or {}).get("summary", {}).get("totalFeesUsd")
+    return float(v) if v is not None else None
+  except Exception:
+    return None
+
+
+def _slippage_bps(fill_price, reference_price):
+  """Absolute slippage in basis points."""
+  if not fill_price or not reference_price or reference_price <= 0:
+    return None
+  return abs(fill_price - reference_price) / reference_price * 10_000.0
+
+
+def _exit_side_str(position_side):
+  """Fill side when closing a position: LONG->SELL, SHORT->BUY."""
+  s = str(position_side or "").upper()
+  return "SELL" if s == "LONG" else "BUY" if s == "SHORT" else None
+
+
+def _entry_side_str(desired_side):
+  """Fill side when opening a position: LONG->BUY, SHORT->SELL."""
+  s = str(desired_side or "").upper()
+  return "BUY" if s == "LONG" else "SELL" if s == "SHORT" else None
+
+
 def _ws_base_url_from_api(eth_base: str) -> str:
   raw = str(os.environ.get("UC5_ETHEREAL_WS_BASE", "")).strip()
   if raw:
@@ -2891,6 +2935,7 @@ async def main():
   last_order_ts: List[float] = []
 
   current_trade_entry_price: Optional[float] = None
+  current_trade_mid_at_entry: Optional[float] = None
   current_trade_entry_ts: Optional[int] = None
   current_trade_entry_atr_pct: Optional[float] = None
   current_trade_fixed_stop_pct: Optional[float] = None
@@ -3128,6 +3173,7 @@ async def main():
       else:
         position_state = PositionState(open=False, side=None, qty=0.0, entry_price=None, entry_ts_ms=None)
         current_trade_entry_price = None
+        current_trade_mid_at_entry = None
         current_trade_entry_ts = None
         current_trade_entry_atr_pct = None
         current_trade_fixed_stop_pct = None
@@ -3300,11 +3346,27 @@ async def main():
               if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
                 await asyncio.sleep(0.2)
               exit_side_int = _exit_side_int(side)
+              _flatten_start_ms = int(time.time() * 1000)
               await place_market(client, ticker, exit_side_int, qty, owner_addr, subaccount_name, cached_lot_size)
               await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
               last_order_submit_ms = int(time.time() * 1000)
 
-              px = float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None
+              _flatten_audit = None
+              try:
+                await asyncio.sleep(1.0)
+                _flatten_audit = await fetch_fills_audit(
+                  client, sub_id, product_id, limit=20,
+                  created_after_ms=_flatten_start_ms - 2000,
+                )
+              except Exception:
+                pass
+              _exit_vwap = _fills_vwap(
+                (_flatten_audit or {}).get("fills", []),
+                expected_side=_exit_side_str(side),
+              )
+              _exit_fees = _fills_total_fees(_flatten_audit or {})
+              _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+              px = float(_exit_vwap) if _exit_vwap else (float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None)
               pnl = _realized_pnl(side, current_trade_entry_price or position_state.entry_price, px, qty)
               DB_MANAGER.insert_trade_event(
                 trade_id=str(uuid.uuid4()),
@@ -3320,6 +3382,10 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
+                fees=_exit_fees,
+                slippage_bps=_exit_slip,
+                mid_at_entry=current_trade_mid_at_entry,
+                mid_at_exit=float(last_mid) if last_mid else None,
               )
               last_close_ts_ms = now_ms
               atr_sl_breach_started_ms = None
@@ -3356,11 +3422,27 @@ async def main():
             if not _order_guard_ok(now_ms, last_order_submit_ms, int(cfg.get("orderGuardMs", 200))):
               await asyncio.sleep(0.2)
             exit_side_int = _exit_side_int(position_state.side)
+            _flatten_dis_start_ms = int(time.time() * 1000)
             await place_market(client, ticker, exit_side_int, position_state.qty, owner_addr, subaccount_name, cached_lot_size)
             await cancel_open_orders(client, ticker, owner_addr, subaccount_name)
             last_order_submit_ms = int(time.time() * 1000)
 
-            px = float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None
+            _flatten_dis_audit = None
+            try:
+              await asyncio.sleep(1.0)
+              _flatten_dis_audit = await fetch_fills_audit(
+                client, sub_id, product_id, limit=20,
+                created_after_ms=_flatten_dis_start_ms - 2000,
+              )
+            except Exception:
+              pass
+            _exit_vwap = _fills_vwap(
+              (_flatten_dis_audit or {}).get("fills", []),
+              expected_side=_exit_side_str(position_state.side),
+            )
+            _exit_fees = _fills_total_fees(_flatten_dis_audit or {})
+            _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+            px = float(_exit_vwap) if _exit_vwap else (float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None)
             pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
             DB_MANAGER.insert_trade_event(
               trade_id=str(uuid.uuid4()),
@@ -3376,6 +3458,10 @@ async def main():
               exit_ts=now_ms,
               entry_price=current_trade_entry_price,
               exit_price=px,
+              fees=_exit_fees,
+              slippage_bps=_exit_slip,
+              mid_at_entry=current_trade_mid_at_entry,
+              mid_at_exit=float(last_mid) if last_mid else None,
             )
             last_close_ts_ms = now_ms
             atr_sl_breach_started_ms = None
@@ -3484,7 +3570,13 @@ async def main():
               except Exception:
                 pass
               last_exit_method = "market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"
-              px = float(last_mid)
+              _exit_vwap = _fills_vwap(
+                (last_exit_fill_audit or {}).get("fills", []),
+                expected_side=_exit_side_str(position_state.side),
+              )
+              _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
+              _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+              px = float(_exit_vwap) if _exit_vwap else float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
               DB_MANAGER.insert_trade_event(
                 trade_id=str(uuid.uuid4()),
@@ -3506,6 +3598,10 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
+                fees=_exit_fees,
+                slippage_bps=_exit_slip,
+                mid_at_entry=current_trade_mid_at_entry,
+                mid_at_exit=float(last_mid) if last_mid else None,
               )
               last_close_ts_ms = now_ms
               atr_sl_breach_started_ms = None
@@ -3761,7 +3857,11 @@ async def main():
                   maker_entry_ttf_ms_samples.append(ttf_i)
                   if len(maker_entry_ttf_ms_samples) > 200:
                     maker_entry_ttf_ms_samples = maker_entry_ttf_ms_samples[-200:]
-                entry_px = float(epf if epf and epf > 0 else last_mid)
+                _entry_vwap = _fills_vwap(
+                  (last_entry_fill_audit or {}).get("fills", []),
+                  expected_side=_entry_side_str(desired),
+                )
+                entry_px = float(_entry_vwap or epf or last_mid)
                 entry_mode = "maker_partial" if opened_qty > filled > 0 else "maker"
                 entry_leverage = float(cfg.get("maxLeverage", 2.0))
                 entry_notional = opened_qty * entry_px if entry_px > 0 else 0.0
@@ -3802,6 +3902,8 @@ async def main():
                 _entry_maker_pct = float(
                   (last_entry_fill_audit or {}).get("summary", {}).get("makerRatePct") or 0.0
                 ) if last_entry_fill_audit else 0.0
+                _entry_fees = _fills_total_fees(last_entry_fill_audit or {})
+                _entry_slip = _slippage_bps(entry_px, last_mid)
                 DB_MANAGER.insert_trade_event(
                   trade_id=str(uuid.uuid4()),
                   ts_ms=now_ms,
@@ -3814,10 +3916,14 @@ async def main():
                   reason_json=json.dumps(entry_reason_payload),
                   entry_ts=etsf or now_ms,
                   entry_price=entry_px,
+                  fees=_entry_fees,
+                  slippage_bps=_entry_slip,
+                  mid_at_entry=float(last_mid) if last_mid else None,
                   note=f"maker:{round(_entry_maker_pct)}%" if _entry_maker_pct > 0 else "taker",
                 )
 
                 current_trade_entry_price = entry_px
+                current_trade_mid_at_entry = float(last_mid) if last_mid else None
                 current_trade_entry_ts = etsf or now_ms
                 current_trade_entry_atr_pct = _f(entry_risk_state.entry_atr_pct)
                 current_trade_fixed_stop_pct = _f(entry_risk_state.fixed_stop_pct)
@@ -3994,7 +4100,13 @@ async def main():
                 pass
               last_exit_method = "market_safety" if bool(exec_result.get("marketSafetyUsed")) else "maker"
 
-              px = float(last_mid)
+              _exit_vwap = _fills_vwap(
+                (last_exit_fill_audit or {}).get("fills", []),
+                expected_side=_exit_side_str(position_state.side),
+              )
+              _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
+              _exit_slip = _slippage_bps(_exit_vwap, last_mid)
+              px = float(_exit_vwap) if _exit_vwap else float(last_mid)
               pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
               close_tag = "regime_flip" if regime_exit_reason == "REGIME_FLIP" else "regime_end"
               DB_MANAGER.insert_trade_event(
@@ -4019,6 +4131,10 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
+                fees=_exit_fees,
+                slippage_bps=_exit_slip,
+                mid_at_entry=current_trade_mid_at_entry,
+                mid_at_exit=float(last_mid) if last_mid else None,
               )
               last_close_ts_ms = now_ms
               last_regime_exit_ts_ms = now_ms
