@@ -2137,10 +2137,9 @@ export default function Uc6Page() {
                 hodlGateAllowed={hodlGateAllowed}
                 hodlGateReason={hodlGateReason}
                 alphaTodayUsd={n(status?.pnl?.netTodayUsd, 0)}
-                feesCollectedUsd={n(hodlGateView?.feesCollectedUsd, 0)}
-                rewardsClaimedUsd={n(hodlGateView?.rewardsClaimedUsd, 0)}
-                claimableAeroUsd={n(hodlGateView?.claimableAeroUsd, 0) || n(status?.emissions?.claimable?.usd, 0)}
-                totalCostsUsd={n(hodlGateView?.totalCostsToDateUsd, 0)}
+                feesCollectedUsd={_feesCollected + _collectableNow}
+                rewardsClaimedUsd={_rewardsClaimed + _claimableAero}
+                totalCostsUsd={_totalCosts}
               />
             </Uc6Card>
 
@@ -2697,10 +2696,10 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
 }
 
 function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFeesToBeatHodlLiveUsd, hodlGateAllowed, hodlGateReason, alphaTodayUsd,
-  feesCollectedUsd, rewardsClaimedUsd, claimableAeroUsd, totalCostsUsd,
+  feesCollectedUsd, rewardsClaimedUsd, totalCostsUsd,
 }: {
   alphaLiveUsd: number; feesNetLiveUsd: number; divVsHodlLiveUsd: number; requiredFeesToBeatHodlLiveUsd: number; hodlGateAllowed: boolean; hodlGateReason: string; alphaTodayUsd: number;
-  feesCollectedUsd: number; rewardsClaimedUsd: number; claimableAeroUsd: number; totalCostsUsd: number;
+  feesCollectedUsd: number; rewardsClaimedUsd: number; totalCostsUsd: number;
 }) {
   const beating = alphaLiveUsd >= 0;
   const fillPct = requiredFeesToBeatHodlLiveUsd > 0
@@ -2708,7 +2707,6 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
     : beating
       ? 100
       : 0;
-  const totalRewardsUsd = rewardsClaimedUsd + claimableAeroUsd;
   const brkStyle: CSSProperties = { display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0" };
   const brkLabel: CSSProperties = { color:"rgba(232,232,240,0.45)" };
   const brkVal = (v: number, invert = false): CSSProperties => ({ fontFamily:"monospace", color: invert ? (v > 0 ? "#ef4444" : "#22c55e") : (v >= 0 ? "#22c55e" : "#ef4444") });
@@ -2725,7 +2723,7 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
       </div>
       <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
         <div style={brkStyle}><span style={brkLabel}>Fees collected</span><span style={brkVal(feesCollectedUsd)}>{fmtUsd(feesCollectedUsd)}</span></div>
-        <div style={brkStyle}><span style={brkLabel}>AERO rewards</span><span style={brkVal(totalRewardsUsd)}>{fmtUsd(totalRewardsUsd)}{claimableAeroUsd > 0 ? ` (${fmtUsd(claimableAeroUsd)} pending)` : ""}</span></div>
+        <div style={brkStyle}><span style={brkLabel}>AERO rewards</span><span style={brkVal(rewardsClaimedUsd)}>{fmtUsd(rewardsClaimedUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>Costs</span><span style={brkVal(totalCostsUsd, true)}>-{fmtUsd(totalCostsUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>Divergence vs HODL</span><span style={brkVal(divVsHodlLiveUsd)}>{fmtSignedUsd(divVsHodlLiveUsd)}</span></div>
       </div>
