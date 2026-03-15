@@ -75,7 +75,7 @@ const ENV = {
   privateKey: process.env.UC6_PRIVATE_KEY || "",
   adminToken: process.env.UC6_ADMIN_TOKEN || "",
   ownerAddress: process.env.UC6_OWNER_ADDRESS || "",
-  host: process.env.UC6_HTTP_HOST || "127.0.0.1",
+  host: process.env.UC6_HTTP_HOST || "0.0.0.0",
   port: Number(process.env.UC6_HTTP_PORT || 8797),
   dataDir: process.env.UC6_DATA_DIR || "/opt/uc6-bot",
 
