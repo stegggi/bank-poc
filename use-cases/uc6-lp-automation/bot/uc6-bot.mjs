@@ -3969,6 +3969,7 @@ class Uc6Bot {
     let totalClosedPositions = 0;
     let totalRealizedNetProfitUsd = 0;
     let totalFeesCollectedUsd = 0;
+    let totalRewardsUsd = 0;
     let totalTotalCostsUsd = 0;
     let totalFeesNetUsd = 0;
     let totalCapitalGainLossUsd = 0;
@@ -3989,6 +3990,7 @@ class Uc6Bot {
       const perf = rec?.performance || {};
       const net = Number(perf.netProfitUsd || 0);
       const feesCollected = Number(perf.feesCollectedUsd || 0);
+      const rewards = Number(perf.rewardsUsd || 0);
       const totalCosts = Number(perf.totalCostsUsd || 0);
       const feesNet = Number(perf.feesNetUsd || 0);
       const capitalGainLoss = Number(perf.capitalGainLossUsd || 0);
@@ -4019,6 +4021,7 @@ class Uc6Bot {
       totalClosedPositions += 1;
       totalRealizedNetProfitUsd += Number.isFinite(net) ? net : 0;
       totalFeesCollectedUsd += Number.isFinite(feesCollected) ? feesCollected : 0;
+      totalRewardsUsd += Number.isFinite(rewards) ? rewards : 0;
       totalTotalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
       totalFeesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
       totalCapitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
@@ -4031,6 +4034,7 @@ class Uc6Bot {
           closedPositions: 0,
           realizedNetProfitUsd: 0,
           feesCollectedUsd: 0,
+          rewardsUsd: 0,
           totalCostsUsd: 0,
           feesNetUsd: 0,
           capitalGainLossUsd: 0,
@@ -4048,6 +4052,7 @@ class Uc6Bot {
       row.closedPositions += 1;
       row.realizedNetProfitUsd += Number.isFinite(net) ? net : 0;
       row.feesCollectedUsd += Number.isFinite(feesCollected) ? feesCollected : 0;
+      row.rewardsUsd += Number.isFinite(rewards) ? rewards : 0;
       row.totalCostsUsd += Number.isFinite(totalCosts) ? totalCosts : 0;
       row.feesNetUsd += Number.isFinite(feesNet) ? feesNet : 0;
       row.capitalGainLossUsd += Number.isFinite(capitalGainLoss) ? capitalGainLoss : 0;
@@ -4090,6 +4095,7 @@ class Uc6Bot {
       totals: {
         closedPositions: totalClosedPositions,
         feesCollectedUsd: totalFeesCollectedUsd,
+        rewardsUsd: totalRewardsUsd,
         totalCostsUsd: totalTotalCostsUsd,
         feesNetUsd: totalFeesNetUsd,
         capitalGainLossUsd: totalCapitalGainLossUsd,
@@ -5569,8 +5575,6 @@ class Uc6Bot {
   async collectableNowSnapshot() {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
-    // Can't simulate collect() while NFT is staked in gauge (gauge owns the NFT)
-    if (this.state.emissions?.staked) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
     const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
     const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const activePool = venueActive === "uniswapv3"
@@ -5578,30 +5582,57 @@ class Uc6Bot {
       : this.state.latest?.primary || this.state.latest?.fallback || null;
     const token0 = getAddress(activePool?.token0 || this.weth);
     const token1 = getAddress(activePool?.token1 || this.usdc);
-    const sim = await this.publicClient.simulateContract({
-      address: npm,
-      abi: NPM_POSITION_ABI,
-      functionName: "collect",
-      args: [
-        {
-          tokenId: BigInt(tokenId),
-          recipient: this.account.address,
-          amount0Max: UINT128_MAX,
-          amount1Max: UINT128_MAX,
-        },
-      ],
-      account: this.account.address,
-    });
-    const out0 = BigInt(
-      Array.isArray(sim.result)
-        ? sim.result[0]
-        : sim.result?.amount0 ?? sim.result?.[0] ?? 0n
-    );
-    const out1 = BigInt(
-      Array.isArray(sim.result)
-        ? sim.result[1]
-        : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
-    );
+    // When staked, simulate collect() from the gauge address (gauge owns the NFT).
+    // Falls back to positions() tokensOwed if gauge simulation fails.
+    const staked = Boolean(this.state.emissions?.staked);
+    const gaugeAddr = staked ? this.state.emissions?.gaugeAddress : null;
+    const caller = staked ? gaugeAddr : this.account.address;
+    if (staked && !gaugeAddr) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    let out0 = 0n;
+    let out1 = 0n;
+    let estimated = false;
+    try {
+      const sim = await this.publicClient.simulateContract({
+        address: npm,
+        abi: NPM_POSITION_ABI,
+        functionName: "collect",
+        args: [
+          {
+            tokenId: BigInt(tokenId),
+            recipient: caller,
+            amount0Max: UINT128_MAX,
+            amount1Max: UINT128_MAX,
+          },
+        ],
+        account: caller,
+      });
+      out0 = BigInt(
+        Array.isArray(sim.result)
+          ? sim.result[0]
+          : sim.result?.amount0 ?? sim.result?.[0] ?? 0n
+      );
+      out1 = BigInt(
+        Array.isArray(sim.result)
+          ? sim.result[1]
+          : sim.result?.amount1 ?? sim.result?.[1] ?? 0n
+      );
+    } catch {
+      // Gauge simulation failed — fall back to positions() tokensOwed (lower bound).
+      if (!staked) throw new Error("collect simulation failed for non-staked position");
+      try {
+        const pos = await this.publicClient.readContract({
+          address: npm,
+          abi: NPM_POSITION_ABI,
+          functionName: "positions",
+          args: [BigInt(tokenId)],
+        });
+        out0 = BigInt(pos.tokensOwed0 ?? pos[10] ?? 0n);
+        out1 = BigInt(pos.tokensOwed1 ?? pos[11] ?? 0n);
+        estimated = true;
+      } catch {
+        return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+      }
+    }
     let usdcRaw = 0n;
     let wethRaw = 0n;
     if (sameAddress(token0, this.usdc)) usdcRaw = out0;
@@ -5615,7 +5646,7 @@ class Uc6Bot {
       usdc,
       weth,
       usd: usdc + weth * spot,
-      isEstimated: false,
+      isEstimated: estimated,
     };
   }
 
@@ -9524,6 +9555,10 @@ class Uc6Bot {
         collected7dUsd: stats7d.feesUsd,
         collected30dUsd: stats30d.feesUsd,
         collectedTotalUsd: statsAll.feesUsd,
+        rewardsTodayUsd: todayStats.rewardsUsd,
+        rewards7dUsd: stats7d.rewardsUsd,
+        rewards30dUsd: stats30d.rewardsUsd,
+        rewardsTotalUsd: statsAll.rewardsUsd,
         pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
       },
       costs: {

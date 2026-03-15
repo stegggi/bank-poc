@@ -459,6 +459,10 @@ type Uc6Status = {
     collected7dUsd?: number;
     collected30dUsd?: number;
     collectedTotalUsd?: number;
+    rewardsTodayUsd?: number;
+    rewards7dUsd?: number;
+    rewards30dUsd?: number;
+    rewardsTotalUsd?: number;
     pendingCompoundUsd?: number;
   };
   costs?: {
@@ -658,6 +662,7 @@ type Uc6Status = {
       feesCollectedUsd?: number;
       totalCostsUsd?: number;
       feesNetUsd?: number;
+      rewardsUsd?: number;
       capitalGainLossUsd?: number;
       alphaVsHodlUsd?: number;
       realizedNetProfitUsd?: number;
@@ -669,6 +674,7 @@ type Uc6Status = {
       feesCollectedUsd?: number;
       totalCostsUsd?: number;
       feesNetUsd?: number;
+      rewardsUsd?: number;
       capitalGainLossUsd?: number;
       alphaVsHodlUsd?: number;
       realizedNetProfitUsd?: number;
@@ -2118,7 +2124,7 @@ export default function Uc6Page() {
 
           {/* ZONE 3: Live Economics */}
           <div style={{ display:"grid", gap:12 }}>
-            <Uc6Card title="Fee Economics">
+            <Uc6Card title="Fee Economics (incl. active position)">
               <FeeWaterfall status={status} />
             </Uc6Card>
 
@@ -2165,6 +2171,7 @@ export default function Uc6Page() {
                 baseBandBps={regimeBaseBandBps}
                 effectiveBandBps={regimeEffectiveBandBps}
                 fast={regimeStatus?.fast ?? null}
+                adviceReason={status?.decision?.adviceReason ?? null}
               />
             </Uc6Card>
 
@@ -2252,7 +2259,7 @@ export default function Uc6Page() {
               ) : (
                 <>
                   <DarkTable
-                    headers={["Opened", "Duration", "Band", "Entry $", "Exit $", "Fees", "Rewards", "Costs", "Net", "Alpha vs HODL", "Reason"]}
+                    headers={["Opened", "Duration", "Band", "Entry $", "Exit $", "Fees", "AERO", "Costs", "Net", "Alpha vs HODL", "Reason"]}
                     rows={closedPositionRecords.map((rec) => [
                       fmtIsoLocal(rec.entry?.openedAtIso),
                       rec.duration?.human || fmtDurationCompact(rec.duration?.secondsInPosition),
@@ -2280,7 +2287,7 @@ export default function Uc6Page() {
 
               {positionsTaxSummary && (
                 <details style={{ marginTop:16 }}>
-                  <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13 }}>Tax Summary</summary>
+                  <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13 }}>Tax Summary (closed positions only)</summary>
                   <TaxSummary taxSummary={positionsTaxSummary} />
                 </details>
               )}
@@ -2652,12 +2659,12 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   const { isMobile: fwIsMobile } = useBreakpoint();
   const nLocal = (v: unknown, fb: number) => { const x = Number(v); return Number.isFinite(x) ? x : fb; };
   const data = {
-    TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0), gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) },
-    "7D": { fees: nLocal(st?.fees?.collected7dUsd,0), gas: nLocal(st?.costs?.gas7dUsd,0), swap: nLocal(st?.costs?.swapCosts7dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn7dUsd,0), net: nLocal(st?.pnl?.net7dUsd,0) },
-    "30D": { fees: nLocal(st?.fees?.collected30dUsd,0), gas: nLocal(st?.costs?.gas30dUsd,0), swap: nLocal(st?.costs?.swapCosts30dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn30dUsd,0), net: nLocal(st?.pnl?.net30dUsd,0) },
-    ALL: { fees: nLocal(st?.fees?.collectedTotalUsd,0), gas: nLocal(st?.costs?.gasTotalUsd,0), swap: nLocal(st?.costs?.swapCostsTotalUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTotalUsd,0), net: nLocal(st?.pnl?.netTotalUsd,0) },
+    TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0), rewards: nLocal(st?.fees?.rewardsTodayUsd,0), gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) },
+    "7D": { fees: nLocal(st?.fees?.collected7dUsd,0), rewards: nLocal(st?.fees?.rewards7dUsd,0), gas: nLocal(st?.costs?.gas7dUsd,0), swap: nLocal(st?.costs?.swapCosts7dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn7dUsd,0), net: nLocal(st?.pnl?.net7dUsd,0) },
+    "30D": { fees: nLocal(st?.fees?.collected30dUsd,0), rewards: nLocal(st?.fees?.rewards30dUsd,0), gas: nLocal(st?.costs?.gas30dUsd,0), swap: nLocal(st?.costs?.swapCosts30dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn30dUsd,0), net: nLocal(st?.pnl?.net30dUsd,0) },
+    ALL: { fees: nLocal(st?.fees?.collectedTotalUsd,0), rewards: nLocal(st?.fees?.rewardsTotalUsd,0), gas: nLocal(st?.costs?.gasTotalUsd,0), swap: nLocal(st?.costs?.swapCostsTotalUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTotalUsd,0), net: nLocal(st?.pnl?.netTotalUsd,0) },
   }[tab];
-  const maxVal = Math.max(data.fees, data.gas + data.swap + data.mintBurn, Math.abs(data.net), 0.01);
+  const maxVal = Math.max(data.fees + data.rewards, data.gas + data.swap + data.mintBurn, Math.abs(data.net), 0.01);
   const barRow = (lbl: string, val: number, color: string) => (
     <div style={{ display:"grid", gridTemplateColumns: fwIsMobile ? "80px 1fr 70px" : "120px 1fr 80px", gap:8, alignItems:"center" }}>
       <span style={{ fontSize:12, color:"rgba(232,232,240,0.6)" }}>{lbl}</span>
@@ -2678,6 +2685,7 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
       </div>
       <div style={{ display:"grid", gap:8 }}>
         {barRow("Fees earned", data.fees, "#06b6d4")}
+        {barRow("AERO rewards", data.rewards, "#22c55e")}
         {barRow("Gas", data.gas, "#ef4444")}
         {barRow("Swap costs", data.swap, "#ef4444")}
         {barRow("Mint/burn", data.mintBurn, "#ef4444")}
@@ -2889,8 +2897,8 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   );
 }
 
-function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps, fast }: {
-  label: string|null; thetaStrength: number; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number; fast?: { theta?: number|null; thetaStrength?: number; halfLifeSec?: number|null; label?: string; confidence?: number; sampleCount?: number; windowSec?: number } | null;
+function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps, fast, adviceReason }: {
+  label: string|null; thetaStrength: number; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number; fast?: { theta?: number|null; thetaStrength?: number; halfLifeSec?: number|null; label?: string; confidence?: number; sampleCount?: number; windowSec?: number } | null; adviceReason?: string | null;
 }) {
   if (!enabled) {
     return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"16px 0" }}>Regime engine disabled</div>;
@@ -2920,9 +2928,17 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
         <Uc6Metric label="Half-life" value={halfLifeLabel} />
         <Uc6Metric label="Samples" value={`${sampleCount}/${windowSec}s`} />
-        {theta != null && <Uc6Metric label="Mean-Revert Speed" value={theta.toFixed(4)} />}
-        {sigma != null && <Uc6Metric label="Volatility" value={sigma.toFixed(4)} />}
-        {muPrice != null && <Uc6Metric label="Mean Price" value={fmtUsd(muPrice)} />}
+        <Uc6Metric label="Mean-Revert Speed" value={
+          label === "trending"
+            ? <span style={{ color:"rgba(232,232,240,0.3)" }}>N/A</span>
+            : theta != null ? theta.toFixed(4) : "\u2014"
+        } />
+        {sigma != null && <Uc6Metric label="Volatility" value={sigma > 0 && sigma < 0.0001 ? sigma.toExponential(2) : sigma.toFixed(4)} />}
+        <Uc6Metric label="Mean Price" value={
+          label === "trending"
+            ? <span style={{ color:"rgba(232,232,240,0.3)" }}>N/A</span>
+            : muPrice != null ? fmtUsd(muPrice) : "\u2014"
+        } />
         <Uc6Metric label="Theta Strength" value={
           <span style={{ color: thetaStrength >= 0.7 ? "#22c55e" : thetaStrength >= 0.3 ? "#f59e0b" : "rgba(232,232,240,0.5)" }}>
             {(thetaStrength * 100).toFixed(0)}%
@@ -2993,6 +3009,11 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
             </div>
           );
         })()}
+        {adviceReason && (
+          <div style={{ fontSize:10, color:"rgba(232,232,240,0.35)", marginTop:4, fontStyle:"italic" }}>
+            {adviceReason.includes("cost_gate_wait") ? "Cost gate active — fees < rebalance cost" : adviceReason.replace(/_/g, " ")}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -3253,9 +3274,8 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
           <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(totals?.feesCollectedUsd)}</span>} />
           <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(totals?.totalCostsUsd)}</span>} />
           <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.feesNetUsd) }}>{fmtSignedUsd(totals?.feesNetUsd)}</span>} />
+          <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(totals?.rewardsUsd)}</span>} />
           <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.alphaVsHodlUsd) }}>{fmtSignedUsd(totals?.alphaVsHodlUsd)}</span>} />
-          <Uc6Metric label="Capital gain/loss" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.capitalGainLossUsd) }}>{fmtSignedUsd(totals?.capitalGainLossUsd)}</span>} />
-          <Uc6Metric label="Net profit" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:signColor(totals?.realizedNetProfitUsd) }}>{fmtSignedUsd(totals?.realizedNetProfitUsd)}</span>} />
           <Uc6Metric label="Closed positions" value={String(totals?.closedPositions ?? 0)} />
           {totals?.totalAssetValueTodayUsd != null && (
             <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
@@ -3315,9 +3335,8 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
                   <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(yr.feesCollectedUsd)}</span>} />
                   <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(yr.totalCostsUsd)}</span>} />
                   <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(yr.feesNetUsd) }}>{fmtSignedUsd(yr.feesNetUsd)}</span>} />
+                  <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(yr.rewardsUsd)}</span>} />
                   <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(yr.alphaVsHodlUsd) }}>{fmtSignedUsd(yr.alphaVsHodlUsd)}</span>} />
-                  <Uc6Metric label="Capital gain/loss" value={<span style={{ fontFamily:"monospace", color:signColor(yr.capitalGainLossUsd) }}>{fmtSignedUsd(yr.capitalGainLossUsd)}</span>} />
-                  <Uc6Metric label="Net profit" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:signColor(yr.realizedNetProfitUsd) }}>{fmtSignedUsd(yr.realizedNetProfitUsd)}</span>} />
                 </div>
               </div>
             );
@@ -3367,7 +3386,7 @@ function PositionRecordDrawer({
 
         <DrawerSection title="Performance">
           <DRow label="Fees Collected" value={fmtUsd(perf.feesCollectedUsd)} />
-          <DRow label="Rewards" value={fmtUsd(perf.rewardsUsd)} />
+          <DRow label="AERO Rewards" value={fmtUsd(perf.rewardsUsd)} />
           <DRow label="Gas" value={fmtUsd(perf.gasUsd)} />
           <DRow label="Swap Cost" value={fmtUsd(perf.swapCostUsd)} />
           <DRow label="Mint/Burn" value={fmtUsd(perf.mintBurnUsd)} />
