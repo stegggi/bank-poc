@@ -5465,8 +5465,14 @@ class Uc6Bot {
           est.halfLifeSec = est.theta > 0 ? Math.log(2) / est.theta : Number.POSITIVE_INFINITY;
         }
         est.thetaStrength = (1 - fw) * (estSlow.thetaStrength || 0) + fw * (estFast.thetaStrength || 0);
-        // Use fast window's label if it detects trending (faster escape).
-        if (estFast.label === "trending" && estSlow.label !== "trending") {
+        // Re-derive label from blended halfLife so it's consistent with displayed values.
+        const mrHL = Math.max(10, Number(cfg.mrHalfLifeMaxSec || 180));
+        const trHL = Math.max(mrHL + 1, Number(cfg.trendHalfLifeMinSec || 900));
+        if (Number.isFinite(est.halfLifeSec) && est.halfLifeSec <= mrHL) est.label = "mean_reverting";
+        else if (!Number.isFinite(est.halfLifeSec) || est.halfLifeSec >= trHL) est.label = "trending";
+        else est.label = "unknown";
+        // Also override to trending if fast window detects it (safety — quick escape).
+        if (estFast.label === "trending" && est.label !== "trending") {
           est.label = "trending";
         }
       }
