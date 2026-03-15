@@ -278,7 +278,8 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
   const horizonSec = clamp(horizonSecBase, 60, 3600);
   const expectedFeesUsd = feesPerHour * (horizonSec / 3600);
   const severeOutOfRange = Boolean(outOfRange) && Number(edgeProgress || 0) >= 1;
-  const costGateWait = !severeOutOfRange && expectedActionCostUsd > 0 && expectedFeesUsd < expectedActionCostUsd;
+  // Skip cost gate in trending — rebalancing to avoid IL is more important than fee coverage.
+  const costGateWait = est.label !== "trending" && !severeOutOfRange && expectedActionCostUsd > 0 && expectedFeesUsd < expectedActionCostUsd;
 
   let edgeAdj = 0;
   let cooldownAdj = 0;

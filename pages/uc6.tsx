@@ -3009,7 +3009,9 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
         })()}
         {adviceReason && (
           <div style={{ fontSize:10, color:"rgba(232,232,240,0.35)", marginTop:4, fontStyle:"italic" }}>
-            {adviceReason.includes("cost_gate_wait") ? "Cost gate active — fees < rebalance cost" : adviceReason.replace(/_/g, " ")}
+            {adviceReason.includes("cost_gate_wait")
+              ? "Cost gate — expected fees over horizon < rebalance cost, deferring"
+              : adviceReason.replace(/_/g, " ").replace(/,/g, " · ")}
           </div>
         )}
       </div>
