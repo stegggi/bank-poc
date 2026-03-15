@@ -222,6 +222,7 @@ export function estimateOU(state, { mrHalfLifeMaxSec: _mrHL = 180, trendHalfLife
       ? clamp(1 - (halfLifeSec - mrHalfLifeMaxSec) / range, 0, 1)
       : (halfLifeSec <= mrHalfLifeMaxSec ? 1 : 0);
   }
+  console.log(`[regime] estimateOU b=${b.toFixed(6)} theta=${theta.toFixed(6)} halfLife=${halfLifeSec.toFixed(1)}s label=${label} thetaStr=${thetaStrength.toFixed(4)} mrHL=${mrHalfLifeMaxSec} trHL=${trendHalfLifeMinSec} n=${n} sigma=${sigma.toExponential(3)}`);
 
   const sampleScore = clamp(n / Math.max(practicalMinSamples * 2, 1), 0, 1);
   const fitScore = clamp(Number.isFinite(r2) ? Math.max(r2, 0) : 0, 0, 1);

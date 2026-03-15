@@ -5470,6 +5470,7 @@ class Uc6Bot {
           est.label = "trending";
         }
       }
+      console.log(`[regime-blend] fw=${fw} slow: ok=${estSlow.ok} b=${estSlow.slope?.toFixed(6)} theta=${estSlow.theta?.toFixed(6)} tStr=${estSlow.thetaStrength?.toFixed(4)} label=${estSlow.label} | fast: ok=${estFast?.ok} b=${estFast?.slope?.toFixed(6)} theta=${estFast?.theta?.toFixed(6)} tStr=${estFast?.thetaStrength?.toFixed(4)} label=${estFast?.label} | blended: theta=${est.theta?.toFixed(6)} tStr=${est.thetaStrength?.toFixed(4)} label=${est.label}`);
       const now = Date.now();
       const stats24h = this.summarizeEvents(this.getEventsSince(now - 24 * 60 * 60 * 1000));
       const recentRebalanceCostUsd =
