@@ -1577,7 +1577,7 @@ export default function Uc6Page() {
   const decision = (status?.ops?.lastDecision || status?.lastDecision || {}) as Record<string, unknown>;
   const regimeStatus = status?.regime || null;
   const regimeDecisionView = status?.decision || null;
-  const events = (status?.events?.lastN || []).slice(-15).reverse();
+  const events = (status?.events?.lastN || []).slice(-50).reverse();
   const hasActiveLpPosition = Boolean(status?.position?.tokenId);
   const inRange = hasActiveLpPosition && Boolean(status?.position?.inRange);
   const cooldownRemaining = Number(status?.ops?.cooldownRemainingSec || 0);
@@ -2087,7 +2087,7 @@ export default function Uc6Page() {
                 alphaTodayUsd={n(status?.pnl?.netTodayUsd, 0)}
                 feesCollectedUsd={n(hodlGateView?.feesCollectedUsd, 0)}
                 rewardsClaimedUsd={n(hodlGateView?.rewardsClaimedUsd, 0)}
-                claimableAeroUsd={n(hodlGateView?.claimableAeroUsd, 0)}
+                claimableAeroUsd={n(hodlGateView?.claimableAeroUsd, 0) || n(status?.emissions?.claimable?.usd, 0)}
                 totalCostsUsd={n(hodlGateView?.totalCostsToDateUsd, 0)}
               />
             </Uc6Card>
@@ -2715,6 +2715,11 @@ function OpsGrid({ rebalancesToday, rebalances24h, lastRebalanceAtIso, churnRati
 }
 
 function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: string; reason?: string; message?: string; gasUsd?: number; feesCollectedUsd?: number; rewardsUsd?: number; netUsd?: number; txHashes?: string[] }> }) {
+  const PAGE_SIZE = 10;
+  const [page, setPage] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(evs.length / PAGE_SIZE));
+  const pageEvs = evs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
   const eventColor = (t?: string): string => {
     switch (t) {
       case "harvest": case "claim": return "#22c55e";
@@ -2793,11 +2798,11 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   };
   return (
     <div style={{ display:"grid", gap:6 }}>
-      {evs.map((ev, i) => {
+      {pageEvs.map((ev, i) => {
         const badge = financialBadge(ev);
         const txHash = ev.txHashes?.[0];
         return (
-          <div key={i} style={{ display:"grid", gap:2 }}>
+          <div key={page * PAGE_SIZE + i} style={{ display:"grid", gap:2 }}>
             <div style={{ display:"flex", gap:8, alignItems:"baseline", fontSize:12 }}>
               <span style={{ color:"rgba(232,232,240,0.35)", whiteSpace:"nowrap", minWidth:54 }}>{timeAgo(ev.atIso)}</span>
               <span style={{ color:eventColor(ev.type), fontWeight:600, whiteSpace:"nowrap" }}>{eventLabel(ev.type, ev.reason)}</span>
@@ -2819,6 +2824,14 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
           </div>
         );
       })}
+      {totalPages > 1 && (
+        <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:8, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.06)", fontSize:12, color:"rgba(232,232,240,0.5)" }}>
+          <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={darkBtnStyle}>Prev</button>
+          <span>{page + 1} / {totalPages}</span>
+          <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} style={darkBtnStyle}>Next</button>
+          <span style={{ marginLeft:"auto", fontSize:11, color:"rgba(232,232,240,0.3)" }}>{evs.length} events</span>
+        </div>
+      )}
     </div>
   );
 }
