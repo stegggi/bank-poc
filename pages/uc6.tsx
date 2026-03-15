@@ -1641,10 +1641,16 @@ export default function Uc6Page() {
   const hodlGateView = status?.hodlGate || null;
   const hodlGateAllowed = hodlGateView?.lastGateDecision?.allowed !== false;
   const hodlGateReason = String(hodlGateView?.lastGateDecision?.reason || "—");
-  const alphaLiveUsd = n(hodlGateView?.alphaLiveUsd, 0);
-  const feesNetLiveUsd = n(hodlGateView?.feesNetLiveUsd, 0);
   const divVsHodlLiveUsd = n(hodlGateView?.divVsHodlLiveUsd, 0);
   const requiredFeesToBeatHodlLiveUsd = n(hodlGateView?.requiredFeesToBeatHodlLiveUsd, 0);
+  // Recompute feesNet and alpha to include AERO rewards (claimed + claimable)
+  const _feesCollected = n(hodlGateView?.feesCollectedUsd, 0);
+  const _rewardsClaimed = n(hodlGateView?.rewardsClaimedUsd, 0);
+  const _claimableAero = n(hodlGateView?.claimableAeroUsd, 0) || n(status?.emissions?.claimable?.usd, 0);
+  const _collectableNow = n(hodlGateView?.collectableNowUsd, 0);
+  const _totalCosts = n(hodlGateView?.totalCostsToDateUsd, 0);
+  const feesNetLiveUsd = _feesCollected + _rewardsClaimed + _claimableAero + _collectableNow - _totalCosts;
+  const alphaLiveUsd = feesNetLiveUsd + divVsHodlLiveUsd;
   const strategyMode = status?.strategyMode || "LP_ACTIVE";
   const isHoldMode = strategyMode !== "LP_ACTIVE";
   const trendView = status?.trend || null;
