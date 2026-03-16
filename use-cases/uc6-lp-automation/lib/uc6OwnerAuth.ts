@@ -18,6 +18,7 @@ type RegimeSettingsPayload = {
   trendHalfLifeMinSec?: number;
   maxEdgeAdj?: number;
   maxBandAdjBps?: number;
+  maxBandNarrowBps?: number;
   maxCooldownAdjSec?: number;
 };
 type TrendEscapeSettingsPayload = {
@@ -385,6 +386,7 @@ const REGIME_SETTING_RULES: Record<keyof Required<RegimeSettingsPayload>, Settin
   trendHalfLifeMinSec: { type: "number", min: 10, max: 86_400 },
   maxEdgeAdj: { type: "number", min: 0, max: 0.5 },
   maxBandAdjBps: { type: "number", min: 0, max: 500 },
+  maxBandNarrowBps: { type: "number", min: 0, max: 500 },
   maxCooldownAdjSec: { type: "number", min: 0, max: 86_400 },
 };
 

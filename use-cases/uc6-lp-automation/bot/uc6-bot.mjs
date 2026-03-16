@@ -923,6 +923,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         0,
         500
       ),
+      maxBandNarrowBps: clamp(
+        Math.round(toNumber(srcRegime.maxBandNarrowBps ?? src.regimeMaxBandNarrowBps, baseRegime.maxBandNarrowBps)),
+        0,
+        500
+      ),
       maxCooldownAdjSec: clamp(
         Math.round(
           toNumber(srcRegime.maxCooldownAdjSec ?? src.regimeMaxCooldownAdjSec, baseRegime.maxCooldownAdjSec)
