@@ -9737,6 +9737,8 @@ class Uc6Bot {
         killSwitch: this.settings.killSwitch,
         venue: this.settings.venue,
         bandHalfBps: this.settings.bandHalfBps,
+        bandHalfBpsUp: this.settings.bandHalfBpsUp ?? null,
+        bandHalfBpsDown: this.settings.bandHalfBpsDown ?? null,
         edgeRebalancePct: this.settings.edgeRebalancePct,
         minRebalanceIntervalSec: this.settings.minRebalanceIntervalSec,
         maxRebalancesPerDay: this.settings.maxRebalancesPerDay,
