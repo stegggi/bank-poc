@@ -3616,6 +3616,38 @@ async def main():
           else:
             atr_sl_breach_started_ms = None
 
+          # Spread guard for take-profit exits: skip TP if spread is too wide
+          # (prevents market orders filling at terrible prices on flash wicks).
+          # Stop-loss exits always proceed regardless of spread.
+          if allow_risk_exit and risk_result.reason == "take_profit":
+            tp_spread_bps = (
+              ((last_ask - last_bid) / last_mid * 10_000.0)
+              if (last_ask and last_bid and last_mid and last_mid > 0)
+              else 0.0
+            )
+            tp_max_spread_mult = float(cfg.get("tpMaxSpreadMult", 3.0))
+            tp_spread_limit = float(cfg.get("maxSpreadBpsForTrade", 12.0)) * tp_max_spread_mult
+            if tp_spread_bps > tp_spread_limit:
+              allow_risk_exit = False
+              print(
+                f"[TP_SPREAD_GUARD] Skipping TP exit — spread {tp_spread_bps:.1f} bps "
+                f"exceeds limit {tp_spread_limit:.1f} bps (mid={last_mid}, bid={last_bid}, ask={last_ask}). "
+                f"Will retry next iteration."
+              )
+              last_action = {
+                "type": "RISK_WAIT_TP_SPREAD",
+                "ok": True,
+                "info": {
+                  "rule": risk_result.rule,
+                  "reason": risk_result.reason,
+                  "spreadBps": round(tp_spread_bps, 1),
+                  "spreadLimit": round(tp_spread_limit, 1),
+                  "mid": last_mid,
+                  "bid": last_bid,
+                  "ask": last_ask,
+                },
+              }
+
           if allow_risk_exit:
             cerr = await ensure_client_ready()
             if not cerr and client is not None:
