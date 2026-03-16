@@ -3000,7 +3000,10 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
             ? <span style={{ color:"rgba(232,232,240,0.3)" }}>N/A</span>
             : theta != null ? theta.toFixed(4) : "\u2014"
         } />
-        {sigma != null && <Uc6Metric label="Volatility" value={sigma > 0 && sigma < 0.0001 ? sigma.toExponential(2) : sigma.toFixed(4)} />}
+        {sigma != null && (() => {
+          const annualPct = sigma * Math.sqrt(365.25 * 24 * 3600) * 100;
+          return <Uc6Metric label="Volatility (ann.)" value={`${annualPct.toFixed(1)}%`} />;
+        })()}
         <Uc6Metric label="Mean Price" value={
           label === "trending"
             ? <span style={{ color:"rgba(232,232,240,0.3)" }}>N/A</span>
