@@ -4012,6 +4012,13 @@ class Uc6Bot {
       if (tokenId && this.lifecycleCurrentTokenByRunId.get(runId) === tokenId) {
         this.lifecycleCurrentTokenByRunId.delete(runId);
       }
+    } else if (type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") {
+      const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
+      const rec = getRecordForToken(tokenId, { create: false });
+      if (rec) {
+        touchRecordCommon(rec);
+        this.recomputeLifecycleRecordDerived(rec);
+      }
     }
 
     this.positionRecords.sort((a, b) => {
