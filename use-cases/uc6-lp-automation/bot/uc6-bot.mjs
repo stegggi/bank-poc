@@ -881,6 +881,22 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         5,
         20_000
       ),
+      fastWindowSec: clamp(
+        Math.round(toNumber(srcRegime.fastWindowSec ?? src.regimeFastWindowSec, baseRegime.fastWindowSec)),
+        30,
+        86_400
+      ),
+      fastSampleEverySec: clamp(
+        Math.round(toNumber(srcRegime.fastSampleEverySec ?? src.regimeFastSampleEverySec, baseRegime.fastSampleEverySec)),
+        1,
+        3_600
+      ),
+      fastMinSamples: clamp(
+        Math.round(toNumber(srcRegime.fastMinSamples ?? src.regimeFastMinSamples, baseRegime.fastMinSamples)),
+        5,
+        20_000
+      ),
+      fastWeight: clamp(toNumber(srcRegime.fastWeight ?? src.regimeFastWeight, baseRegime.fastWeight), 0, 0.8),
       mrHalfLifeMaxSec: clamp(
         Math.round(toNumber(srcRegime.mrHalfLifeMaxSec ?? src.regimeMrHalfLifeMaxSec, baseRegime.mrHalfLifeMaxSec)),
         10,

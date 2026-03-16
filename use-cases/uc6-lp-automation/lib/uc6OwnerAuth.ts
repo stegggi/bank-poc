@@ -10,6 +10,10 @@ type RegimeSettingsPayload = {
   windowSec?: number;
   sampleEverySec?: number;
   minSamples?: number;
+  fastWindowSec?: number;
+  fastSampleEverySec?: number;
+  fastMinSamples?: number;
+  fastWeight?: number;
   mrHalfLifeMaxSec?: number;
   trendHalfLifeMinSec?: number;
   maxEdgeAdj?: number;
@@ -372,6 +376,10 @@ const REGIME_SETTING_RULES: Record<keyof Required<RegimeSettingsPayload>, Settin
   windowSec: { type: "number", min: 60, max: 86_400 },
   sampleEverySec: { type: "number", min: 1, max: 3_600 },
   minSamples: { type: "number", min: 5, max: 20_000 },
+  fastWindowSec: { type: "number", min: 30, max: 86_400 },
+  fastSampleEverySec: { type: "number", min: 1, max: 3_600 },
+  fastMinSamples: { type: "number", min: 5, max: 20_000 },
+  fastWeight: { type: "number", min: 0, max: 0.8 },
   mrHalfLifeMaxSec: { type: "number", min: 10, max: 86_400 },
   trendHalfLifeMinSec: { type: "number", min: 10, max: 86_400 },
   maxEdgeAdj: { type: "number", min: 0, max: 0.5 },
