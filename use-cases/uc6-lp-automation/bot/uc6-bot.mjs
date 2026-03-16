@@ -577,6 +577,8 @@ const DEFAULT_SETTINGS = {
   failureCooldownSec: 900,
   venue: "slipstream",
   bandHalfBps: 100,
+  bandHalfBpsUp: null,
+  bandHalfBpsDown: null,
   edgeRebalancePct: 0.85,
   minRebalanceIntervalSec: 7200,
   maxRebalancesPerDay: 20,
@@ -805,6 +807,12 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     ),
     venue: src.venue === "uniswapv3" ? "uniswapv3" : "slipstream",
     bandHalfBps: clamp(Math.round(toNumber(src.bandHalfBps, baseSettings.bandHalfBps)), 10, 5000),
+    bandHalfBpsUp: src.bandHalfBpsUp != null
+      ? clamp(Math.round(toNumber(src.bandHalfBpsUp, 0)), 10, 5000)
+      : (baseSettings.bandHalfBpsUp ?? null),
+    bandHalfBpsDown: src.bandHalfBpsDown != null
+      ? clamp(Math.round(toNumber(src.bandHalfBpsDown, 0)), 10, 5000)
+      : (baseSettings.bandHalfBpsDown ?? null),
     edgeRebalancePct: clamp(toNumber(src.edgeRebalancePct, baseSettings.edgeRebalancePct), 0.1, 0.99),
     minRebalanceIntervalSec: clamp(
       Math.round(toNumber(src.minRebalanceIntervalSec, baseSettings.minRebalanceIntervalSec)),
@@ -5501,6 +5509,8 @@ class Uc6Bot {
       edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
       minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
       bandHalfBps: Number(this.settings.bandHalfBps || 0),
+      bandHalfBpsUp: this.settings.bandHalfBpsUp ?? null,
+      bandHalfBpsDown: this.settings.bandHalfBpsDown ?? null,
     };
     const baseDecisionView = {
       baseThresholds,
@@ -5600,11 +5610,27 @@ class Uc6Bot {
         // Allow both widening and narrowing from regime advice.
         const bandAdj = Number(advice.bandHalfBpsAdj || 0);
         const minBandHalfBps = Math.max(30, Math.round(baseThresholds.bandHalfBps * 0.7));
+        const maxBandAdj = Math.max(0, Number(cfg.maxBandAdjBps || 0));
         effective.bandHalfBps = clamp(
           Math.round(baseThresholds.bandHalfBps + bandAdj),
           minBandHalfBps,
-          Math.round(baseThresholds.bandHalfBps + Math.max(0, Number(cfg.maxBandAdjBps || 0)))
+          Math.round(baseThresholds.bandHalfBps + maxBandAdj)
         );
+        // Apply same regime adjustment to asymmetric overrides when set.
+        if (baseThresholds.bandHalfBpsUp != null) {
+          const minUp = Math.max(30, Math.round(baseThresholds.bandHalfBpsUp * 0.7));
+          effective.bandHalfBpsUp = clamp(
+            Math.round(baseThresholds.bandHalfBpsUp + bandAdj), minUp,
+            Math.round(baseThresholds.bandHalfBpsUp + maxBandAdj)
+          );
+        }
+        if (baseThresholds.bandHalfBpsDown != null) {
+          const minDown = Math.max(30, Math.round(baseThresholds.bandHalfBpsDown * 0.7));
+          effective.bandHalfBpsDown = clamp(
+            Math.round(baseThresholds.bandHalfBpsDown + bandAdj), minDown,
+            Math.round(baseThresholds.bandHalfBpsDown + maxBandAdj)
+          );
+        }
       }
       const estOk = Boolean(est?.ok);
       const hasUsableMu =
@@ -6220,13 +6246,16 @@ class Uc6Bot {
     return Math.ceil(tick / spacing) * spacing;
   }
 
-  computeTargetRange(currentTick, tickSpacing, bandHalfBps) {
+  computeTargetRange(currentTick, tickSpacing, bandHalfBps, { bandHalfBpsUp, bandHalfBpsDown } = {}) {
     const tick = Math.round(Number(currentTick || 0));
     const spacing = Math.max(1, Math.round(Number(tickSpacing || 0)));
-    const targetHalfBps = Math.max(1, Number(bandHalfBps || 0));
-    const priceFactor = 1 + targetHalfBps / 10_000;
-    const targetHalfTicks = Math.max(1, Math.round(Math.log(priceFactor) / Math.log(1.0001)));
-    const targetSpanTicks = Math.max(spacing, targetHalfTicks * 2);
+    const baseBps = Math.max(1, Number(bandHalfBps || 0));
+    const upBps = Math.max(1, Number(bandHalfBpsUp ?? baseBps));
+    const downBps = Math.max(1, Number(bandHalfBpsDown ?? baseBps));
+    const log1_0001 = Math.log(1.0001);
+    const targetTicksUp = Math.max(1, Math.round(Math.log(1 + upBps / 10_000) / log1_0001));
+    const targetTicksDown = Math.max(1, Math.round(Math.log(1 + downBps / 10_000) / log1_0001));
+    const targetSpanTicks = Math.max(spacing, targetTicksUp + targetTicksDown);
     const baseSpanSteps = Math.max(1, Math.round(targetSpanTicks / spacing));
 
     let best = null;
@@ -6234,15 +6263,14 @@ class Uc6Bot {
       if (!(Number.isFinite(tickLower) && Number.isFinite(tickUpper))) return;
       if (tickUpper <= tickLower) return;
       if (!(tick > tickLower && tick < tickUpper)) return;
-      const effBps = this.estimateBandHalfBpsFromTicks(tickLower, tickUpper);
-      if (!(Number.isFinite(effBps) && effBps > 0)) return;
-      const center = Math.round((tickLower + tickUpper) / 2);
-      const widthDiff = Math.abs(effBps - targetHalfBps);
-      const centerDiff = Math.abs(((tickLower + tickUpper) / 2) - tick);
-      const narrowerPenalty = effBps < targetHalfBps ? 1 : 0;
-      const score = widthDiff * 1_000_000 + centerDiff * 10 + narrowerPenalty;
+      const actualDown = tick - tickLower;
+      const actualUp = tickUpper - tick;
+      const downDiff = Math.abs(actualDown - targetTicksDown);
+      const upDiff = Math.abs(actualUp - targetTicksUp);
+      const narrowerPenalty = (actualDown < targetTicksDown ? 1 : 0) + (actualUp < targetTicksUp ? 1 : 0);
+      const score = (downDiff + upDiff) * 1_000_000 + narrowerPenalty;
       if (!best || score < best.score) {
-        best = { score, centerTick: center, tickLower, tickUpper, bandHalfBpsEffective: effBps };
+        best = { score, tickLower, tickUpper };
       }
     };
 
@@ -6250,29 +6278,43 @@ class Uc6Bot {
       const spanSteps = baseSpanSteps + stepOffset;
       if (spanSteps <= 0) continue;
       const span = spanSteps * spacing;
-      const idealLower = tick - span / 2;
+      // Ideal lower based on asymmetric target: tick should be targetTicksDown above tickLower
+      const idealLower = tick - targetTicksDown;
       const baseLowerCandidates = new Set([
         this.floorTick(idealLower, spacing),
         this.ceilTick(idealLower, spacing),
       ]);
       for (const baseLower of baseLowerCandidates) {
         for (const shift of [-spacing, 0, spacing]) {
-          const tickLower = baseLower + shift;
-          const tickUpper = tickLower + span;
-          consider(tickLower, tickUpper);
+          const tl = baseLower + shift;
+          consider(tl, tl + span);
+        }
+      }
+      // Also try from the upper end
+      const idealUpper = tick + targetTicksUp;
+      const baseUpperCandidates = new Set([
+        this.floorTick(idealUpper, spacing),
+        this.ceilTick(idealUpper, spacing),
+      ]);
+      for (const baseUpper of baseUpperCandidates) {
+        for (const shift of [-spacing, 0, spacing]) {
+          const tu = baseUpper + shift;
+          consider(tu - span, tu);
         }
       }
     }
 
     if (best) {
-      return { centerTick: best.centerTick, tickLower: best.tickLower, tickUpper: best.tickUpper };
+      const center = Math.round((best.tickLower + best.tickUpper) / 2);
+      return { centerTick: center, tickLower: best.tickLower, tickUpper: best.tickUpper };
     }
 
-    const center = this.floorTick(tick, spacing);
-    const delta = this.toTickDelta(targetHalfBps, spacing);
-    let tickLower = this.floorTick(center - delta, spacing);
-    let tickUpper = this.ceilTick(center + delta, spacing);
+    const deltaDown = this.toTickDelta(downBps, spacing);
+    const deltaUp = this.toTickDelta(upBps, spacing);
+    let tickLower = this.floorTick(tick - deltaDown, spacing);
+    let tickUpper = this.ceilTick(tick + deltaUp, spacing);
     if (tickUpper <= tickLower) tickUpper = tickLower + spacing;
+    const center = Math.round((tickLower + tickUpper) / 2);
     return { centerTick: center, tickLower, tickUpper };
   }
 
@@ -8436,7 +8478,7 @@ class Uc6Bot {
     }
   }
 
-  async executeReEntry(primary, effectiveBandHalfBps, trendCtx) {
+  async executeReEntry(primary, effectiveBandHalfBps, trendCtx, { bandHalfBpsUp, bandHalfBpsDown } = {}) {
     if (this.state.position?.tokenId) {
       await this.syncStrategyModeInvariant({ persist: true });
       this.setDecision({
@@ -8469,7 +8511,7 @@ class Uc6Bot {
     });
     this.beginAction("reentry", "mean_reversion_reentry");
     try {
-      await this.rebalanceSlipstream(primary, { bandHalfBps: effectiveBandHalfBps });
+      await this.rebalanceSlipstream(primary, { bandHalfBps: effectiveBandHalfBps, bandHalfBpsUp, bandHalfBpsDown });
       if (!this.state.position?.tokenId) {
         throw new Error("reentry finished without active LP token");
       }
@@ -8827,6 +8869,12 @@ class Uc6Bot {
     const effectiveBandHalfBps = Number.isFinite(Number(options.bandHalfBps))
       ? Number(options.bandHalfBps)
       : Number(this.settings.bandHalfBps || 0);
+    const effectiveBandUp = options.bandHalfBpsUp != null
+      ? Number(options.bandHalfBpsUp) : (this.settings.bandHalfBpsUp ?? null);
+    const effectiveBandDown = options.bandHalfBpsDown != null
+      ? Number(options.bandHalfBpsDown) : (this.settings.bandHalfBpsDown ?? null);
+    const bandOpts = (effectiveBandUp != null || effectiveBandDown != null)
+      ? { bandHalfBpsUp: effectiveBandUp, bandHalfBpsDown: effectiveBandDown } : {};
 
     const currentTokenId = this.state.position?.tokenId;
     const existingBand = currentTokenId
@@ -8838,7 +8886,9 @@ class Uc6Bot {
       : null;
     const plannedBand = {
       bandHalfBps: effectiveBandHalfBps,
-      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, effectiveBandHalfBps) || {}),
+      ...(effectiveBandUp != null ? { bandHalfBpsUp: effectiveBandUp } : {}),
+      ...(effectiveBandDown != null ? { bandHalfBpsDown: effectiveBandDown } : {}),
+      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, effectiveBandHalfBps, bandOpts) || {}),
     };
     const runId = this.ensureActivePositionRun({
       reason: currentTokenId ? "auto_rebalance" : "auto",
@@ -9123,7 +9173,7 @@ class Uc6Bot {
 
     const maxPreflightMintAttempts = 3;
     let mintBasis = snapshot;
-    let targetRange = this.computeTargetRange(mintBasis.tick, mintBasis.tickSpacing, effectiveBandHalfBps);
+    let targetRange = this.computeTargetRange(mintBasis.tick, mintBasis.tickSpacing, effectiveBandHalfBps, bandOpts);
     let minted;
     let lastMintErr = null;
     const preflightErrors = [];
@@ -9138,7 +9188,8 @@ class Uc6Bot {
         targetRange = this.computeTargetRange(
           mintBasis.tick,
           mintBasis.tickSpacing,
-          effectiveBandHalfBps
+          effectiveBandHalfBps,
+          bandOpts
         );
       } else {
         try {
@@ -9146,7 +9197,8 @@ class Uc6Bot {
           targetRange = this.computeTargetRange(
             mintBasis.tick,
             mintBasis.tickSpacing,
-            effectiveBandHalfBps
+            effectiveBandHalfBps,
+            bandOpts
           );
         } catch {
           // Keep provided snapshot on first attempt if refresh fails.
@@ -9208,6 +9260,8 @@ class Uc6Bot {
       venue: "slipstream",
       tokenId: minted.tokenId,
       bandHalfBps: effectiveBandHalfBps,
+      bandHalfBpsUp: effectiveBandUp ?? null,
+      bandHalfBpsDown: effectiveBandDown ?? null,
       tickLower: minted.tickLower,
       tickUpper: minted.tickUpper,
       centerTick: minted.centerTick,
@@ -9241,6 +9295,8 @@ class Uc6Bot {
       edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
       minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
       bandHalfBps: Number(this.settings.bandHalfBps || 0),
+      bandHalfBpsUp: this.settings.bandHalfBpsUp ?? null,
+      bandHalfBpsDown: this.settings.bandHalfBpsDown ?? null,
     };
     const trendCtx = this.buildTrendContext(primary);
     const gate = this.getRebalanceGate({
@@ -9339,7 +9395,10 @@ class Uc6Bot {
 
     if (strategyMode !== "LP_ACTIVE") {
       if (reEntryEval.eligible) {
-        await this.executeReEntry(primary, effectiveThresholds.bandHalfBps, trendCtx);
+        await this.executeReEntry(primary, effectiveThresholds.bandHalfBps, trendCtx, {
+          bandHalfBpsUp: effectiveThresholds.bandHalfBpsUp,
+          bandHalfBpsDown: effectiveThresholds.bandHalfBpsDown,
+        });
         return;
       }
       this.setDecision({
@@ -9466,6 +9525,8 @@ class Uc6Bot {
     try {
       await this.rebalanceSlipstream(primary, {
         bandHalfBps: effectiveThresholds.bandHalfBps,
+        bandHalfBpsUp: effectiveThresholds.bandHalfBpsUp,
+        bandHalfBpsDown: effectiveThresholds.bandHalfBpsDown,
       });
       if (!this.state.position?.tokenId) {
         throw new Error("Rebalance finished without an active LP position (tokenId missing)");
@@ -9805,11 +9866,15 @@ class Uc6Bot {
           edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
           minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
           bandHalfBps: Number(this.settings.bandHalfBps || 0),
+          bandHalfBpsUp: this.settings.bandHalfBpsUp ?? null,
+          bandHalfBpsDown: this.settings.bandHalfBpsDown ?? null,
         },
         effectiveThresholds: {
           edgeRebalancePct: Number(this.settings.edgeRebalancePct || 0),
           minRebalanceIntervalSec: Number(this.settings.minRebalanceIntervalSec || 0),
           bandHalfBps: Number(this.settings.bandHalfBps || 0),
+          bandHalfBpsUp: this.settings.bandHalfBpsUp ?? null,
+          bandHalfBpsDown: this.settings.bandHalfBpsDown ?? null,
         },
         adviceReason: this.settings.regime?.enabled ? "regime_not_estimated_yet" : "regime_disabled",
         waitRecommended: false,

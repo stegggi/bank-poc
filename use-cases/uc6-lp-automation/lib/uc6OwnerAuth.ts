@@ -94,6 +94,7 @@ type SettingRule = {
   min?: number;
   max?: number;
   enum?: string[];
+  nullable?: boolean;
 };
 
 type RateBucket = { count: number; resetAt: number };
@@ -393,6 +394,8 @@ const TOP_LEVEL_SETTING_RULES: Record<string, SettingRule> = {
   failureCooldownSec: { type: "number", min: 30, max: 86_400 },
   venue: { type: "string", enum: ["slipstream", "uniswapv3"] },
   bandHalfBps: { type: "number", min: 10, max: 5_000 },
+  bandHalfBpsUp: { type: "number", min: 10, max: 5_000, nullable: true },
+  bandHalfBpsDown: { type: "number", min: 10, max: 5_000, nullable: true },
   edgeRebalancePct: { type: "number", min: 0.1, max: 0.99 },
   minRebalanceIntervalSec: { type: "number", min: 30, max: 86_400 },
   maxRebalancesPerDay: { type: "number", min: 1, max: 500 },
@@ -490,6 +493,9 @@ function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
 
 function validateSettingRule(scope: string, key: string, value: unknown, rule: SettingRule): unknown {
   const label = scope ? `${scope}.${key}` : key;
+  if (rule.nullable && value === null) {
+    return null;
+  }
   if (rule.type === "boolean") {
     if (typeof value !== "boolean") {
       throw new Error(`Invalid settings value for "${label}"`);

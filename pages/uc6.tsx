@@ -23,6 +23,8 @@ type Uc6DraftSettings = {
   killSwitch: boolean;
   venue: Uc6Venue;
   bandHalfBps: number;
+  bandHalfBpsUp: number | null;
+  bandHalfBpsDown: number | null;
   edgeRebalancePct: number;
   minRebalanceIntervalSec: number;
   maxRebalancesPerDay: number;
@@ -85,6 +87,8 @@ type OwnerPayload = {
   killSwitch: boolean;
   venue: Uc6Venue;
   bandHalfBps: number;
+  bandHalfBpsUp: number | null;
+  bandHalfBpsDown: number | null;
   edgeRebalancePct: number;
   minRebalanceIntervalSec: number;
   maxRebalancesPerDay: number;
@@ -339,6 +343,8 @@ type Uc6Status = {
     killSwitch?: boolean;
     venue?: Uc6Venue;
     bandHalfBps?: number;
+    bandHalfBpsUp?: number | null;
+    bandHalfBpsDown?: number | null;
     edgeRebalancePct?: number;
     minRebalanceIntervalSec?: number;
     maxRebalancesPerDay?: number;
@@ -747,6 +753,8 @@ function defaultDraft(): Uc6DraftSettings {
     killSwitch: true,
     venue: "slipstream",
     bandHalfBps: 100,
+    bandHalfBpsUp: null,
+    bandHalfBpsDown: null,
     edgeRebalancePct: 0.85,
     minRebalanceIntervalSec: 7200,
     maxRebalancesPerDay: 20,
@@ -828,6 +836,8 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     killSwitch: Boolean(settings.killSwitch ?? d.killSwitch),
     venue,
     bandHalfBps: n(settings.bandHalfBps, d.bandHalfBps),
+    bandHalfBpsUp: settings.bandHalfBpsUp != null ? n(settings.bandHalfBpsUp, null) : d.bandHalfBpsUp,
+    bandHalfBpsDown: settings.bandHalfBpsDown != null ? n(settings.bandHalfBpsDown, null) : d.bandHalfBpsDown,
     edgeRebalancePct: n(settings.edgeRebalancePct, d.edgeRebalancePct),
     minRebalanceIntervalSec: n(settings.minRebalanceIntervalSec, d.minRebalanceIntervalSec),
     maxRebalancesPerDay: n(settings.maxRebalancesPerDay, d.maxRebalancesPerDay),
@@ -913,6 +923,8 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
     killSwitch: draft.killSwitch,
     venue: draft.venue,
     bandHalfBps: draft.bandHalfBps,
+    bandHalfBpsUp: draft.bandHalfBpsUp,
+    bandHalfBpsDown: draft.bandHalfBpsDown,
     edgeRebalancePct: draft.edgeRebalancePct,
     minRebalanceIntervalSec: draft.minRebalanceIntervalSec,
     maxRebalancesPerDay: draft.maxRebalancesPerDay,
@@ -2313,6 +2325,8 @@ export default function Uc6Page() {
                 <summary style={cmdSectionStyle}>STRATEGY</summary>
                 <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <NumberField label="bandHalfBps" value={draft.bandHalfBps} onChange={(v) => updateNumber("bandHalfBps", v)} />
+                  <NullableNumberField label="bandHalfBpsUp (↑)" value={draft.bandHalfBpsUp} placeholder="= bandHalfBps" onChange={(v) => setDraft((p) => p ? { ...p, bandHalfBpsUp: v } : p)} />
+                  <NullableNumberField label="bandHalfBpsDown (↓)" value={draft.bandHalfBpsDown} placeholder="= bandHalfBps" onChange={(v) => setDraft((p) => p ? { ...p, bandHalfBpsDown: v } : p)} />
                   <NumberField label="edgeRebalancePct" value={draft.edgeRebalancePct} step="0.01" onChange={(v) => updateNumber("edgeRebalancePct", v)} />
                   <NumberField label="minRebalanceIntervalSec" value={draft.minRebalanceIntervalSec} onChange={(v) => updateNumber("minRebalanceIntervalSec", v)} />
                   <NumberField label="maxRebalancesPerDay" value={draft.maxRebalancesPerDay} onChange={(v) => updateNumber("maxRebalancesPerDay", v)} />
@@ -2509,6 +2523,25 @@ function NumberField({ label, value, onChange, step = "1" }: { label: string; va
     <label style={darkLabelStyle}>
       <span style={darkLabelSpanStyle}>{label}</span>
       <input type="number" step={step} value={value} onChange={(e) => onChange(e.target.value)} style={darkInputStyle} />
+    </label>
+  );
+}
+
+function NullableNumberField({ label, value, onChange, step = "1", placeholder = "inherit" }: { label: string; value: number | null; onChange: (next: number | null) => void; step?: string; placeholder?: string }) {
+  return (
+    <label style={darkLabelStyle}>
+      <span style={darkLabelSpanStyle}>{label}</span>
+      <input
+        type="number"
+        step={step}
+        value={value ?? ""}
+        placeholder={placeholder}
+        onChange={(e) => {
+          const raw = e.target.value.trim();
+          onChange(raw === "" ? null : Number(raw));
+        }}
+        style={darkInputStyle}
+      />
     </label>
   );
 }
