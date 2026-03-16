@@ -165,6 +165,8 @@ type PositionLifecycleRecord = {
   selector?: { type?: "tickSpacing" | "fee" | string; value?: number; humanLabel?: string };
   band?: {
     bandHalfBps?: number;
+    bandHalfBpsUp?: number;
+    bandHalfBpsDown?: number;
     targetBandHalfBps?: number;
     tickLower?: number;
     tickUpper?: number;
@@ -573,11 +575,15 @@ type Uc6Status = {
       edgeRebalancePct?: number;
       minRebalanceIntervalSec?: number;
       bandHalfBps?: number;
+      bandHalfBpsUp?: number | null;
+      bandHalfBpsDown?: number | null;
     };
     effectiveThresholds?: {
       edgeRebalancePct?: number;
       minRebalanceIntervalSec?: number;
       bandHalfBps?: number;
+      bandHalfBpsUp?: number | null;
+      bandHalfBpsDown?: number | null;
     };
     adviceReason?: string;
     waitRecommended?: boolean;
@@ -1205,9 +1211,15 @@ function actualBandHalfPctFromTicks(tickLower?: number | null, tickUpper?: numbe
 }
 
 function formatRecordBandLabel(record: Pick<PositionLifecycleRecord, "band">): string {
+  const hasAsym = record.band?.bandHalfBpsUp != null || record.band?.bandHalfBpsDown != null;
+  if (hasAsym) {
+    const upPct = ((record.band?.bandHalfBpsUp ?? record.band?.bandHalfBps ?? 0) / 100).toFixed(2);
+    const downPct = ((record.band?.bandHalfBpsDown ?? record.band?.bandHalfBps ?? 0) / 100).toFixed(2);
+    return `\u2191${upPct}% \u2193${downPct}%`;
+  }
   const actualPct = actualBandHalfPctFromTicks(record.band?.tickLower, record.band?.tickUpper);
-  if (actualPct != null) return `±${fmtPct(actualPct)}`;
-  return `±${(n(record.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
+  if (actualPct != null) return `\u00b1${fmtPct(actualPct)}`;
+  return `\u00b1${(n(record.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
 }
 
 function fmtDurationCompact(seconds: number | null | undefined): string {
@@ -1696,6 +1708,11 @@ export default function Uc6Page() {
     regimeDecisionView?.effectiveThresholds?.bandHalfBps,
     n(status?.settings?.bandHalfBps, 0)
   );
+  const regimeBaseBandBpsUp = status?.settings?.bandHalfBpsUp ?? null;
+  const regimeBaseBandBpsDown = status?.settings?.bandHalfBpsDown ?? null;
+  const regimeEffectiveBandBpsUp = regimeDecisionView?.effectiveThresholds?.bandHalfBpsUp ?? regimeBaseBandBpsUp;
+  const regimeEffectiveBandBpsDown = regimeDecisionView?.effectiveThresholds?.bandHalfBpsDown ?? regimeBaseBandBpsDown;
+  const isAsymmetricBand = regimeBaseBandBpsUp != null || regimeBaseBandBpsDown != null;
   const hodlGateView = status?.hodlGate || null;
   const hodlGateAllowed = hodlGateView?.lastGateDecision?.allowed !== false;
   const hodlGateReason = String(hodlGateView?.lastGateDecision?.reason || "—");
@@ -2181,6 +2198,10 @@ export default function Uc6Page() {
                 effectiveEdgePct={regimeEffectiveEdgePct}
                 baseBandBps={regimeBaseBandBps}
                 effectiveBandBps={regimeEffectiveBandBps}
+                baseBandBpsUp={regimeBaseBandBpsUp}
+                baseBandBpsDown={regimeBaseBandBpsDown}
+                effectiveBandBpsUp={regimeEffectiveBandBpsUp}
+                effectiveBandBpsDown={regimeEffectiveBandBpsDown}
                 fast={regimeStatus?.fast ?? null}
                 adviceReason={status?.decision?.adviceReason ?? null}
               />
@@ -2592,7 +2613,17 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
   const ticksToLower = currentTick != null && tickLower != null ? currentTick - tickLower : null;
   const ticksToUpper = currentTick != null && tickUpper != null ? tickUpper - currentTick : null;
 
-  const actualBandStr = bandHalfPct != null ? `\u00b1${bandHalfPct.toFixed(2)}%` : `\u00b1${configuredBandHalfPct.toFixed(2)}% (cfg)`;
+  const actualBandStr = (() => {
+    if (tickLower != null && tickUpper != null && currentTick != null) {
+      const log1_0001 = Math.log(1.0001);
+      const upPct = (Math.exp(log1_0001 * (tickUpper - currentTick)) - 1) * 100;
+      const downPct = (Math.exp(log1_0001 * (currentTick - tickLower)) - 1) * 100;
+      if (Math.abs(upPct - downPct) > 0.05) {
+        return `\u2191${upPct.toFixed(2)}% \u2193${downPct.toFixed(2)}%`;
+      }
+    }
+    return bandHalfPct != null ? `\u00b1${bandHalfPct.toFixed(2)}%` : `\u00b1${configuredBandHalfPct.toFixed(2)}% (cfg)`;
+  })();
 
   const trackColor = inRange ? "rgba(6,182,212,0.15)" : "rgba(239,68,68,0.1)";
   const dotColor = inRange ? "#06b6d4" : "#ef4444";
@@ -2928,8 +2959,8 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
   );
 }
 
-function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps, fast, adviceReason }: {
-  label: string|null; thetaStrength: number; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number; fast?: { theta?: number|null; thetaStrength?: number; halfLifeSec?: number|null; label?: string; confidence?: number; sampleCount?: number; windowSec?: number } | null; adviceReason?: string | null;
+function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta, sigma, muPrice, sampleCount, windowSec, enabled, baseEdgePct, effectiveEdgePct, baseBandBps, effectiveBandBps, baseBandBpsUp, baseBandBpsDown, effectiveBandBpsUp, effectiveBandBpsDown, fast, adviceReason }: {
+  label: string|null; thetaStrength: number; confidencePct: number|null; halfLifeLabel: string; theta: number|null; sigma: number|null; muPrice: number|null; sampleCount: number; windowSec: number; enabled: boolean; baseEdgePct: number; effectiveEdgePct: number; baseBandBps: number; effectiveBandBps: number; baseBandBpsUp?: number|null; baseBandBpsDown?: number|null; effectiveBandBpsUp?: number|null; effectiveBandBpsDown?: number|null; fast?: { theta?: number|null; thetaStrength?: number; halfLifeSec?: number|null; label?: string; confidence?: number; sampleCount?: number; windowSec?: number } | null; adviceReason?: string | null;
 }) {
   if (!enabled) {
     return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"16px 0" }}>Regime engine disabled</div>;
@@ -2993,6 +3024,39 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
 
         {/* Band */}
         {(() => {
+          const asymmetric = baseBandBpsUp != null || baseBandBpsDown != null;
+          if (asymmetric) {
+            const renderBandRow = (dir: string, baseBps: number, effBps: number) => {
+              const adjBps = Math.round(effBps - baseBps);
+              const basePct = (baseBps / 100).toFixed(2);
+              const effPct = (effBps / 100).toFixed(2);
+              const sameVal = Math.abs(adjBps) < 1;
+              return (
+                <div key={dir} style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", fontSize:12 }}>
+                  <span style={{ color:"rgba(232,232,240,0.45)" }}>Band {dir}</span>
+                  <span style={{ fontFamily:"monospace" }}>
+                    <span style={{ color:"rgba(232,232,240,0.55)" }}>{basePct}%</span>
+                    {!sameVal && (
+                      <>
+                        <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
+                        <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{effPct}%</span>
+                        <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#06b6d4" }}>
+                          ({adjBps > 0 ? "+" : ""}{adjBps})
+                        </span>
+                      </>
+                    )}
+                    {sameVal && <span style={{ color:"rgba(232,232,240,0.3)", marginLeft:6, fontSize:11 }}>no adj</span>}
+                  </span>
+                </div>
+              );
+            };
+            return (
+              <>
+                {renderBandRow("\u2191", baseBandBpsUp ?? baseBandBps, effectiveBandBpsUp ?? effectiveBandBps)}
+                {renderBandRow("\u2193", baseBandBpsDown ?? baseBandBps, effectiveBandBpsDown ?? effectiveBandBps)}
+              </>
+            );
+          }
           const adjBps = effectiveBandBps - baseBandBps;
           const basePct = (baseBandBps / 100).toFixed(2);
           const effPct  = (effectiveBandBps / 100).toFixed(2);
@@ -3001,11 +3065,11 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
             <div style={{ display:"flex", alignItems:"baseline", justifyContent:"space-between", fontSize:12 }}>
               <span style={{ color:"rgba(232,232,240,0.45)" }}>Band half-width</span>
               <span style={{ fontFamily:"monospace" }}>
-                <span style={{ color:"rgba(232,232,240,0.55)" }}>{"±"}{basePct}%</span>
+                <span style={{ color:"rgba(232,232,240,0.55)" }}>{"\u00b1"}{basePct}%</span>
                 {!sameVal && (
                   <>
-                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"→"}</span>
-                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{"±"}{effPct}%</span>
+                    <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
+                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{"\u00b1"}{effPct}%</span>
                     <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#06b6d4" }}>
                       ({adjBps > 0 ? "+" : ""}{adjBps} bps)
                     </span>
