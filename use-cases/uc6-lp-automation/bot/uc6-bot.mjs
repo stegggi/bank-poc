@@ -9245,6 +9245,27 @@ class Uc6Bot {
         reason: "regime_wait_near_edge",
       };
     }
+    // Block initial mint when regime is not mean-reverting (same rule as re-entry).
+    // Force rebalance bypasses this gate (owner override).
+    if (
+      !forceRebalance &&
+      effectiveTrigger.trigger &&
+      effectiveTrigger.reason === "no_position" &&
+      this.settings?.regime?.enabled
+    ) {
+      const regimeEst = regimeDecisionCtx?.est;
+      const regimeLabel = String(regimeEst?.label || "unknown");
+      const regimeOk = Boolean(regimeEst?.ok);
+      const reEntryCfg = this.getReEntrySettings();
+      const regimeConfidence = clamp(Number(regimeEst?.confidence || 0), 0, 1);
+      if (!regimeOk || regimeLabel !== reEntryCfg.requireRegimeLabel || regimeConfidence < reEntryCfg.minRegimeConfidence) {
+        effectiveTrigger = {
+          ...effectiveTrigger,
+          trigger: false,
+          reason: regimeOk ? `regime_blocks_entry_${regimeLabel}` : "regime_not_ready",
+        };
+      }
+    }
     if (effectiveTrigger.trigger && effectiveTrigger.reason === "no_position" && (forceRebalance || recoveryRetry || gate.allowed)) {
       await this.maybeRefreshPositionInventory({ force: true });
       this.enforceSinglePositionInvariant();
