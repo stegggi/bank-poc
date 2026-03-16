@@ -2169,6 +2169,10 @@ class Uc6Bot {
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return false;
 
+    // Don't stake while top-up is pending retry (top-up failed recently)
+    const topUpRetryAt = Date.parse(this.state.topUpRetryAfterIso || "");
+    if (Number.isFinite(topUpRetryAt) && topUpRetryAt > Date.now()) return false;
+
     // Back off after a failed stake attempt (5 min cooldown)
     const retryAt = Date.parse(em._autoStakeRetryAfterIso || "");
     if (Number.isFinite(retryAt) && retryAt > Date.now()) return false;
