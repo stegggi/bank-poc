@@ -2282,6 +2282,16 @@ class Uc6Bot {
       }
     }
 
+    // Reconcile staked state with on-chain truth every 60s
+    if (this.isTtlDue("emissions_reconcile", 60)) {
+      try {
+        await this.reconcileEmissionsState();
+        this.markRefreshStamp("emissions_reconcile", "emissionsReconcile");
+      } catch (err) {
+        console.warn("[UC6] [emissions] periodic reconcile error:", sanitizeErrorMessage(err));
+      }
+    }
+
     // Refresh claimable + wallet AERO every 60s
     if (this.isTtlDue("emissions_metrics", 60)) {
       try {
