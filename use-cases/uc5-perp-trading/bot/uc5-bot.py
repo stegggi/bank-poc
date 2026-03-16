@@ -2861,6 +2861,7 @@ def _extract_entry_risk_from_reason(reason_json: Any) -> Dict[str, Any]:
       if "atrStopLossIsAtr" in payload
       else payload.get("atr_stop_loss_is_atr")
     ),
+    "leverage": _f(payload.get("leverage")),
   }
 
 
@@ -3043,6 +3044,8 @@ async def main():
   current_trade_fixed_take_price: Optional[float] = None
   current_trade_entry_fees: Optional[float] = None
   current_trade_stop_loss_is_atr: Optional[bool] = None
+  current_trade_leverage: Optional[float] = None
+  current_trade_margin_usd: Optional[float] = None
   atr_sl_breach_started_ms: Optional[int] = None
   # Restore entry price from DB in case bot restarted with an open position.
   # Without this, FLATTEN/risk-exit would compute pnl=None on restart.
@@ -3059,6 +3062,11 @@ async def main():
       current_trade_fixed_stop_price = _entry_risk.get("fixed_stop_price")
       current_trade_fixed_take_price = _entry_risk.get("fixed_take_price")
       current_trade_stop_loss_is_atr = _entry_risk.get("atr_stop_loss_is_atr")
+      current_trade_leverage = _f(_entry_risk.get("leverage")) or _f(cfg.get("maxLeverage"))
+      _ep = current_trade_entry_price
+      _eq = _f(_open_entry.get("qty"))
+      if current_trade_leverage and current_trade_leverage > 0 and _ep and _eq:
+        current_trade_margin_usd = (_ep * _eq) / current_trade_leverage
   except Exception as _e:
     print(f"[startup] Could not restore entry price from DB: {_e}")
   last_close_ts_ms: Optional[int] = DB_MANAGER.query_last_close_ts()
@@ -3262,6 +3270,10 @@ async def main():
           position_state.fixed_take_price = float(current_trade_fixed_take_price)
         if current_trade_stop_loss_is_atr is not None and position_state.stop_loss_is_atr_based is None:
           position_state.stop_loss_is_atr_based = bool(current_trade_stop_loss_is_atr)
+        if current_trade_leverage and not position_state.leverage:
+          position_state.leverage = float(current_trade_leverage)
+        if current_trade_margin_usd and not position_state.margin_usd:
+          position_state.margin_usd = float(current_trade_margin_usd)
         if position_state.entry_ts_ms is None:
           open_leg = DB_MANAGER.query_open_leg_from_trades()
           if open_leg and open_leg.get("ts_ms"):
@@ -3283,9 +3295,20 @@ async def main():
         current_trade_fixed_stop_price = None
         current_trade_fixed_take_price = None
         current_trade_stop_loss_is_atr = None
+        current_trade_leverage = None
+        current_trade_margin_usd = None
         atr_sl_breach_started_ms = None
       if was_open and not pos_open:
         last_close_ts_ms = now_ms
+
+      # Compute unrealized PnL when Ethereal API doesn't provide it
+      if pos_upnl is None and position_state.open and last_mid and last_mid > 0:
+        _ep = position_state.entry_price or current_trade_entry_price
+        if _ep and _ep > 0 and position_state.qty > 0:
+          if position_state.side == "LONG":
+            pos_upnl = (last_mid - _ep) * position_state.qty
+          elif position_state.side == "SHORT":
+            pos_upnl = (_ep - last_mid) * position_state.qty
 
       if position_state.open:
         _ensure_frozen_risk_levels(
@@ -3300,6 +3323,10 @@ async def main():
         current_trade_fixed_take_price = _f(position_state.fixed_take_price) or current_trade_fixed_take_price
         if position_state.stop_loss_is_atr_based is not None:
           current_trade_stop_loss_is_atr = bool(position_state.stop_loss_is_atr_based)
+        if position_state.leverage:
+          current_trade_leverage = current_trade_leverage or float(position_state.leverage)
+        if position_state.margin_usd:
+          current_trade_margin_usd = current_trade_margin_usd or float(position_state.margin_usd)
 
       if position_state.open and last_mid:
         position_state = update_position_extremes(position_state, float(last_mid))
@@ -4076,6 +4103,7 @@ async def main():
                   "fixedStopPrice": entry_risk_state.fixed_stop_price,
                   "fixedTakePrice": entry_risk_state.fixed_take_price,
                   "atrStopLossIsAtr": bool(entry_risk_state.stop_loss_is_atr_based),
+                  "leverage": entry_leverage,
                 }
 
                 _entry_maker_pct = float(
@@ -4115,6 +4143,8 @@ async def main():
                   if entry_risk_state.stop_loss_is_atr_based is not None
                   else None
                 )
+                current_trade_leverage = entry_leverage
+                current_trade_margin_usd = entry_margin_usd
                 atr_sl_breach_started_ms = None
                 if submitted_any:
                   last_order_ts.append(time.time())

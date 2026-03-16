@@ -217,6 +217,8 @@ export type Uc5Status = {
     atrStopLossConfirmSec?: number;
     atrStopLossBreachSec?: number;
     atrStopLossConfirmRemainingSec?: number;
+    marginUsd?: number;
+    leverage?: number;
     updatedAt?: number;
   };
   agent?: {
