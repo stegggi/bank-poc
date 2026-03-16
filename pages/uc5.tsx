@@ -1609,6 +1609,9 @@ export default function Uc5Page() {
                 <Field label="maxSpreadBpsForTrade" help="Skip entries when live spread is wider than this." error={undefined}>
                   <input style={input} type="number" min={1} max={100} step={0.1} value={edit?.maxSpreadBpsForTrade ?? 12} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxSpreadBpsForTrade: Number(e.target.value) } : p))} />
                 </Field>
+                <Field label="tpMaxSpreadMult" help="TP spread guard: skip TP exit when spread > maxSpreadBps × this multiplier. Prevents fills on flash wicks." error={undefined}>
+                  <input style={input} type="number" min={1} max={20} step={0.5} value={edit?.tpMaxSpreadMult ?? 3} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, tpMaxSpreadMult: Number(e.target.value) } : p))} />
+                </Field>
                 <Field label="exitSpreadInsaneBps" help="Force market exit if spread exceeds this at exit." error={undefined}>
                   <input style={input} type="number" min={5} max={300} step={1} value={edit?.exitSpreadInsaneBps ?? 28} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, exitSpreadInsaneBps: Number(e.target.value) } : p))} />
                 </Field>

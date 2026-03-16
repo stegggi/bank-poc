@@ -57,6 +57,7 @@ export const Uc5ConfigSchema = z.object({
   smartEntryTimeoutMs: z.number().int().min(200).max(5000).default(900),
   orderGuardMs: z.number().int().min(200).max(5000).default(200),
   maxSpreadBpsForTrade: z.number().min(1).max(100).default(12),
+  tpMaxSpreadMult: z.number().min(1).max(20).default(3),
   exitSpreadInsaneBps: z.number().min(5).max(300).default(28),
   feeEstimateBps: z.number().min(0).max(100).default(3),
   slippageBufferBps: z.number().min(0).max(100).default(4),
