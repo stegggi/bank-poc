@@ -878,6 +878,10 @@ class DailyDbManager:
           elif oside == "SHORT":
             realized = (oprice - price) * oqty
 
+      # Net P&L: subtract fees to match exchange-reported closed P&L
+      if realized is not None and fees is not None:
+        realized = realized - float(fees)
+
       closed.append((ts_ms, realized))
       close_reasons.append(_classify_close_reason(tag, reason_json))
       if fees is not None:
@@ -911,8 +915,8 @@ class DailyDbManager:
       "realizedPnlToday": realized_24h,
       "totalFeesUsd": total_fees,
       "feesTodayUsd": fees_24h,
-      "netPnlTotal": (sum(pnls) - total_fees) if pnls else 0.0,
-      "netPnlToday": realized_24h - fees_24h,
+      "netPnlTotal": sum(pnls) if pnls else 0.0,
+      "netPnlToday": realized_24h,
       "avgSlippageBps": (sum(all_slippage) / len(all_slippage)) if all_slippage else None,
       "closedByConfidence": closed_by_confidence,
       "closedByRegimeEnd": closed_by_regime_end,
@@ -1026,7 +1030,7 @@ class DailyDbManager:
     for _, conn in self._iter_all_connections():
       cur = conn.execute(
         """
-        SELECT ts_ms, event_type, side, qty, price, entry_price, entry_ts, reason_json
+        SELECT ts_ms, event_type, side, qty, price, entry_price, entry_ts, reason_json, fees
         FROM trades
         WHERE event_type IN ('ENTRY', 'EXIT', 'FLATTEN')
         ORDER BY ts_ms ASC
@@ -1042,11 +1046,12 @@ class DailyDbManager:
           float(r[5]) if r[5] is not None else None,
           int(r[6]) if r[6] is not None else None,
           str(r[7]) if r[7] is not None else None,
+          float(r[8]) if r[8] is not None else None,
         ))
 
     rows.sort(key=lambda x: x[0])
     open_row: Optional[Dict[str, Any]] = None
-    for ts_ms, et, side, qty, price, entry_price, entry_ts, reason_json in rows:
+    for ts_ms, et, side, qty, price, entry_price, entry_ts, reason_json, fees in rows:
       if et == "ENTRY":
         open_row = {
           "ts_ms": ts_ms,
@@ -1056,6 +1061,7 @@ class DailyDbManager:
           "entry_price": entry_price if entry_price is not None else price,
           "entry_ts": entry_ts if entry_ts is not None else ts_ms,
           "reason_json": reason_json,
+          "fees": fees,
         }
       elif et in ("EXIT", "FLATTEN"):
         open_row = None
@@ -1089,7 +1095,7 @@ class DailyDbManager:
           "qty": float(r[5]) if r[5] is not None else None,
           "entry_price": float(r[6]) if r[6] is not None else None,
           "exit_price": float(r[7]) if r[7] is not None else None,
-          "pnl": float(r[8]) if r[8] is not None else None,
+          "pnl": (float(r[8]) - float(r[9])) if r[8] is not None and r[9] is not None else (float(r[8]) if r[8] is not None else None),
           "fees": float(r[9]) if r[9] is not None else None,
           "slippage_bps": float(r[10]) if r[10] is not None else None,
           "tag": str(r[11] or "") if r[11] else None,

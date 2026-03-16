@@ -3041,6 +3041,7 @@ async def main():
   current_trade_fixed_take_pct: Optional[float] = None
   current_trade_fixed_stop_price: Optional[float] = None
   current_trade_fixed_take_price: Optional[float] = None
+  current_trade_entry_fees: Optional[float] = None
   current_trade_stop_loss_is_atr: Optional[bool] = None
   atr_sl_breach_started_ms: Optional[int] = None
   # Restore entry price from DB in case bot restarted with an open position.
@@ -3050,6 +3051,7 @@ async def main():
     if _open_entry:
       current_trade_entry_price = _open_entry.get("entry_price")
       current_trade_entry_ts = _open_entry.get("entry_ts")
+      current_trade_entry_fees = _f(_open_entry.get("fees"))
       _entry_risk = _extract_entry_risk_from_reason(_open_entry.get("reason_json"))
       current_trade_entry_atr_pct = _entry_risk.get("entry_atr_pct")
       current_trade_fixed_stop_pct = _entry_risk.get("fixed_stop_pct")
@@ -3274,6 +3276,7 @@ async def main():
         current_trade_entry_price = None
         current_trade_mid_at_entry = None
         current_trade_entry_ts = None
+        current_trade_entry_fees = None
         current_trade_entry_atr_pct = None
         current_trade_fixed_stop_pct = None
         current_trade_fixed_take_pct = None
@@ -3464,6 +3467,7 @@ async def main():
                 expected_side=_exit_side_str(side),
               )
               _exit_fees = _fills_total_fees(_flatten_audit or {})
+              _total_fees = (current_trade_entry_fees or 0.0) + (_exit_fees or 0.0)
               _exit_slip = _slippage_bps(_exit_vwap, last_mid)
               px = float(_exit_vwap) if _exit_vwap else (float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None)
               pnl = _realized_pnl(side, current_trade_entry_price or position_state.entry_price, px, qty)
@@ -3481,7 +3485,7 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
-                fees=_exit_fees,
+                fees=_total_fees,
                 slippage_bps=_exit_slip,
                 mid_at_entry=current_trade_mid_at_entry,
                 mid_at_exit=float(last_mid) if last_mid else None,
@@ -3540,6 +3544,7 @@ async def main():
               expected_side=_exit_side_str(position_state.side),
             )
             _exit_fees = _fills_total_fees(_flatten_dis_audit or {})
+            _total_fees = (current_trade_entry_fees or 0.0) + (_exit_fees or 0.0)
             _exit_slip = _slippage_bps(_exit_vwap, last_mid)
             px = float(_exit_vwap) if _exit_vwap else (float(last_mid or position_state.entry_price or 0.0) if (last_mid or position_state.entry_price) else None)
             pnl = _realized_pnl(position_state.side, current_trade_entry_price or position_state.entry_price, px, position_state.qty)
@@ -3557,7 +3562,7 @@ async def main():
               exit_ts=now_ms,
               entry_price=current_trade_entry_price,
               exit_price=px,
-              fees=_exit_fees,
+              fees=_total_fees,
               slippage_bps=_exit_slip,
               mid_at_entry=current_trade_mid_at_entry,
               mid_at_exit=float(last_mid) if last_mid else None,
@@ -3693,6 +3698,7 @@ async def main():
                 expected_side=_exit_side_str(position_state.side),
               )
               _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
+              _total_fees = (current_trade_entry_fees or 0.0) + (_exit_fees or 0.0)
               _exit_slip = _slippage_bps(_exit_vwap, last_mid)
               if not _exit_vwap:
                 print(f"[WARN] EXIT_RISK: fills VWAP unavailable, falling back to last_mid={last_mid}")
@@ -3718,7 +3724,7 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
-                fees=_exit_fees,
+                fees=_total_fees,
                 slippage_bps=_exit_slip,
                 mid_at_entry=current_trade_mid_at_entry,
                 mid_at_exit=float(last_mid) if last_mid else None,
@@ -4066,6 +4072,7 @@ async def main():
                 current_trade_entry_price = entry_px
                 current_trade_mid_at_entry = float(last_mid) if last_mid else None
                 current_trade_entry_ts = etsf or now_ms
+                current_trade_entry_fees = _entry_fees
                 current_trade_entry_atr_pct = _f(entry_risk_state.entry_atr_pct)
                 current_trade_fixed_stop_pct = _f(entry_risk_state.fixed_stop_pct)
                 current_trade_fixed_take_pct = _f(entry_risk_state.fixed_take_pct)
@@ -4265,6 +4272,7 @@ async def main():
                 expected_side=_exit_side_str(position_state.side),
               )
               _exit_fees = _fills_total_fees(last_exit_fill_audit or {})
+              _total_fees = (current_trade_entry_fees or 0.0) + (_exit_fees or 0.0)
               _exit_slip = _slippage_bps(_exit_vwap, last_mid)
               if not _exit_vwap:
                 print(f"[WARN] EXIT_{regime_exit_reason}: fills VWAP unavailable, falling back to last_mid={last_mid}")
@@ -4293,7 +4301,7 @@ async def main():
                 exit_ts=now_ms,
                 entry_price=current_trade_entry_price,
                 exit_price=px,
-                fees=_exit_fees,
+                fees=_total_fees,
                 slippage_bps=_exit_slip,
                 mid_at_entry=current_trade_mid_at_entry,
                 mid_at_exit=float(last_mid) if last_mid else None,
