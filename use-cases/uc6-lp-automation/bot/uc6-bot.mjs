@@ -8629,6 +8629,7 @@ class Uc6Bot {
       activeCount: 0,
       totalUsdValue: 0,
       active: [],
+      deadTokenIds: [],
     };
 
     try {
@@ -8729,7 +8730,11 @@ class Uc6Bot {
             }
 
             const pos = this.parsePositionResult(posEntry.result);
-            if (!pos || pos.liquidity <= 0n) continue;
+            if (!pos) continue;
+            if (pos.liquidity <= 0n) {
+              inventory.deadTokenIds.push(tokenIdRaw.toString());
+              continue;
+            }
 
             let usdValue = 0;
             let inRange = null;
@@ -8803,6 +8808,57 @@ class Uc6Bot {
       inRange: typeof only.inRange === "boolean" ? only.inRange : this.state.position?.inRange ?? null,
       topUpsThisCycle: Number(this.state.position?.topUpsThisCycle || 0),
     };
+  }
+
+  async sweepDeadPositions() {
+    const inventory = this.state.latest?.positionInventory;
+    const deadIds = inventory?.deadTokenIds;
+    if (!Array.isArray(deadIds) || deadIds.length === 0) return;
+    const npm = this.slipstreamNpm;
+    const trackedTokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
+    let burned = 0;
+    for (const rawId of deadIds) {
+      if (String(rawId) === trackedTokenId) continue;
+      const id = BigInt(rawId);
+      try {
+        // Collect any remaining dust so burn can succeed
+        await this.assertTxAllowed("sweep_collect");
+        const collectHash = await this.walletClient.writeContract({
+          address: npm,
+          abi: NPM_POSITION_ABI,
+          functionName: "collect",
+          args: [{
+            tokenId: id,
+            recipient: this.account.address,
+            amount0Max: UINT128_MAX,
+            amount1Max: UINT128_MAX,
+          }],
+          account: this.account,
+        });
+        await this.publicClient.waitForTransactionReceipt({ hash: collectHash });
+
+        // Now burn the empty NFT
+        await this.assertTxAllowed("sweep_burn");
+        const burnHash = await this.walletClient.writeContract({
+          address: npm,
+          abi: NPM_POSITION_ABI,
+          functionName: "burn",
+          args: [id],
+          account: this.account,
+        });
+        await this.publicClient.waitForTransactionReceipt({ hash: burnHash });
+        burned += 1;
+        console.log(`[UC6] [sweep] Burned dead position NFT #${rawId}`);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err || "unknown");
+        console.warn(`[UC6] [sweep] Failed to burn dead position #${rawId}: ${redactSensitiveText(msg)}`);
+      }
+    }
+    if (burned > 0) {
+      this.pushEvent({ type: "action", reason: `sweep_burned_${burned}_dead_positions` });
+      // Refresh inventory after cleanup
+      await this.refreshOwnedSlipstreamPositionInventory().catch(() => {});
+    }
   }
 
   async maybeHarvestOnly() {
@@ -9562,6 +9618,15 @@ class Uc6Bot {
     await this.maybeRefreshPositionFromChain();
     await this.maybeRefreshPositionInventory();
     this.enforceSinglePositionInvariant();
+    // Sweep dead (0-liquidity) position NFTs every 30 minutes
+    if (!this._lastSweepAtMs || Date.now() - this._lastSweepAtMs > 30 * 60 * 1000) {
+      try {
+        await this.sweepDeadPositions();
+      } catch (err) {
+        console.warn("[UC6] [sweep] error:", err instanceof Error ? err.message : String(err));
+      }
+      this._lastSweepAtMs = Date.now();
+    }
     try {
       await this.repairLedgerAccounting();
     } catch (err) {
@@ -9998,6 +10063,7 @@ class Uc6Bot {
               activeCount: Number(positionInventory.activeCount || 0),
               totalUsdValue: Number(positionInventory.totalUsdValue || 0),
               active: Array.isArray(positionInventory.active) ? positionInventory.active.slice(0, 20) : [],
+              deadCount: Array.isArray(positionInventory.deadTokenIds) ? positionInventory.deadTokenIds.length : 0,
             }
           : null,
         lastDecision: this.state.lastDecision,
