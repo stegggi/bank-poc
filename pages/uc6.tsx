@@ -406,6 +406,7 @@ type Uc6Status = {
       useUncollectedFees?: boolean;
       allowCloseIfOutOfRange?: boolean;
       outOfRangeMaxSec?: number;
+      outOfRangeEmergencyMinSec?: number;
       outOfRangeEmergencyEdgePct?: number;
     };
     executionCaps?: {
@@ -2253,6 +2254,13 @@ export default function Uc6Page() {
                 alphaLiveUsd={alphaLiveUsd}
                 requiredUsd={requiredFeesToBeatHodlLiveUsd}
                 enabled={Boolean(hodlGateView?.enabled)}
+                outOfRangeDurationSec={n(hodlGateView?.outOfRangeDurationSec, 0)}
+                distanceBeyondEdgePct={n(hodlGateView?.distanceBeyondEdgePct, 0)}
+                outOfRangeMaxSec={n(status?.settings?.hodlGate?.outOfRangeMaxSec, 900)}
+                outOfRangeEmergencyMinSec={n(status?.settings?.hodlGate?.outOfRangeEmergencyMinSec, 60)}
+                outOfRangeEmergencyEdgePct={n(status?.settings?.hodlGate?.outOfRangeEmergencyEdgePct, 1.15)}
+                allowCloseIfOutOfRange={Boolean(status?.settings?.hodlGate?.allowCloseIfOutOfRange)}
+                inRange={inRange}
               />
             </Uc6Card>
           </div>
@@ -3229,9 +3237,28 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   );
 }
 
-function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _enabled }: {
+function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _enabled,
+  outOfRangeDurationSec, distanceBeyondEdgePct, outOfRangeMaxSec, outOfRangeEmergencyMinSec, outOfRangeEmergencyEdgePct, allowCloseIfOutOfRange, inRange,
+}: {
   allowed: boolean; reason: string; alphaLiveUsd: number; requiredUsd: number; enabled: boolean;
+  outOfRangeDurationSec: number; distanceBeyondEdgePct: number;
+  outOfRangeMaxSec: number; outOfRangeEmergencyMinSec: number; outOfRangeEmergencyEdgePct: number;
+  allowCloseIfOutOfRange: boolean; inRange: boolean;
 }) {
+  const isBlocked = !allowed;
+  const isOutOfRange = !inRange && outOfRangeDurationSec > 0;
+
+  // Override 1: out of range for outOfRangeMaxSec
+  const timeoutPct = isOutOfRange ? Math.min(100, (outOfRangeDurationSec / outOfRangeMaxSec) * 100) : 0;
+  const timeoutRemaining = Math.max(0, outOfRangeMaxSec - outOfRangeDurationSec);
+
+  // Override 2: emergency — out of range for emergencyMinSec AND beyond emergencyEdgePct
+  const emergencyTimePct = isOutOfRange ? Math.min(100, (outOfRangeDurationSec / outOfRangeEmergencyMinSec) * 100) : 0;
+  const emergencyTimeMet = outOfRangeDurationSec >= outOfRangeEmergencyMinSec;
+  const emergencyEdgeMet = distanceBeyondEdgePct >= outOfRangeEmergencyEdgePct;
+
+  const showOverrides = isBlocked && allowCloseIfOutOfRange && isOutOfRange;
+
   return (
     <div style={{ display:"grid", gap:8 }}>
       <div style={{ fontSize:14, fontWeight:800, color: allowed ? "#22c55e" : "#ef4444" }} title={reason}>
@@ -3246,6 +3273,61 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
           </div>
           <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
             <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, (alphaLiveUsd/requiredUsd)*100))}%`, borderRadius:3, background: alphaLiveUsd >= requiredUsd ? "#22c55e" : "#f59e0b" }} />
+          </div>
+        </div>
+      )}
+
+      {showOverrides && (
+        <div style={{ display:"grid", gap:8, marginTop:4, padding:"8px 0", borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+          <div style={{ fontSize:11, fontWeight:700, color:"rgba(232,232,240,0.6)", textTransform:"uppercase", letterSpacing:0.5 }}>
+            Out-of-range overrides
+          </div>
+
+          {/* Timeout override */}
+          <div style={{ display:"grid", gap:4 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
+              <span>Timeout ({fmtDurationCompact(outOfRangeMaxSec)})</span>
+              <span style={{ fontFamily:"monospace", color: timeoutPct >= 100 ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                {timeoutPct >= 100 ? "READY" : `${fmtDurationCompact(outOfRangeDurationSec)} / ${fmtDurationCompact(outOfRangeMaxSec)}`}
+              </span>
+            </div>
+            <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
+              <div style={{ height:"100%", width:`${timeoutPct}%`, borderRadius:3, background: timeoutPct >= 100 ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+            </div>
+          </div>
+
+          {/* Emergency override */}
+          <div style={{ display:"grid", gap:4 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
+              <span>Emergency</span>
+              <span style={{ fontFamily:"monospace", color: emergencyTimeMet && emergencyEdgeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                {emergencyTimeMet && emergencyEdgeMet ? "READY" : ""}
+              </span>
+            </div>
+            <div style={{ display:"flex", gap:12, fontSize:11 }}>
+              <div style={{ flex:1, display:"grid", gap:2 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", color:"rgba(232,232,240,0.45)" }}>
+                  <span>Time ({fmtDurationCompact(outOfRangeEmergencyMinSec)})</span>
+                  <span style={{ fontFamily:"monospace", color: emergencyTimeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                    {emergencyTimeMet ? "OK" : fmtDurationCompact(outOfRangeDurationSec)}
+                  </span>
+                </div>
+                <div style={{ height:4, borderRadius:2, background:"rgba(255,255,255,0.08)" }}>
+                  <div style={{ height:"100%", width:`${emergencyTimePct}%`, borderRadius:2, background: emergencyTimeMet ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+                </div>
+              </div>
+              <div style={{ flex:1, display:"grid", gap:2 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", color:"rgba(232,232,240,0.45)" }}>
+                  <span>Edge ({(outOfRangeEmergencyEdgePct * 100).toFixed(0)}%)</span>
+                  <span style={{ fontFamily:"monospace", color: emergencyEdgeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                    {(distanceBeyondEdgePct * 100).toFixed(1)}%
+                  </span>
+                </div>
+                <div style={{ height:4, borderRadius:2, background:"rgba(255,255,255,0.08)" }}>
+                  <div style={{ height:"100%", width:`${Math.min(100, (distanceBeyondEdgePct / outOfRangeEmergencyEdgePct) * 100)}%`, borderRadius:2, background: emergencyEdgeMet ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+                </div>
+              </div>
+            </div>
           </div>
         </div>
       )}

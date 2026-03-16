@@ -9460,7 +9460,7 @@ class Uc6Bot {
     }
 
     const hodlGate = this.evaluateHodlGateForClose();
-    if (!hodlGate.allowed) {
+    if (!forceRebalance && !hodlGate.allowed) {
       const harvested = await this.maybeHarvestOnly();
       if (harvested) return;
       const activeRec = this.getActiveLifecycleRecordInternal();
