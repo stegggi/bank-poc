@@ -4060,6 +4060,7 @@ class Uc6Bot {
       const rec = getRecordForToken(tokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
+        if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
         this.recomputeLifecycleRecordDerived(rec);
       }
     }
