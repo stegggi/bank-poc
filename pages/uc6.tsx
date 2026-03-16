@@ -445,6 +445,9 @@ type Uc6Status = {
     tickLower?: number | null;
     tickUpper?: number | null;
     centerTick?: number | null;
+    bandHalfBps?: number | null;
+    bandHalfBpsUp?: number | null;
+    bandHalfBpsDown?: number | null;
     inRange?: boolean;
     distanceToEdge?: { ticks?: number | null; pct?: number | null };
     liquidity?: string | null;
@@ -2005,6 +2008,8 @@ export default function Uc6Page() {
                 pairLabel={activePairLabel}
                 configuredBandHalfPct={configuredBandHalfPct}
                 entryAtIso={activeLpEntryAtIso}
+                posBandHalfBpsUp={status?.position?.bandHalfBpsUp ?? null}
+                posBandHalfBpsDown={status?.position?.bandHalfBpsDown ?? null}
               />
             </Uc6Card>
 
@@ -2578,7 +2583,7 @@ function SelectField({ label, value, onChange, options, disabled }: { label: str
   );
 }
 
-function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct, entryAtIso }: {
+function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct, entryAtIso, posBandHalfBpsUp, posBandHalfBpsDown }: {
   hasPosition: boolean;
   inRange: boolean;
   tickLower: number | null;
@@ -2590,6 +2595,8 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
   pairLabel: string;
   configuredBandHalfPct: number;
   entryAtIso?: string | null;
+  posBandHalfBpsUp?: number | null;
+  posBandHalfBpsDown?: number | null;
 }) {
   if (!hasPosition) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"20px 0", textAlign:"center" }}>No active LP position</div>;
 
@@ -2614,13 +2621,11 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
   const ticksToUpper = currentTick != null && tickUpper != null ? tickUpper - currentTick : null;
 
   const actualBandStr = (() => {
-    if (tickLower != null && tickUpper != null && currentTick != null) {
-      const log1_0001 = Math.log(1.0001);
-      const upPct = (Math.exp(log1_0001 * (tickUpper - currentTick)) - 1) * 100;
-      const downPct = (Math.exp(log1_0001 * (currentTick - tickLower)) - 1) * 100;
-      if (Math.abs(upPct - downPct) > 0.05) {
-        return `\u2191${upPct.toFixed(2)}% \u2193${downPct.toFixed(2)}%`;
-      }
+    // Show band width at mint (not live distance to edges)
+    if (posBandHalfBpsUp != null || posBandHalfBpsDown != null) {
+      const upPct = ((posBandHalfBpsUp ?? posBandHalfBpsDown!) / 100).toFixed(2);
+      const downPct = ((posBandHalfBpsDown ?? posBandHalfBpsUp!) / 100).toFixed(2);
+      return `\u2191${upPct}% \u2193${downPct}%`;
     }
     return bandHalfPct != null ? `\u00b1${bandHalfPct.toFixed(2)}%` : `\u00b1${configuredBandHalfPct.toFixed(2)}% (cfg)`;
   })();
