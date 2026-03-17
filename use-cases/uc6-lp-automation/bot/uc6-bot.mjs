@@ -3999,7 +3999,7 @@ class Uc6Bot {
       }
     } else if (type === "REBALANCE_START") {
       const closingTokenId = resolveTokenId(ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(closingTokenId, { create: false });
+      const rec = getRecordForToken(closingTokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         rec.activity.rebalances += 1;
@@ -4015,7 +4015,7 @@ class Uc6Bot {
       });
     } else if (type === "REBALANCE_CLOSE") {
       const tokenId = resolveTokenId(ev.details?.closedTokenId, ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(tokenId, { create: false });
+      const rec = getRecordForToken(tokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         this.addUniqueTxHashes(rec.tx.closeTxHashes, txHashes);
@@ -4033,7 +4033,7 @@ class Uc6Bot {
       }
     } else if (type === "CLOSE_POSITION_START") {
       const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(tokenId, { create: false });
+      const rec = getRecordForToken(tokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         this.applyLifecycleCloseContext(rec, {
@@ -4045,7 +4045,7 @@ class Uc6Bot {
       }
     } else if (type === "CLOSE_POSITION") {
       const tokenId = resolveTokenId(ev.details?.closedTokenId, ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(tokenId, { create: false });
+      const rec = getRecordForToken(tokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         this.applyLifecycleCloseContext(rec, {
@@ -4068,7 +4068,7 @@ class Uc6Bot {
       }
     } else if (type === "EXIT_SNAPSHOT") {
       const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(tokenId, { create: false });
+      const rec = getRecordForToken(tokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         this.ensureEntryBaselineBeforeClose(rec, { closeAtIso: ev.atIso || null });
