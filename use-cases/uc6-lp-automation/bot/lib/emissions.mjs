@@ -23,6 +23,7 @@ const CLGAUGE_ABI = parseAbi([
 ]);
 
 const ERC721_ABI = parseAbi([
+  "function ownerOf(uint256 tokenId) view returns (address)",
   "function getApproved(uint256 tokenId) view returns (address)",
   "function isApprovedForAll(address owner, address operator) view returns (bool)",
   "function approve(address to, uint256 tokenId)",
@@ -442,6 +443,7 @@ export async function unstakeNft(
   tokenId,
   account,
   log,
+  npmAddress,
 ) {
   const _log = log || (() => {});
   const tid = BigInt(tokenId);
@@ -491,11 +493,33 @@ export async function unstakeNft(
   const effectiveGasPrice = receipt.effectiveGasPrice ?? 0n;
   const gasCostWei = gasUsed * effectiveGasPrice;
 
+  // Verify NFT still exists after withdrawal (gauge may burn it)
+  let nftExists = false;
+  if (npmAddress && receipt.status === "success") {
+    try {
+      const owner = await publicClient.readContract({
+        address: npmAddress,
+        abi: ERC721_ABI,
+        functionName: "ownerOf",
+        args: [tid],
+      });
+      nftExists = owner?.toLowerCase() === accountAddress.toLowerCase();
+    } catch {
+      // ownerOf reverts for nonexistent tokens → NFT was burned by gauge
+      nftExists = false;
+    }
+    _log(nftExists ? "NFT confirmed owned after withdraw" : "⚠ NFT no longer exists after withdraw (gauge burned it)");
+  } else if (receipt.status === "success") {
+    // No npmAddress provided — assume NFT exists (backwards compat)
+    nftExists = true;
+  }
+
   return {
     txHash: withdrawTx,
     gasCostWei,
     aeroClaimed,
     success: receipt.status === "success",
+    nftExists,
   };
 }
 

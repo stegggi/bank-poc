@@ -213,6 +213,13 @@ const SLOT0_ABI_V6 = [
 
 const NPM_POSITION_ABI = [
   {
+    name: "ownerOf",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "tokenId", type: "uint256" }],
+    outputs: [{ type: "address" }],
+  },
+  {
     name: "balanceOf",
     type: "function",
     stateMutability: "view",
@@ -2219,6 +2226,7 @@ class Uc6Bot {
         em.stakedTokenId,
         this.account,
         (msg) => console.log(`[UC6] [emissions] ${msg}`),
+        this.slipstreamNpm,
       );
     } catch (unstakeErr) {
       const errMsg = unstakeErr instanceof Error ? unstakeErr.message : String(unstakeErr || "");
@@ -2241,6 +2249,12 @@ class Uc6Bot {
       em.staked = false;
       em.lastUnstakeAtIso = nowIso();
 
+      // If gauge burned the NFT during withdrawal, signal to caller
+      if (result.nftExists === false) {
+        console.log(`[UC6] [emissions] gauge burned NFT ${em.stakedTokenId} during withdraw — position already closed on-chain`);
+        this._nftBurnedByGauge = true;
+      }
+
       await this.appendLifecycleEvent(
         this.lifecycleCommonFields({
           type: "EMISSIONS_UNSTAKE",
@@ -2253,6 +2267,7 @@ class Uc6Bot {
             gaugeAddress,
             aeroClaimed: result.aeroClaimed,
             aeroPrice,
+            nftBurnedByGauge: result.nftExists === false,
           },
         }),
       ).catch((err) => this.setLastError(err));
@@ -7011,6 +7026,46 @@ class Uc6Bot {
 
     const id = BigInt(tokenId);
 
+    // If gauge burned the NFT during unstake, skip on-chain close ops
+    if (this._nftBurnedByGauge) {
+      this._nftBurnedByGauge = false;
+      console.log(`[UC6] closePosition: NFT ${tokenId} was burned by gauge — skipping on-chain close ops`);
+      // Still emit lifecycle event with zero accounting
+      const phaseCtx = this.lifecyclePhaseContext;
+      if (phaseCtx?.positionRunId && (phaseCtx.phase === "rebalance_close" || phaseCtx.phase === "final_close")) {
+        const lifecycleType = phaseCtx.phase === "final_close" ? "CLOSE_POSITION" : "REBALANCE_CLOSE";
+        await this.appendLifecycleEvent(
+          this.lifecycleCommonFields({
+            type: lifecycleType,
+            positionRunId: String(phaseCtx.positionRunId),
+            tokenId: tokenId,
+            band: phaseCtx.band || undefined,
+            txHashes: [],
+            accounting: { gasUsd: 0, mintBurnUsd: 0, feesCollectedUsd: 0, isEstimated: false },
+            details: { closedTokenId: String(tokenId), nftBurnedByGauge: true, principalOut: { usdc: 0, weth: 0 }, feesOut: { usdc: 0, weth: 0 } },
+          })
+        ).catch((err) => this.setLastError(err));
+        if (phaseCtx.phase === "final_close") {
+          await this.appendLifecycleEvent(
+            this.lifecycleCommonFields({
+              type: "EXIT_SNAPSHOT",
+              positionRunId: String(phaseCtx.positionRunId),
+              tokenId: tokenId,
+              txHashes: [],
+              details: { exitTokens: { usdc: 0, weth: 0 }, exitValueUsd: 0, spotPriceUsdcPerWeth: this.getSpotUsdcPerWeth(), nftBurnedByGauge: true },
+            })
+          ).catch((err) => this.setLastError(err));
+        }
+      }
+      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
+      if (this.state.emissions?.stakedTokenId === String(tokenId)) {
+        this.state.emissions.staked = false;
+        this.state.emissions.stakedTokenId = null;
+      }
+      await this.refreshOwnedSlipstreamPositionInventory().catch(() => {});
+      return { closedTokenId: String(tokenId), principalOut: { usdc: 0, weth: 0 }, feesOut: { usdc: 0, weth: 0, usd: 0 }, txHashes: [], nftBurnedByGauge: true };
+    }
+
     let posRaw;
     try {
       posRaw = await this.publicClient.readContract({
@@ -7026,6 +7081,25 @@ class Uc6Bot {
 
     const pos = this.parsePositionResult(posRaw);
     if (!pos) return;
+
+    // Defense-in-depth: verify NFT actually exists (positions() is a mapping read that succeeds for burned tokens)
+    try {
+      await this.publicClient.readContract({
+        address: npmAddress,
+        abi: NPM_POSITION_ABI,
+        functionName: "ownerOf",
+        args: [id],
+      });
+    } catch {
+      console.log(`[UC6] closePosition: NFT ${tokenId} does not exist on-chain (ownerOf reverted) — skipping close`);
+      this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
+      if (this.state.emissions?.stakedTokenId === String(tokenId)) {
+        this.state.emissions.staked = false;
+        this.state.emissions.stakedTokenId = null;
+      }
+      await this.refreshOwnedSlipstreamPositionInventory().catch(() => {});
+      return;
+    }
 
     const caps = this.getExecutionCapsConfig();
     const deadline = BigInt(Math.floor(Date.now() / 1000) + 600);
