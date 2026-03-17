@@ -2209,14 +2209,28 @@ class Uc6Bot {
     );
 
     const aeroPrice = em.aeroPrice?.aeroUsd || 0;
-    const result = await unstakeNft(
-      this.walletClient,
-      this.publicClient,
-      gaugeAddress,
-      em.stakedTokenId,
-      this.account,
-      (msg) => console.log(`[UC6] [emissions] ${msg}`),
-    );
+    let result;
+    try {
+      result = await unstakeNft(
+        this.walletClient,
+        this.publicClient,
+        gaugeAddress,
+        em.stakedTokenId,
+        this.account,
+        (msg) => console.log(`[UC6] [emissions] ${msg}`),
+      );
+    } catch (unstakeErr) {
+      const errMsg = unstakeErr instanceof Error ? unstakeErr.message : String(unstakeErr || "");
+      // If the gauge says "NA" — the NFT isn't staked there.
+      // Treat as success and clear the stale flag.
+      if (errMsg.includes('"NA"') || errMsg.includes('reason:\nNA') || errMsg.includes("NA")) {
+        console.log(`[UC6] [emissions] unstake got NA (not staked on-chain) — clearing stale flag`);
+        em.staked = false;
+        em.stakedTokenId = null;
+        return;
+      }
+      throw unstakeErr;
+    }
 
     if (result.success) {
       const gasUsd =
@@ -7182,6 +7196,12 @@ class Uc6Bot {
       }
     }
 
+    // Clear emissions staked state for the burned token (covers all close paths)
+    if (this.state.emissions?.stakedTokenId === String(tokenId)) {
+      this.state.emissions.staked = false;
+      this.state.emissions.stakedTokenId = null;
+    }
+
     return {
       closedTokenId: String(tokenId),
       principalOut,
@@ -9037,9 +9057,19 @@ class Uc6Bot {
         ...this.state.position,
         tokenId: null,
         bandHalfBps: null,
+        bandHalfBpsUp: null,
+        bandHalfBpsDown: null,
+        tickLower: null,
+        tickUpper: null,
+        centerTick: null,
         liquidity: null,
         inRange: null,
       };
+      // Clear emissions staked state for the burned token
+      if (this.state.emissions?.stakedTokenId === currentTokenId) {
+        this.state.emissions.staked = false;
+        this.state.emissions.stakedTokenId = null;
+      }
       closedExistingPosition = true;
     }
 
