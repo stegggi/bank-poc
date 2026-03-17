@@ -7262,6 +7262,9 @@ class Uc6Bot {
       this.state.emissions.stakedTokenId = null;
     }
 
+    // Refresh inventory so burned token is removed from cache immediately
+    await this.refreshOwnedSlipstreamPositionInventory().catch(() => {});
+
     return {
       closedTokenId: String(tokenId),
       principalOut,
@@ -9131,6 +9134,10 @@ class Uc6Bot {
         this.state.emissions.stakedTokenId = null;
       }
       closedExistingPosition = true;
+      // Invalidate stale inventory so enforceSinglePositionInvariant doesn't re-adopt the burned token
+      if (this.state.latest?.positionInventory) {
+        this.state.latest.positionInventory = { active: [], activeCount: 0, deadTokenIds: [], updatedAtIso: null };
+      }
     }
 
     // Do not force a full normalization leg on close; this creates avoidable churn.
@@ -9331,8 +9338,9 @@ class Uc6Bot {
 
     const token0 = snapshot.token0;
     const token1 = snapshot.token1;
-    const amount0Desired = sameAddress(token0, this.usdc) ? usdcToUse : wethToUse;
-    const amount1Desired = sameAddress(token1, this.usdc) ? usdcToUse : wethToUse;
+    // Apply 0.5% haircut to avoid STF revert from balance drift between simulation and broadcast
+    const amount0Desired = (sameAddress(token0, this.usdc) ? usdcToUse : wethToUse) * 995n / 1000n;
+    const amount1Desired = (sameAddress(token1, this.usdc) ? usdcToUse : wethToUse) * 995n / 1000n;
 
     await this.approveIfNeeded(token0, npm, amount0Desired);
     await this.approveIfNeeded(token1, npm, amount1Desired);
