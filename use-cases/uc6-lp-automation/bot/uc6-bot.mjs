@@ -4579,6 +4579,38 @@ class Uc6Bot {
     };
   }
 
+  summarizeLifecycleRecords() {
+    let feesUsd = 0;
+    let rewardsUsd = 0;
+    let gasUsd = 0;
+    let swapCostsUsd = 0;
+    let mintBurnUsd = 0;
+    let rebalances = 0;
+    for (const rec of Array.isArray(this.positionRecords) ? this.positionRecords : []) {
+      if (!rec?.performance) continue;
+      const perf = rec.performance;
+      feesUsd += Number(perf.feesCollectedUsd || 0);
+      rewardsUsd += Number(perf.rewardsUsd || 0);
+      gasUsd += Number(perf.gasUsd || 0);
+      swapCostsUsd += Number(perf.swapCostUsd || 0);
+      mintBurnUsd += Number(perf.mintBurnUsd || 0);
+      rebalances += Number(rec.activity?.rebalances || 0);
+    }
+    const totalCostsUsd = gasUsd + swapCostsUsd;
+    const netUsd = feesUsd + rewardsUsd - totalCostsUsd;
+    return {
+      feesUsd,
+      rewardsUsd,
+      gasUsd,
+      swapCostsUsd,
+      mintBurnUsd,
+      totalCostsUsd,
+      netUsd,
+      rebalances,
+      churnRatio: feesUsd > 0 ? totalCostsUsd / feesUsd : totalCostsUsd > 0 ? Number.POSITIVE_INFINITY : 0,
+    };
+  }
+
   estimateTrackedLpUsdValueFromLatest() {
     const latest = this.state.latest || {};
     const activePool = latest.primary || latest.fallback || null;
@@ -9806,7 +9838,7 @@ class Uc6Bot {
     const stats24h = this.summarizeEvents(events24h);
     const stats7d = this.summarizeEvents(events7d);
     const stats30d = this.summarizeEvents(events30d);
-    const statsAll = this.summarizeEvents(eventsAll);
+    const statsAll = this.summarizeLifecycleRecords();
     const bandPerformance = this.summarizeBandPerformance(eventsAll);
 
     const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
