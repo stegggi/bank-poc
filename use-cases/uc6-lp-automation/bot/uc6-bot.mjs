@@ -2142,6 +2142,7 @@ class Uc6Bot {
       await this.appendLifecycleEvent(
         this.lifecycleCommonFields({
           type: "EMISSIONS_STAKE",
+          positionRunId: this.state.activePositionRunId || undefined,
           tokenId,
           txHashes: result.txHashes,
           accounting: { gasUsd, isEstimated: false },
@@ -2243,6 +2244,7 @@ class Uc6Bot {
       await this.appendLifecycleEvent(
         this.lifecycleCommonFields({
           type: "EMISSIONS_UNSTAKE",
+          positionRunId: this.state.activePositionRunId || undefined,
           tokenId: em.stakedTokenId,
           txHashes: [result.txHash],
           accounting: { gasUsd, rewardsUsd, isEstimated: false },
@@ -2368,6 +2370,7 @@ class Uc6Bot {
               await this.appendLifecycleEvent(
                 this.lifecycleCommonFields({
                   type: "EMISSIONS_CLAIM",
+                  positionRunId: this.state.activePositionRunId || undefined,
                   tokenId: String(tokenId),
                   txHashes: [result.txHash],
                   accounting: {
@@ -4074,7 +4077,7 @@ class Uc6Bot {
       const rec = getRecordForToken(tokenId, { create: false });
       if (rec) {
         touchRecordCommon(rec);
-        if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
+        // accounting already applied by touchRecordCommon
         this.recomputeLifecycleRecordDerived(rec);
       }
     }
@@ -10643,6 +10646,7 @@ class Uc6Bot {
         await this.appendLifecycleEvent(
           this.lifecycleCommonFields({
             type: "EMISSIONS_CLAIM",
+            positionRunId: this.state.activePositionRunId || undefined,
             tokenId: String(tokenId),
             txHashes: [result.txHash],
             accounting: {
