@@ -3832,9 +3832,21 @@ class Uc6Bot {
 
   applyLifecycleEventToRecords(ev) {
     if (!ev || typeof ev !== "object") return;
-    const runId = String(ev.positionRunId || "");
-    if (!runId) return;
     const type = String(ev.type || "");
+    const runId = String(ev.positionRunId || "");
+    // Emissions events logged before the positionRunId fix lack a runId.
+    // Fall back to tokenId-based lookup so old events are still accounted for.
+    if (!runId) {
+      if ((type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") && ev.tokenId) {
+        const tokenId = String(ev.tokenId);
+        const rec = this.positionRecordsById.get(tokenId);
+        if (rec && ev.accounting) {
+          this.addAccountingToRecord(rec, ev.accounting);
+          this.recomputeLifecycleRecordDerived(rec);
+        }
+      }
+      return;
+    }
     const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes : [];
     const touchRecordCommon = (rec) => {
       if (!rec) return;
