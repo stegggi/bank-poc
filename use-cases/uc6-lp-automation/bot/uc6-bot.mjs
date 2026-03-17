@@ -3128,6 +3128,11 @@ class Uc6Bot {
       });
       this.positionRecordsById.set(id, rec);
       this.positionRecords.push(rec);
+      // Apply any buffered emissions accounting that arrived before this record existed
+      if (this._pendingEmissionsAccounting?.has(id)) {
+        this.addAccountingToRecord(rec, this._pendingEmissionsAccounting.get(id));
+        this._pendingEmissionsAccounting.delete(id);
+      }
     }
     return rec || null;
   }
@@ -3837,12 +3842,20 @@ class Uc6Bot {
     // Emissions events logged before the positionRunId fix lack a runId.
     // Fall back to tokenId-based lookup so old events are still accounted for.
     if (!runId) {
-      if ((type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") && ev.tokenId) {
+      if ((type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") && ev.tokenId && ev.accounting) {
         const tokenId = String(ev.tokenId);
         const rec = this.positionRecordsById.get(tokenId);
-        if (rec && ev.accounting) {
+        if (rec) {
           this.addAccountingToRecord(rec, ev.accounting);
           this.recomputeLifecycleRecordDerived(rec);
+        } else {
+          // Record doesn't exist yet (emissions event arrived before close event).
+          // Buffer the accounting and apply when the record is created.
+          if (!this._pendingEmissionsAccounting) this._pendingEmissionsAccounting = new Map();
+          const pending = this._pendingEmissionsAccounting.get(tokenId) || this.emptyLifecycleAccounting();
+          pending.rewardsUsd = (pending.rewardsUsd || 0) + Number(ev.accounting.rewardsUsd || 0);
+          pending.gasUsd = (pending.gasUsd || 0) + Number(ev.accounting.gasUsd || 0);
+          this._pendingEmissionsAccounting.set(tokenId, pending);
         }
       }
       return;
