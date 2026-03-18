@@ -2795,11 +2795,15 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   const [tab, setTab] = useState<"TODAY"|"7D"|"30D"|"ALL">("TODAY");
   const { isMobile: fwIsMobile } = useBreakpoint();
   const nLocal = (v: unknown, fb: number) => { const x = Number(v); return Number.isFinite(x) ? x : fb; };
+  // Active position's unrealized fees & rewards (not yet collected/claimed)
+  const liveFeesUsd = nLocal(st?.fees?.collectableNow?.usd, 0);
+  const liveRewardsUsd = nLocal(st?.emissions?.claimable?.usd, 0);
+  const liveTotal = liveFeesUsd + liveRewardsUsd;
   const data = {
-    TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0), rewards: nLocal(st?.fees?.rewardsTodayUsd,0), gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) },
-    "7D": { fees: nLocal(st?.fees?.collected7dUsd,0), rewards: nLocal(st?.fees?.rewards7dUsd,0), gas: nLocal(st?.costs?.gas7dUsd,0), swap: nLocal(st?.costs?.swapCosts7dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn7dUsd,0), net: nLocal(st?.pnl?.net7dUsd,0) },
-    "30D": { fees: nLocal(st?.fees?.collected30dUsd,0), rewards: nLocal(st?.fees?.rewards30dUsd,0), gas: nLocal(st?.costs?.gas30dUsd,0), swap: nLocal(st?.costs?.swapCosts30dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn30dUsd,0), net: nLocal(st?.pnl?.net30dUsd,0) },
-    ALL: { fees: nLocal(st?.fees?.collectedTotalUsd,0), rewards: nLocal(st?.fees?.rewardsTotalUsd,0), gas: nLocal(st?.costs?.gasTotalUsd,0), swap: nLocal(st?.costs?.swapCostsTotalUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTotalUsd,0), net: nLocal(st?.pnl?.netTotalUsd,0) },
+    TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0) + liveFeesUsd, rewards: nLocal(st?.fees?.rewardsTodayUsd,0) + liveRewardsUsd, gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) + liveTotal },
+    "7D": { fees: nLocal(st?.fees?.collected7dUsd,0) + liveFeesUsd, rewards: nLocal(st?.fees?.rewards7dUsd,0) + liveRewardsUsd, gas: nLocal(st?.costs?.gas7dUsd,0), swap: nLocal(st?.costs?.swapCosts7dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn7dUsd,0), net: nLocal(st?.pnl?.net7dUsd,0) + liveTotal },
+    "30D": { fees: nLocal(st?.fees?.collected30dUsd,0) + liveFeesUsd, rewards: nLocal(st?.fees?.rewards30dUsd,0) + liveRewardsUsd, gas: nLocal(st?.costs?.gas30dUsd,0), swap: nLocal(st?.costs?.swapCosts30dUsd,0), mintBurn: nLocal(st?.costs?.mintBurn30dUsd,0), net: nLocal(st?.pnl?.net30dUsd,0) + liveTotal },
+    ALL: { fees: nLocal(st?.fees?.collectedTotalUsd,0) + liveFeesUsd, rewards: nLocal(st?.fees?.rewardsTotalUsd,0) + liveRewardsUsd, gas: nLocal(st?.costs?.gasTotalUsd,0), swap: nLocal(st?.costs?.swapCostsTotalUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTotalUsd,0), net: nLocal(st?.pnl?.netTotalUsd,0) + liveTotal },
   }[tab];
   const maxVal = Math.max(data.fees + data.rewards, data.gas + data.swap + data.mintBurn, Math.abs(data.net), 0.01);
   const barRow = (lbl: string, val: number, color: string) => (

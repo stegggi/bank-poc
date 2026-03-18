@@ -2298,6 +2298,8 @@ class Uc6Bot {
       ).catch((err) => this.setLastError(err));
 
       em.stakedTokenId = null;
+      // Clear stale claimable (AERO was just claimed during withdraw)
+      em.claimable = { aero: 0, updatedAtIso: nowIso() };
       console.log(
         `[UC6] [emissions] unstaked for ${reason}, aeroClaimed=${result.aeroClaimed.toFixed(4)}, gasUsd=${gasUsd.toFixed(4)}`,
       );
@@ -7144,6 +7146,8 @@ class Uc6Bot {
         weth: Number(latestLpTokens.weth || 0),
       };
       console.log(`[UC6] closePosition: NFT burned — accounting fees=$${burnedFees.usd.toFixed(4)} principal=$${estimatedPrincipalUsd.toFixed(2)}`);
+      // Record fees in active action so push event (for TODAY/7D/30D stats) includes them
+      this.addFeesToActiveAction(burnedFees.usd);
       const phaseCtx = this.lifecyclePhaseContext;
       if (phaseCtx?.positionRunId && (phaseCtx.phase === "rebalance_close" || phaseCtx.phase === "final_close")) {
         const lifecycleType = phaseCtx.phase === "final_close" ? "CLOSE_POSITION" : "REBALANCE_CLOSE";
