@@ -3938,6 +3938,21 @@ class Uc6Bot {
       return rec;
     };
 
+    // Backfill feesCollectedUsd from ev.details.feesOut for historical close events that recorded 0
+    if ((type === "REBALANCE_CLOSE" || type === "CLOSE_POSITION") &&
+        Number(ev.accounting?.feesCollectedUsd || 0) === 0 &&
+        ev.details?.feesOut && typeof ev.details.feesOut === "object") {
+      const feesOut = ev.details.feesOut;
+      const feesUsdc = Number(feesOut.usdc || 0);
+      const feesWeth = Number(feesOut.weth || 0);
+      const spot = Number(ev.spotPriceUsdcPerWeth || 0) || (this.getSpotUsdcPerWeth() || 0);
+      const backfilledFeesUsd = feesUsdc + feesWeth * spot;
+      if (backfilledFeesUsd > 0) {
+        if (!ev.accounting) ev.accounting = {};
+        ev.accounting.feesCollectedUsd = backfilledFeesUsd;
+      }
+    }
+
     if (type === "OPEN_POSITION") {
       const pending = this.getOrCreatePendingOpenForRun(runId, {
         openedAtIso: ev.atIso,
