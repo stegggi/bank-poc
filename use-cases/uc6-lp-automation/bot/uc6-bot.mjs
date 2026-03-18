@@ -2216,7 +2216,14 @@ class Uc6Bot {
       `[UC6] [emissions] unstaking tokenId=${em.stakedTokenId} before ${reason}`,
     );
 
-    const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+    let aeroPrice = em.aeroPrice?.aeroUsd || 0;
+    if (!aeroPrice) {
+      try {
+        em.aeroPrice = await fetchAeroPrice(this.settings);
+        aeroPrice = em.aeroPrice?.aeroUsd || 0;
+        if (aeroPrice) console.log(`[UC6] [emissions] force-refreshed AERO price=$${aeroPrice.toFixed(4)} before unstake`);
+      } catch {}
+    }
     let result;
     try {
       result = await unstakeNft(
@@ -2353,7 +2360,10 @@ class Uc6Bot {
       em.gaugeAddress &&
       em.claimable
     ) {
-      const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      let aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      if (!aeroPrice) {
+        try { em.aeroPrice = await fetchAeroPrice(this.settings); aeroPrice = em.aeroPrice?.aeroUsd || 0; } catch {}
+      }
       const claimableUsd = (em.claimable.aero || 0) * aeroPrice;
       const cooldownOk =
         !em.lastClaimAtIso ||
@@ -3858,6 +3868,15 @@ class Uc6Bot {
     // Fall back to tokenId-based lookup so old events are still accounted for.
     if (!runId) {
       if ((type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") && ev.tokenId && ev.accounting) {
+        // Backfill rewardsUsd from raw AERO if it was 0 at emission time
+        if ((type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_CLAIM") &&
+            Number(ev.accounting.rewardsUsd || 0) === 0 &&
+            Number(ev.details?.aeroClaimed || 0) > 0) {
+          const currentAeroPrice = Number(ev.details?.aeroPrice || 0) || (this.state.emissions?.aeroPrice?.aeroUsd || 0);
+          if (currentAeroPrice > 0) {
+            ev.accounting.rewardsUsd = Number(ev.details.aeroClaimed) * currentAeroPrice;
+          }
+        }
         const tokenId = String(ev.tokenId);
         const rec = this.positionRecordsById.get(tokenId);
         if (rec) {
@@ -4113,8 +4132,18 @@ class Uc6Bot {
         this.lifecycleCurrentTokenByRunId.delete(runId);
       }
     } else if (type === "EMISSIONS_CLAIM" || type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_STAKE") {
+      // Backfill rewardsUsd from raw AERO if it was 0 (price was unavailable at emission time)
+      if ((type === "EMISSIONS_UNSTAKE" || type === "EMISSIONS_CLAIM") &&
+          Number(ev.accounting?.rewardsUsd || 0) === 0 &&
+          Number(ev.details?.aeroClaimed || 0) > 0) {
+        const currentAeroPrice = Number(ev.details?.aeroPrice || 0) || (this.state.emissions?.aeroPrice?.aeroUsd || 0);
+        if (currentAeroPrice > 0) {
+          if (!ev.accounting) ev.accounting = {};
+          ev.accounting.rewardsUsd = Number(ev.details.aeroClaimed) * currentAeroPrice;
+        }
+      }
       const tokenId = resolveTokenId(ev.tokenId, currentTokenId);
-      const rec = getRecordForToken(tokenId, { create: false });
+      const rec = getRecordForToken(tokenId, { create: true });
       if (rec) {
         touchRecordCommon(rec);
         // accounting already applied by touchRecordCommon
@@ -7022,6 +7051,18 @@ class Uc6Bot {
       } catch (err) {
         console.warn("[UC6] [emissions] auto-unstake before close failed:", sanitizeErrorMessage(err));
       }
+      // After unstake, position is no longer staked — re-snapshot fees using simulate path
+      // (more accurate than the staked feeGrowth estimate used pre-unstake)
+      if (!this._nftBurnedByGauge && Number(feeBreakdownOverride?.usd || feeValueOverrideUsd || 0) < 0.001) {
+        try {
+          const fresh = await this.collectableNowSnapshot();
+          if (Number(fresh.usd || 0) > Number(feeBreakdownOverride?.usd || 0)) {
+            feeBreakdownOverride = fresh;
+            feeValueOverrideUsd = Number(fresh.usd || 0);
+            console.log(`[UC6] closePosition: re-snapshotted fees post-unstake: $${feeValueOverrideUsd.toFixed(4)}`);
+          }
+        } catch {}
+      }
     }
 
     const id = BigInt(tokenId);
@@ -7030,7 +7071,23 @@ class Uc6Bot {
     if (this._nftBurnedByGauge) {
       this._nftBurnedByGauge = false;
       console.log(`[UC6] closePosition: NFT ${tokenId} was burned by gauge — skipping on-chain close ops`);
-      // Still emit lifecycle event with zero accounting
+      // Use pre-close fee estimate (captured before unstake) instead of hardcoding 0
+      const burnedFees = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
+        ? { usdc: Math.max(0, Number(feeBreakdownOverride.usdc || 0)),
+            weth: Math.max(0, Number(feeBreakdownOverride.weth || 0)),
+            usd: Math.max(0, Number(feeBreakdownOverride.usd || 0)) }
+        : { usdc: 0, weth: 0, usd: 0 };
+      // Estimate principal from tracked LP value (gauge returned tokens during withdraw)
+      const spot = this.getSpotUsdcPerWeth();
+      const trackedLpUsd = this.estimateTrackedLpUsdValueFromLatest() || 0;
+      const estimatedPrincipalUsd = Math.max(0, trackedLpUsd - burnedFees.usd);
+      // Best-effort principal breakdown from latest position snapshot
+      const latestLpTokens = this.state.latest?.lpTokens || {};
+      const principalOut = {
+        usdc: Number(latestLpTokens.usdc || 0),
+        weth: Number(latestLpTokens.weth || 0),
+      };
+      console.log(`[UC6] closePosition: NFT burned — accounting fees=$${burnedFees.usd.toFixed(4)} principal=$${estimatedPrincipalUsd.toFixed(2)}`);
       const phaseCtx = this.lifecyclePhaseContext;
       if (phaseCtx?.positionRunId && (phaseCtx.phase === "rebalance_close" || phaseCtx.phase === "final_close")) {
         const lifecycleType = phaseCtx.phase === "final_close" ? "CLOSE_POSITION" : "REBALANCE_CLOSE";
@@ -7041,18 +7098,19 @@ class Uc6Bot {
             tokenId: tokenId,
             band: phaseCtx.band || undefined,
             txHashes: [],
-            accounting: { gasUsd: 0, mintBurnUsd: 0, feesCollectedUsd: 0, isEstimated: false },
-            details: { closedTokenId: String(tokenId), nftBurnedByGauge: true, principalOut: { usdc: 0, weth: 0 }, feesOut: { usdc: 0, weth: 0 } },
+            accounting: { gasUsd: 0, mintBurnUsd: 0, feesCollectedUsd: burnedFees.usd, isEstimated: true },
+            details: { closedTokenId: String(tokenId), nftBurnedByGauge: true, principalOut, feesOut: { usdc: burnedFees.usdc, weth: burnedFees.weth } },
           })
         ).catch((err) => this.setLastError(err));
         if (phaseCtx.phase === "final_close") {
+          const exitValueUsd = principalOut.usdc + principalOut.weth * spot;
           await this.appendLifecycleEvent(
             this.lifecycleCommonFields({
               type: "EXIT_SNAPSHOT",
               positionRunId: String(phaseCtx.positionRunId),
               tokenId: tokenId,
               txHashes: [],
-              details: { exitTokens: { usdc: 0, weth: 0 }, exitValueUsd: 0, spotPriceUsdcPerWeth: this.getSpotUsdcPerWeth(), nftBurnedByGauge: true },
+              details: { exitTokens: principalOut, exitValueUsd, spotPriceUsdcPerWeth: spot, nftBurnedByGauge: true },
             })
           ).catch((err) => this.setLastError(err));
         }
@@ -7063,7 +7121,7 @@ class Uc6Bot {
         this.state.emissions.stakedTokenId = null;
       }
       await this.refreshOwnedSlipstreamPositionInventory().catch(() => {});
-      return { closedTokenId: String(tokenId), principalOut: { usdc: 0, weth: 0 }, feesOut: { usdc: 0, weth: 0, usd: 0 }, txHashes: [], nftBurnedByGauge: true };
+      return { closedTokenId: String(tokenId), principalOut, feesOut: burnedFees, txHashes: [], nftBurnedByGauge: true };
     }
 
     let posRaw;
@@ -10767,7 +10825,10 @@ class Uc6Bot {
         return jsonResponse(res, 409, { error: "No token ID for claim" });
       }
 
-      const aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      let aeroPrice = em.aeroPrice?.aeroUsd || 0;
+      if (!aeroPrice) {
+        try { em.aeroPrice = await fetchAeroPrice(this.settings); aeroPrice = em.aeroPrice?.aeroUsd || 0; } catch {}
+      }
       const result = await claimAeroRewards(
         this.walletClient,
         this.publicClient,
