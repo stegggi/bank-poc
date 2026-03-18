@@ -62,8 +62,12 @@ type Uc6DraftSettings = {
   regimeMaxBandAdjBps: number;
   regimeMaxBandNarrowBps: number;
   regimeMaxCooldownAdjSec: number;
+  hodlGateEnabled: boolean;
   trendEscapeEnabled: boolean;
   trendEscapeMinRegimeConfidence: number;
+  trendEscapeMinEdgeProgressToConsider: number;
+  trendEscapeBaseConfirmSec: number;
+  trendEscapeUrgencyThreshold: number;
   trendEscapeDirectionLookbackSec: number;
   trendEscapeMinTrendMovePct: number;
   trendEscapeMinTrendConfirmSec: number;
@@ -128,11 +132,17 @@ type OwnerPayload = {
     maxBandNarrowBps: number;
     maxCooldownAdjSec: number;
   };
+  hodlGate: {
+    enabled: boolean;
+  };
   trendEscape: {
     enabled: boolean;
-    variant: "hybrid";
+    variant: "tiered" | "hybrid";
     requireRegimeLabel: "trending";
     minRegimeConfidence: number;
+    minEdgeProgressToConsider: number;
+    baseConfirmSec: number;
+    urgencyThreshold: number;
     directionLookbackSec: number;
     minTrendMovePct: number;
     minTrendConfirmSec: number;
@@ -380,6 +390,9 @@ type Uc6Status = {
       variant?: string;
       requireRegimeLabel?: string;
       minRegimeConfidence?: number;
+      minEdgeProgressToConsider?: number;
+      baseConfirmSec?: number;
+      urgencyThreshold?: number;
       directionLookbackSec?: number;
       minTrendMovePct?: number;
       minTrendConfirmSec?: number;
@@ -555,6 +568,26 @@ type Uc6Status = {
     holdTargetIfEscape?: string | null;
     reasonIfBlocked?: string;
     cooldownUntilIso?: string | null;
+    urgency?: number | null;
+    diagnostics?: {
+      edgeProgress?: number;
+      regimeConfidence?: number;
+      trendMovePct?: number;
+      actualConfirmSec?: number;
+      requiredConfirmSec?: number;
+      edgeProgressNorm?: number;
+      confidenceNorm?: number;
+      trendMagnitudeNorm?: number;
+      confirmProgressNorm?: number;
+      urgency?: number;
+      urgencyThreshold?: number;
+      alphaLiveUsd?: number;
+      minAlphaUsdToEscape?: number;
+      alphaOk?: boolean;
+      emergencyAllowed?: boolean;
+      minEdgeProgressToConsider?: number;
+      baseConfirmSec?: number;
+    } | null;
   };
   reEntry?: {
     enabled?: boolean;
@@ -802,14 +835,18 @@ function defaultDraft(): Uc6DraftSettings {
     regimeMaxBandAdjBps: 50,
     regimeMaxBandNarrowBps: 20,
     regimeMaxCooldownAdjSec: 900,
+    hodlGateEnabled: false,
     trendEscapeEnabled: true,
-    trendEscapeMinRegimeConfidence: 0.6,
-    trendEscapeDirectionLookbackSec: 600,
-    trendEscapeMinTrendMovePct: 0.004,
-    trendEscapeMinTrendConfirmSec: 120,
-    trendEscapeCooldownAfterEscapeSec: 3600,
-    trendEscapeMinAlphaUsdToEscape: 0,
-    trendEscapeEmergencyOutOfRangeEdgePct: 1.15,
+    trendEscapeMinRegimeConfidence: 0.45,
+    trendEscapeMinEdgeProgressToConsider: 0.6,
+    trendEscapeBaseConfirmSec: 300,
+    trendEscapeUrgencyThreshold: 0.7,
+    trendEscapeDirectionLookbackSec: 300,
+    trendEscapeMinTrendMovePct: 0.01,
+    trendEscapeMinTrendConfirmSec: 60,
+    trendEscapeCooldownAfterEscapeSec: 600,
+    trendEscapeMinAlphaUsdToEscape: -5,
+    trendEscapeEmergencyOutOfRangeEdgePct: 1.5,
     trendEscapeEmergencyMinOutOfRangeSec: 120,
     trendEscapeUptrendHold: "WETH",
     trendEscapeDowntrendHold: "USDC",
@@ -837,6 +874,7 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
   const reserveMax = n(settings.reservePolicy?.maxUsdc ?? settings.reserveMaxUsdc, d.reserveMaxUsdc);
   const churnEnabled = Boolean(settings.churnProtection?.enabled ?? settings.churnProtectionEnabled ?? d.churnProtectionEnabled);
   const churnRatio = n(settings.churnProtection?.maxCostToFeeRatio ?? settings.churnMaxCostToFeeRatio, d.churnMaxCostToFeeRatio / 100);
+  const hodlGate = settings.hodlGate || {};
   const regime = settings.regime || {};
   const trendEscape = settings.trendEscape || {};
   const reEntry = settings.reEntry || {};
@@ -885,8 +923,12 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     regimeMaxBandAdjBps: n(regime.maxBandAdjBps, d.regimeMaxBandAdjBps),
     regimeMaxBandNarrowBps: n(regime.maxBandNarrowBps, d.regimeMaxBandNarrowBps),
     regimeMaxCooldownAdjSec: n(regime.maxCooldownAdjSec, d.regimeMaxCooldownAdjSec),
+    hodlGateEnabled: Boolean(hodlGate.enabled ?? d.hodlGateEnabled),
     trendEscapeEnabled: Boolean(trendEscape.enabled ?? d.trendEscapeEnabled),
     trendEscapeMinRegimeConfidence: n(trendEscape.minRegimeConfidence, d.trendEscapeMinRegimeConfidence),
+    trendEscapeMinEdgeProgressToConsider: n(trendEscape.minEdgeProgressToConsider, d.trendEscapeMinEdgeProgressToConsider),
+    trendEscapeBaseConfirmSec: n(trendEscape.baseConfirmSec, d.trendEscapeBaseConfirmSec),
+    trendEscapeUrgencyThreshold: n(trendEscape.urgencyThreshold, d.trendEscapeUrgencyThreshold),
     trendEscapeDirectionLookbackSec: n(trendEscape.directionLookbackSec, d.trendEscapeDirectionLookbackSec),
     trendEscapeMinTrendMovePct: n(trendEscape.minTrendMovePct, d.trendEscapeMinTrendMovePct),
     trendEscapeMinTrendConfirmSec: n(trendEscape.minTrendConfirmSec, d.trendEscapeMinTrendConfirmSec),
@@ -974,11 +1016,17 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
       maxBandNarrowBps: draft.regimeMaxBandNarrowBps,
       maxCooldownAdjSec: draft.regimeMaxCooldownAdjSec,
     },
+    hodlGate: {
+      enabled: draft.hodlGateEnabled,
+    },
     trendEscape: {
       enabled: draft.trendEscapeEnabled,
-      variant: "hybrid",
+      variant: "tiered",
       requireRegimeLabel: "trending",
       minRegimeConfidence: draft.trendEscapeMinRegimeConfidence,
+      minEdgeProgressToConsider: draft.trendEscapeMinEdgeProgressToConsider,
+      baseConfirmSec: draft.trendEscapeBaseConfirmSec,
+      urgencyThreshold: draft.trendEscapeUrgencyThreshold,
       directionLookbackSec: draft.trendEscapeDirectionLookbackSec,
       minTrendMovePct: draft.trendEscapeMinTrendMovePct,
       minTrendConfirmSec: draft.trendEscapeMinTrendConfirmSec,
@@ -2222,6 +2270,8 @@ export default function Uc6Page() {
                 cooldownUntilIso={trendEscapeView?.cooldownUntilIso ?? null}
                 trendDirection={trendView?.direction ?? "flat"}
                 trendMovePct={trendMovePct}
+                urgency={trendEscapeView?.urgency ?? null}
+                diagnostics={(trendEscapeView?.diagnostics as Record<string, unknown>) ?? null}
               />
             </Uc6Card>
 
@@ -2399,12 +2449,23 @@ export default function Uc6Page() {
                 </div>
               </details>
 
-              {/* Section 3: Trend Escape */}
+              {/* Section 3: HODL Gate */}
+              <details>
+                <summary style={cmdSectionStyle}>HODL GATE</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="hodlGate.enabled" value={draft.hodlGateEnabled ? "true" : "false"} onChange={(v) => updateBool("hodlGateEnabled", v === "true")} options={["false", "true"]} />
+                </div>
+              </details>
+
+              {/* Section 4: Trend Escape */}
               <details>
                 <summary style={cmdSectionStyle}>TREND ESCAPE</summary>
                 <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
                   <SelectField label="trendEscape.enabled" value={draft.trendEscapeEnabled ? "true" : "false"} onChange={(v) => updateBool("trendEscapeEnabled", v === "true")} options={["false", "true"]} />
                   <NumberField label="trendEscape.minRegimeConfidence" value={draft.trendEscapeMinRegimeConfidence} step="0.01" onChange={(v) => updateNumber("trendEscapeMinRegimeConfidence", v)} />
+                  <NumberField label="trendEscape.minEdgeProgressToConsider" value={draft.trendEscapeMinEdgeProgressToConsider} step="0.05" onChange={(v) => updateNumber("trendEscapeMinEdgeProgressToConsider", v)} />
+                  <NumberField label="trendEscape.baseConfirmSec" value={draft.trendEscapeBaseConfirmSec} step="10" onChange={(v) => updateNumber("trendEscapeBaseConfirmSec", v)} />
+                  <NumberField label="trendEscape.urgencyThreshold" value={draft.trendEscapeUrgencyThreshold} step="0.05" onChange={(v) => updateNumber("trendEscapeUrgencyThreshold", v)} />
                   <NumberField label="trendEscape.directionLookbackSec" value={draft.trendEscapeDirectionLookbackSec} onChange={(v) => updateNumber("trendEscapeDirectionLookbackSec", v)} />
                   <NumberField label="trendEscape.minTrendMovePct" value={draft.trendEscapeMinTrendMovePct} step="0.0001" onChange={(v) => updateNumber("trendEscapeMinTrendMovePct", v)} />
                   <NumberField label="trendEscape.minTrendConfirmSec" value={draft.trendEscapeMinTrendConfirmSec} onChange={(v) => updateNumber("trendEscapeMinTrendConfirmSec", v)} />
@@ -2418,7 +2479,7 @@ export default function Uc6Page() {
                 </div>
               </details>
 
-              {/* Section 4: Re-Entry */}
+              {/* Section 5: Re-Entry */}
               <details>
                 <summary style={cmdSectionStyle}>RE-ENTRY</summary>
                 <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
@@ -3132,11 +3193,13 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
   );
 }
 
-function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, cooldownUntilIso, trendDirection, trendMovePct }: {
+function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, cooldownUntilIso, trendDirection, trendMovePct, urgency, diagnostics }: {
   enabled: boolean; eligible: boolean; holdTarget: string|null; reasonIfBlocked: string|null; cooldownUntilIso: string|null; trendDirection: string; trendMovePct: number|null;
+  urgency: number|null; diagnostics: Record<string, unknown>|null;
 }) {
   if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
   const borderColor = eligible ? "#22c55e" : "transparent";
+  const diag = diagnostics as any;
   return (
     <div style={{ border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px", display:"grid", gap:8 }}>
       <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "rgba(232,232,240,0.5)" }}>
@@ -3144,8 +3207,27 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
       </div>
       {eligible && holdTarget && <Uc6Metric label="Hold target" value={holdTarget} />}
       {!eligible && reasonIfBlocked && <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reasonIfBlocked}</div>}
+      {urgency != null && (
+        <div style={{ display:"grid", gap:4 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
+            <span>Urgency</span>
+            <span style={{ fontFamily:"monospace" }}>{(urgency * 100).toFixed(1)}% / {((diag?.urgencyThreshold ?? 0.7) * 100).toFixed(0)}%</span>
+          </div>
+          <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, urgency * 100))}%`, borderRadius:3, background: urgency >= (diag?.urgencyThreshold ?? 0.7) ? "#22c55e" : "#f59e0b" }} />
+          </div>
+        </div>
+      )}
+      {diag && (
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+          <Uc6Metric label="Edge progress" value={`${((diag.edgeProgress ?? 0) * 100).toFixed(1)}%`} />
+          <Uc6Metric label="Confidence" value={`${((diag.regimeConfidence ?? 0) * 100).toFixed(1)}%`} />
+          <Uc6Metric label="Confirm" value={`${diag.actualConfirmSec ?? 0}s / ${diag.requiredConfirmSec ?? 0}s`} />
+          <Uc6Metric label="Trend move" value={`${((diag.trendMovePct ?? 0) * 100).toFixed(2)}%`} />
+        </div>
+      )}
       {cooldownUntilIso && <Uc6Metric label="Cooldown until" value={fmtIsoLocal(cooldownUntilIso)} />}
-      {trendDirection !== "flat" && (
+      {!diag && trendDirection !== "flat" && (
         <Uc6Metric label="Trend" value={`${trendDirection} ${trendMovePct != null ? `${trendMovePct > 0 ? "+" : ""}${trendMovePct.toFixed(2)}%` : ""}`} />
       )}
     </div>

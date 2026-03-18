@@ -26,6 +26,9 @@ type TrendEscapeSettingsPayload = {
   variant?: string;
   requireRegimeLabel?: string;
   minRegimeConfidence?: number;
+  minEdgeProgressToConsider?: number;
+  baseConfirmSec?: number;
+  urgencyThreshold?: number;
   directionLookbackSec?: number;
   minTrendMovePct?: number;
   minTrendConfirmSec?: number;
@@ -435,9 +438,12 @@ const HODL_GATE_SETTING_RULES: Record<keyof Required<HodlGateSettingsPayload>, S
 
 const TREND_ESCAPE_SETTING_RULES: Record<keyof Required<TrendEscapeSettingsPayload>, SettingRule> = {
   enabled: { type: "boolean" },
-  variant: { type: "string", enum: ["hybrid"] },
+  variant: { type: "string", enum: ["hybrid", "tiered"] },
   requireRegimeLabel: { type: "string", enum: ["trending", "mean_reverting"] },
   minRegimeConfidence: { type: "number", min: 0, max: 1 },
+  minEdgeProgressToConsider: { type: "number", min: 0.2, max: 0.95 },
+  baseConfirmSec: { type: "number", min: 30, max: 3600 },
+  urgencyThreshold: { type: "number", min: 0.3, max: 1.0 },
   directionLookbackSec: { type: "number", min: 30, max: 86_400 },
   minTrendMovePct: { type: "number", min: 0, max: 1 },
   minTrendConfirmSec: { type: "number", min: 5, max: 86_400 },

@@ -625,7 +625,7 @@ const DEFAULT_SETTINGS = {
     maxCooldownAdjSec: 900,
   },
   hodlGate: {
-    enabled: true,
+    enabled: false,
     marginUsd: 0.1,
     useUncollectedFees: true,
     allowCloseIfOutOfRange: true,
@@ -635,15 +635,18 @@ const DEFAULT_SETTINGS = {
   },
   trendEscape: {
     enabled: true,
-    variant: "hybrid",
+    variant: "tiered",
     requireRegimeLabel: "trending",
-    minRegimeConfidence: 0.6,
-    directionLookbackSec: 600,
-    minTrendMovePct: 0.004,
-    minTrendConfirmSec: 120,
-    cooldownAfterEscapeSec: 3600,
-    minAlphaUsdToEscape: 0,
-    emergencyOutOfRangeEdgePct: 1.15,
+    minRegimeConfidence: 0.45,
+    minEdgeProgressToConsider: 0.6,
+    baseConfirmSec: 300,
+    urgencyThreshold: 0.7,
+    directionLookbackSec: 300,
+    minTrendMovePct: 0.01,
+    minTrendConfirmSec: 60,
+    cooldownAfterEscapeSec: 600,
+    minAlphaUsdToEscape: -5,
+    emergencyOutOfRangeEdgePct: 1.5,
     emergencyMinOutOfRangeSec: 120,
     uptrendHold: "WETH",
     downtrendHold: "USDC",
@@ -966,13 +969,28 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
     },
     trendEscape: {
       enabled: toBool(srcTrendEscape.enabled, baseTrendEscape.enabled),
-      variant: "hybrid",
+      variant: "tiered",
       requireRegimeLabel:
         srcTrendEscape.requireRegimeLabel === "mean_reverting" ? "mean_reverting" : "trending",
       minRegimeConfidence: clamp(
         toNumber(srcTrendEscape.minRegimeConfidence, baseTrendEscape.minRegimeConfidence),
         0,
         1
+      ),
+      minEdgeProgressToConsider: clamp(
+        toNumber(srcTrendEscape.minEdgeProgressToConsider, baseTrendEscape.minEdgeProgressToConsider ?? 0.6),
+        0.2,
+        0.95
+      ),
+      baseConfirmSec: clamp(
+        Math.round(toNumber(srcTrendEscape.baseConfirmSec, baseTrendEscape.baseConfirmSec ?? 300)),
+        30,
+        3600
+      ),
+      urgencyThreshold: clamp(
+        toNumber(srcTrendEscape.urgencyThreshold, baseTrendEscape.urgencyThreshold ?? 0.7),
+        0.3,
+        1.0
       ),
       directionLookbackSec: clamp(
         Math.round(toNumber(srcTrendEscape.directionLookbackSec, baseTrendEscape.directionLookbackSec)),
@@ -5415,9 +5433,12 @@ class Uc6Bot {
         : DEFAULT_SETTINGS.trendEscape;
     return {
       enabled: Boolean(cfg.enabled),
-      variant: "hybrid",
+      variant: "tiered",
       requireRegimeLabel: cfg.requireRegimeLabel === "mean_reverting" ? "mean_reverting" : "trending",
       minRegimeConfidence: clamp(Number(cfg.minRegimeConfidence || 0), 0, 1),
+      minEdgeProgressToConsider: clamp(Number(cfg.minEdgeProgressToConsider || 0.6), 0.2, 0.95),
+      baseConfirmSec: clamp(Math.round(Number(cfg.baseConfirmSec || 300)), 30, 3600),
+      urgencyThreshold: clamp(Number(cfg.urgencyThreshold || 0.7), 0.3, 1.0),
       directionLookbackSec: clamp(Math.round(Number(cfg.directionLookbackSec || 0)), 30, 86_400),
       minTrendMovePct: clamp(Number(cfg.minTrendMovePct || 0), 0, 1),
       minTrendConfirmSec: clamp(Math.round(Number(cfg.minTrendConfirmSec || 0)), 5, 86_400),
@@ -8354,6 +8375,28 @@ class Uc6Bot {
     };
   }
 
+  computeEscapeUrgency({ edgeProgressNorm, confidenceNorm, trendMagnitudeNorm, confirmProgressNorm }) {
+    const clamp01 = (v) => Math.min(1, Math.max(0, Number(v) || 0));
+    const W_EDGE  = 0.35;
+    const W_CONF  = 0.25;
+    const W_TREND = 0.20;
+    const W_TIME  = 0.20;
+    const weighted =
+      W_EDGE  * clamp01(edgeProgressNorm) +
+      W_CONF  * clamp01(confidenceNorm) +
+      W_TREND * clamp01(trendMagnitudeNorm) +
+      W_TIME  * clamp01(confirmProgressNorm);
+    // Multiplicative floor: if any signal is near zero, dampen the total.
+    const minSignal = Math.min(
+      clamp01(edgeProgressNorm),
+      clamp01(confidenceNorm),
+      clamp01(trendMagnitudeNorm),
+      clamp01(confirmProgressNorm)
+    );
+    const dampenFactor = minSignal < 0.15 ? minSignal / 0.15 : 1.0;
+    return clamp01(weighted * dampenFactor);
+  }
+
   buildTrendEscapeEvaluation(primary, trendCtx, { tradingAllowed = true } = {}) {
     const cfg = this.getTrendEscapeSettings();
     const mode = this.getStrategyMode();
@@ -8365,50 +8408,103 @@ class Uc6Bot {
       Number(hodl.distanceBeyondEdgePct || 0) >= cfg.emergencyOutOfRangeEdgePct;
     let holdTarget = cfg.fallbackHold;
     if (trendCtx?.direction === "up") holdTarget = cfg.uptrendHold;
-    else if (trendCtx?.direction === "down") holdTarget = cfg.downtrendHold;
+    if (trendCtx?.direction === "down") holdTarget = cfg.downtrendHold;
 
-    let eligible = true;
+    const mkBlocked = (reason, diag = null) => ({
+      enabled: cfg.enabled,
+      eligible: false,
+      holdTargetIfEscape: holdTarget,
+      reasonIfBlocked: reason,
+      cooldownUntilIso: this.state.reEntryCooldownUntilIso || null,
+      cooldownRemainingSec,
+      emergencyAllowed,
+      hodlSnapshot: hodl,
+      urgency: null,
+      diagnostics: diag,
+    });
+
+    // Hard prerequisites
+    if (!cfg.enabled) return mkBlocked("disabled");
+    if (this.settings.venue === "uniswapv3") return mkBlocked("venue_read_only");
+    if (mode !== "LP_ACTIVE") return mkBlocked(`mode_${mode.toLowerCase()}`);
+    if (!this.state.position?.tokenId) return mkBlocked("no_active_lp");
+    if (!tradingAllowed) return mkBlocked("trading_blocked");
+    if (cooldownRemainingSec > 0) return mkBlocked("reentry_cooldown");
+    if (!this.settings?.regime?.enabled) return mkBlocked("regime_disabled");
+
+    // Tier 1: Regime label + confidence floor
+    const regimeLabel = String(trendCtx?.regimeLabel || "unknown");
+    const regimeConfidence = Number(trendCtx?.regimeConfidence || 0);
+    if (regimeLabel !== cfg.requireRegimeLabel) return mkBlocked("regime_label_mismatch");
+    if (regimeConfidence < cfg.minRegimeConfidence) return mkBlocked("regime_confidence_below_floor");
+
+    // Tier 2: Edge progress gate
+    const edgeProgress = this.getPositionDistanceMetrics(
+      Number(primary?.tick ?? this.state.latest?.primary?.tick ?? 0)
+    ).edgeProgress || 0;
+    if (edgeProgress < cfg.minEdgeProgressToConsider) {
+      return mkBlocked("edge_progress_too_low", {
+        edgeProgress, minRequired: cfg.minEdgeProgressToConsider, regimeConfidence,
+      });
+    }
+
+    // Tier 3: Trend magnitude
+    const trendMovePct = Number(trendCtx?.trendMovePct || 0);
+    if (!Number.isFinite(trendMovePct)) return mkBlocked("trend_move_unavailable");
+    if (Math.abs(trendMovePct) < cfg.minTrendMovePct) {
+      return mkBlocked("trend_move_too_small", {
+        trendMovePct, minRequired: cfg.minTrendMovePct, edgeProgress, regimeConfidence,
+      });
+    }
+
+    // Tier 3b: Confidence-scaled confirm timer
+    const requiredConfirmSec = Math.max(5, Math.round(cfg.baseConfirmSec * (1 - regimeConfidence)));
+    const actualConfirmSec = Number(trendCtx?.trendingConfirmSec || 0);
+
+    // Tier 3c: Composite urgency score
+    const edgeRange = 1 - cfg.minEdgeProgressToConsider;
+    const edgeProgressNorm = edgeRange > 0
+      ? Math.min(1, Math.max(0, (edgeProgress - cfg.minEdgeProgressToConsider) / edgeRange))
+      : 0;
+    const confRange = 1 - cfg.minRegimeConfidence;
+    const confidenceNorm = confRange > 0
+      ? Math.min(1, Math.max(0, (regimeConfidence - cfg.minRegimeConfidence) / confRange))
+      : 0;
+    const trendMagnitudeNorm = cfg.minTrendMovePct > 0
+      ? Math.min(1, Math.abs(trendMovePct) / (cfg.minTrendMovePct * 3))
+      : (Math.abs(trendMovePct) > 0 ? 1 : 0);
+    const confirmProgressNorm = requiredConfirmSec > 0
+      ? Math.min(1, actualConfirmSec / requiredConfirmSec)
+      : (actualConfirmSec > 0 ? 1 : 0);
+
+    const urgency = this.computeEscapeUrgency({
+      edgeProgressNorm, confidenceNorm, trendMagnitudeNorm, confirmProgressNorm,
+    });
+
+    // Alpha gate
+    const alphaLiveUsd = Number(hodl.alphaLiveUsd || 0);
+    const alphaOk = alphaLiveUsd >= cfg.minAlphaUsdToEscape || emergencyAllowed;
+
+    // Final decision
+    const meetsUrgency = urgency >= cfg.urgencyThreshold;
+    const eligible = meetsUrgency && alphaOk;
     let reasonIfBlocked = "ok";
-    if (!cfg.enabled) {
-      eligible = false;
-      reasonIfBlocked = "disabled";
-    } else if (this.settings.venue === "uniswapv3") {
-      eligible = false;
-      reasonIfBlocked = "venue_read_only";
-    } else if (mode !== "LP_ACTIVE") {
-      eligible = false;
-      reasonIfBlocked = `mode_${mode.toLowerCase()}`;
-    } else if (!this.state.position?.tokenId) {
-      eligible = false;
-      reasonIfBlocked = "no_active_lp";
-    } else if (!tradingAllowed) {
-      eligible = false;
-      reasonIfBlocked = "trading_blocked";
-    } else if (cooldownRemainingSec > 0) {
-      eligible = false;
-      reasonIfBlocked = "reentry_cooldown";
-    } else if (!this.settings?.regime?.enabled) {
-      eligible = false;
-      reasonIfBlocked = "regime_disabled";
-    } else if (String(trendCtx?.regimeLabel || "unknown") !== cfg.requireRegimeLabel) {
-      eligible = false;
-      reasonIfBlocked = "regime_label_mismatch";
-    } else if (Number(trendCtx?.regimeConfidence || 0) < cfg.minRegimeConfidence) {
-      eligible = false;
-      reasonIfBlocked = "regime_confidence_low";
-    } else if (!Number.isFinite(Number(trendCtx?.trendMovePct))) {
-      eligible = false;
-      reasonIfBlocked = "trend_move_unavailable";
-    } else if (!(Math.abs(Number(trendCtx?.trendMovePct || 0)) >= cfg.minTrendMovePct)) {
-      eligible = false;
-      reasonIfBlocked = "trend_move_too_small";
-    } else if (Number(trendCtx?.trendingConfirmSec || 0) < cfg.minTrendConfirmSec) {
-      eligible = false;
-      reasonIfBlocked = "trend_not_confirmed";
-    } else if (!(Number(hodl.alphaLiveUsd || 0) >= cfg.minAlphaUsdToEscape || emergencyAllowed)) {
-      eligible = false;
+    if (!meetsUrgency) {
+      reasonIfBlocked = `urgency_${urgency.toFixed(3)}_below_${cfg.urgencyThreshold.toFixed(2)}`;
+    } else if (!alphaOk) {
       reasonIfBlocked = "alpha_gate";
     }
+
+    const diagnostics = {
+      edgeProgress, regimeConfidence, trendMovePct,
+      actualConfirmSec, requiredConfirmSec,
+      edgeProgressNorm, confidenceNorm, trendMagnitudeNorm, confirmProgressNorm,
+      urgency, urgencyThreshold: cfg.urgencyThreshold,
+      alphaLiveUsd, minAlphaUsdToEscape: cfg.minAlphaUsdToEscape, alphaOk,
+      emergencyAllowed,
+      minEdgeProgressToConsider: cfg.minEdgeProgressToConsider,
+      baseConfirmSec: cfg.baseConfirmSec,
+    };
 
     return {
       enabled: cfg.enabled,
@@ -8419,6 +8515,8 @@ class Uc6Bot {
       cooldownRemainingSec,
       emergencyAllowed,
       hodlSnapshot: hodl,
+      urgency,
+      diagnostics,
     };
   }
 
@@ -10259,6 +10357,8 @@ class Uc6Bot {
         holdTargetIfEscape: trendEscapeEval.holdTargetIfEscape || null,
         reasonIfBlocked: String(trendEscapeEval.reasonIfBlocked || "ok"),
         cooldownUntilIso: trendEscapeEval.cooldownUntilIso || null,
+        urgency: trendEscapeEval.urgency != null ? Number(trendEscapeEval.urgency) : null,
+        diagnostics: trendEscapeEval.diagnostics || null,
       },
       reEntry: {
         enabled: Boolean(reEntryEval.enabled),
