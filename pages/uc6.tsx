@@ -587,6 +587,9 @@ type Uc6Status = {
       emergencyAllowed?: boolean;
       minEdgeProgressToConsider?: number;
       baseConfirmSec?: number;
+      approachingSide?: "upper" | "lower" | null;
+      upperHalfWidth?: number;
+      lowerHalfWidth?: number;
     } | null;
   };
   reEntry?: {
@@ -1262,6 +1265,41 @@ function actualBandHalfPctFromTicks(tickLower?: number | null, tickUpper?: numbe
   return (ratioHalf - 1) * 100;
 }
 
+function bandSidesFromTicks(
+  tickLower?: number | null, tickUpper?: number | null, centerTick?: number | null
+): { upPct: number | null; downPct: number | null } {
+  const lower = Number(tickLower);
+  const upper = Number(tickUpper);
+  const rawCenter = Number(centerTick);
+  const center = Number.isFinite(rawCenter) ? rawCenter
+    : Number.isFinite(lower) && Number.isFinite(upper) ? Math.round((lower + upper) / 2) : NaN;
+  if (!(Number.isFinite(lower) && Number.isFinite(upper) && Number.isFinite(center) && upper > lower)) {
+    return { upPct: null, downPct: null };
+  }
+  const upTicks = upper - center;
+  const downTicks = center - lower;
+  const upPct = (Math.exp(Math.log(1.0001) * upTicks) - 1) * 100;
+  const downPct = (1 - Math.exp(-Math.log(1.0001) * downTicks)) * 100;
+  return {
+    upPct: Number.isFinite(upPct) ? upPct : null,
+    downPct: Number.isFinite(downPct) ? downPct : null,
+  };
+}
+
+function formatBandLabelDirectional(
+  tickLower?: number | null, tickUpper?: number | null,
+  centerTick?: number | null, fallbackBandHalfBps?: number
+): string {
+  const { upPct, downPct } = bandSidesFromTicks(tickLower, tickUpper, centerTick);
+  if (upPct != null && downPct != null) {
+    const ratio = Math.min(upPct, downPct) / Math.max(upPct, downPct);
+    if (ratio < 0.9) return `+${upPct.toFixed(1)}% / \u2212${downPct.toFixed(1)}%`;
+    return `\u00b1${((upPct + downPct) / 2).toFixed(2)}%`;
+  }
+  if (fallbackBandHalfBps != null) return `\u00b1${(fallbackBandHalfBps / 100).toFixed(2)}%`;
+  return "\u2014";
+}
+
 function formatRecordBandLabel(record: Pick<PositionLifecycleRecord, "band">): string {
   const hasAsym = record.band?.bandHalfBpsUp != null || record.band?.bandHalfBpsDown != null;
   if (hasAsym) {
@@ -1269,6 +1307,9 @@ function formatRecordBandLabel(record: Pick<PositionLifecycleRecord, "band">): s
     const downPct = ((record.band?.bandHalfBpsDown ?? record.band?.bandHalfBps ?? 0) / 100).toFixed(2);
     return `\u2191${upPct}% \u2193${downPct}%`;
   }
+  // Try direction-aware from ticks
+  const dir = formatBandLabelDirectional(record.band?.tickLower, record.band?.tickUpper, null, undefined);
+  if (dir !== "\u2014") return dir;
   const actualPct = actualBandHalfPctFromTicks(record.band?.tickLower, record.band?.tickUpper);
   if (actualPct != null) return `\u00b1${fmtPct(actualPct)}`;
   return `\u00b1${(n(record.band?.bandHalfBps, 0) / 100).toFixed(2)}%`;
@@ -2059,6 +2100,7 @@ export default function Uc6Page() {
                 entryAtIso={activeLpEntryAtIso}
                 posBandHalfBpsUp={status?.position?.bandHalfBpsUp ?? null}
                 posBandHalfBpsDown={status?.position?.bandHalfBpsDown ?? null}
+                centerTick={status?.position?.centerTick ?? null}
               />
             </Uc6Card>
 
@@ -2652,7 +2694,7 @@ function SelectField({ label, value, onChange, options, disabled }: { label: str
   );
 }
 
-function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct, entryAtIso, posBandHalfBpsUp, posBandHalfBpsDown }: {
+function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTick, spotPrice, bandHalfPct, timeInRangePct, pairLabel: pairLbl, configuredBandHalfPct, entryAtIso, posBandHalfBpsUp, posBandHalfBpsDown, centerTick }: {
   hasPosition: boolean;
   inRange: boolean;
   tickLower: number | null;
@@ -2666,6 +2708,7 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
   entryAtIso?: string | null;
   posBandHalfBpsUp?: number | null;
   posBandHalfBpsDown?: number | null;
+  centerTick?: number | null;
 }) {
   if (!hasPosition) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"20px 0", textAlign:"center" }}>No active LP position</div>;
 
@@ -2696,6 +2739,9 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
       const downPct = ((posBandHalfBpsDown ?? posBandHalfBpsUp!) / 100).toFixed(2);
       return `\u2191${upPct}% \u2193${downPct}%`;
     }
+    // Direction-aware from ticks + centerTick
+    const dirLabel = formatBandLabelDirectional(tickLower, tickUpper, centerTick, undefined);
+    if (dirLabel !== "\u2014") return dirLabel;
     return bandHalfPct != null ? `\u00b1${bandHalfPct.toFixed(2)}%` : `\u00b1${configuredBandHalfPct.toFixed(2)}% (cfg)`;
   })();
 
@@ -3224,7 +3270,7 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
       )}
       {diag && (
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
-          <Uc6Metric label="Edge progress" value={`${((diag.edgeProgress ?? 0) * 100).toFixed(1)}%`} />
+          <Uc6Metric label="Edge progress" value={`${((diag.edgeProgress ?? 0) * 100).toFixed(1)}%${diag.approachingSide ? ` (${diag.approachingSide})` : ""}`} />
           <Uc6Metric label="Confidence" value={`${((diag.regimeConfidence ?? 0) * 100).toFixed(1)}%`} />
           <Uc6Metric label="Confirm" value={`${diag.actualConfirmSec ?? 0}s / ${diag.requiredConfirmSec ?? 0}s`} />
           <Uc6Metric label="Trend move" value={`${((diag.trendMovePct ?? 0) * 100).toFixed(2)}%`} />

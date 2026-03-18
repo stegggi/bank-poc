@@ -8084,9 +8084,14 @@ class Uc6Bot {
       return { trigger: true, reason: "out_of_range", edgeProgress: 1 };
     }
 
-    const halfWidth = Math.max(1, Math.abs(upper - center));
+    // Direction-aware edge progress
+    const approachingSide = currentTick >= center ? "upper" : "lower";
+    const relevantHalfWidth = approachingSide === "upper"
+      ? Math.max(1, upper - center)
+      : Math.max(1, center - lower);
     const distance = Math.abs(currentTick - center);
-    const edgeProgress = distance / halfWidth;
+    const edgeProgress = distance / relevantHalfWidth;
+
     const edgeThreshold = Number.isFinite(Number(overrides.edgeRebalancePct))
       ? Number(overrides.edgeRebalancePct)
       : this.settings.edgeRebalancePct;
@@ -8240,15 +8245,27 @@ class Uc6Bot {
         outOfRange: false,
         edgeProgress: 0,
         distanceBeyondEdgePct: 0,
+        approachingSide: null,
+        upperHalfWidth: 0,
+        lowerHalfWidth: 0,
       };
     }
-    const halfWidth = Math.max(1, Math.abs(upper - center));
-    const edgeProgress = Math.abs(currentTick - center) / halfWidth;
     const outOfRange = currentTick <= lower || currentTick >= upper;
+    // Direction-aware: measure distance against the edge price is approaching,
+    // not always the upper side. Critical for asymmetric bands.
+    const approachingSide = currentTick >= center ? "upper" : "lower";
+    const upperHalfWidth = Math.max(1, upper - center);
+    const lowerHalfWidth = Math.max(1, center - lower);
+    const relevantHalfWidth = approachingSide === "upper" ? upperHalfWidth : lowerHalfWidth;
+    const distance = Math.abs(currentTick - center);
+    const edgeProgress = distance / relevantHalfWidth;
     return {
       outOfRange,
       edgeProgress,
       distanceBeyondEdgePct: outOfRange ? edgeProgress : 0,
+      approachingSide,
+      upperHalfWidth,
+      lowerHalfWidth,
     };
   }
 
@@ -8443,9 +8460,11 @@ class Uc6Bot {
     if (regimeConfidence < cfg.minRegimeConfidence) return mkBlocked("regime_confidence_below_floor");
 
     // Tier 2: Edge progress gate
-    const edgeProgress = this.getPositionDistanceMetrics(
+    const distMetrics = this.getPositionDistanceMetrics(
       Number(primary?.tick ?? this.state.latest?.primary?.tick ?? 0)
-    ).edgeProgress || 0;
+    );
+    const edgeProgress = distMetrics.edgeProgress || 0;
+    const approachingSide = distMetrics.approachingSide || null;
     if (edgeProgress < cfg.minEdgeProgressToConsider) {
       return mkBlocked("edge_progress_too_low", {
         edgeProgress, minRequired: cfg.minEdgeProgressToConsider, regimeConfidence,
@@ -8508,6 +8527,9 @@ class Uc6Bot {
       emergencyAllowed,
       minEdgeProgressToConsider: cfg.minEdgeProgressToConsider,
       baseConfirmSec: cfg.baseConfirmSec,
+      approachingSide,
+      upperHalfWidth: distMetrics.upperHalfWidth,
+      lowerHalfWidth: distMetrics.lowerHalfWidth,
     };
 
     return {
