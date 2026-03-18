@@ -4563,6 +4563,8 @@ class Uc6Bot {
     if (this.state.activePositionRunId) return String(this.state.activePositionRunId);
     const runId = randomUUID();
     this.state.activePositionRunId = runId;
+    // Reset fee high-water mark for new position
+    if (this.state.latest) this.state.latest._collectableHighWater = { usdc: 0, weth: 0, usd: 0 };
     const band = this.currentBandDescriptor();
     const plannedBandHalfBps = Number.isFinite(Number(bandHalfBpsOverride))
       ? Number(bandHalfBpsOverride)
@@ -5321,6 +5323,16 @@ class Uc6Bot {
     }
     try {
       this.state.latest.collectableNow = await this.collectableNowSnapshot();
+      // Track high-water mark of collectable fees (used as floor when NFT is burned by gauge)
+      const hwm = this.state.latest._collectableHighWater || { usdc: 0, weth: 0, usd: 0 };
+      const nowUsd = Number(this.state.latest.collectableNow?.usd || 0);
+      if (nowUsd > Number(hwm.usd || 0)) {
+        this.state.latest._collectableHighWater = {
+          usdc: Number(this.state.latest.collectableNow.usdc || 0),
+          weth: Number(this.state.latest.collectableNow.weth || 0),
+          usd: nowUsd,
+        };
+      }
     } catch (err) {
       this.setLastError(err);
       const prev = this.state.latest?.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
@@ -7068,7 +7080,7 @@ class Uc6Bot {
       }
       // After unstake, position is no longer staked — re-snapshot fees using simulate path
       // (more accurate than the staked feeGrowth estimate used pre-unstake)
-      if (!this._nftBurnedByGauge && Number(feeBreakdownOverride?.usd || feeValueOverrideUsd || 0) < 0.001) {
+      if (!this._nftBurnedByGauge) {
         try {
           const fresh = await this.collectableNowSnapshot();
           if (Number(fresh.usd || 0) > Number(feeBreakdownOverride?.usd || 0)) {
@@ -7077,6 +7089,14 @@ class Uc6Bot {
             console.log(`[UC6] closePosition: re-snapshotted fees post-unstake: $${feeValueOverrideUsd.toFixed(4)}`);
           }
         } catch {}
+      } else {
+        // NFT burned by gauge — can't re-snapshot. Use high-water mark as floor.
+        const hwm = this.state.latest?._collectableHighWater;
+        if (hwm && Number(hwm.usd || 0) > Number(feeBreakdownOverride?.usd || 0)) {
+          feeBreakdownOverride = { usdc: Number(hwm.usdc || 0), weth: Number(hwm.weth || 0), usd: Number(hwm.usd || 0) };
+          feeValueOverrideUsd = Number(hwm.usd || 0);
+          console.log(`[UC6] closePosition: NFT burned — using fee high-water mark: $${feeValueOverrideUsd.toFixed(4)}`);
+        }
       }
     }
 
