@@ -8948,17 +8948,24 @@ class Uc6Bot {
         details: closeResult || {},
       });
 
-      const walletSnapshot = this.state.latest?.wallet;
-      const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(Number(walletSnapshot?.valuesUsd?.total || 0));
-      await this.rebalanceWalletToTargetMix({
-        snapshot: primary,
-        router: this.slipstreamRouter,
-        target: holdTarget,
-        maxSwaps: 1,
-        reserveUsdc: holdTarget === "WETH" ? reserveTargetUsdc : 0,
-        eventType: "TREND_ESCAPE_HOLD_SWAP",
-        positionRunId: runId,
-      });
+      // Hold swap: best-effort — if it fails, the escape still succeeded (LP is closed)
+      let swapOk = true;
+      try {
+        const walletSnapshot = this.state.latest?.wallet;
+        const reserveTargetUsdc = this.getEffectiveReserveTargetUsdc(Number(walletSnapshot?.valuesUsd?.total || 0));
+        await this.rebalanceWalletToTargetMix({
+          snapshot: primary,
+          router: this.slipstreamRouter,
+          target: holdTarget,
+          maxSwaps: 1,
+          reserveUsdc: holdTarget === "WETH" ? reserveTargetUsdc : 0,
+          eventType: "TREND_ESCAPE_HOLD_SWAP",
+          positionRunId: runId,
+        });
+      } catch (swapErr) {
+        console.warn(`[UC6] [trend_escape] hold swap failed (non-fatal): ${swapErr?.message || swapErr}`);
+        swapOk = false;
+      }
       const holdStartedAtIso = nowIso();
       this.setStrategyModeState(holdMode, {
         holdStartedAtIso,
@@ -8975,15 +8982,17 @@ class Uc6Bot {
         holdTarget,
         trendMovePct: Number(trendCtx?.trendMovePct || 0),
         alphaLiveUsd: Number(escapeEval?.hodlSnapshot?.alphaLiveUsd || 0),
+        swapOk,
       });
       await this.refreshWalletBalancesHeavy().catch((err) => this.setLastError(err));
       this.finalizeActiveAction("trend_escape", "trend_escape", {
         mode: holdMode,
         holdTarget,
+        swapOk,
       });
       await this.appendStrategyLifecycleEvent("TREND_ESCAPE_DONE", {
         positionRunId: runId,
-        details: { mode: holdMode, holdTarget },
+        details: { mode: holdMode, holdTarget, swapOk },
       });
       return true;
     } catch (err) {
