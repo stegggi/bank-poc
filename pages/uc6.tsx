@@ -1270,7 +1270,7 @@ function bandSidesFromTicks(
 ): { upPct: number | null; downPct: number | null } {
   const lower = Number(tickLower);
   const upper = Number(tickUpper);
-  const rawCenter = Number(centerTick);
+  const rawCenter = centerTick != null ? Number(centerTick) : NaN;
   const center = Number.isFinite(rawCenter) ? rawCenter
     : Number.isFinite(lower) && Number.isFinite(upper) ? Math.round((lower + upper) / 2) : NaN;
   if (!(Number.isFinite(lower) && Number.isFinite(upper) && Number.isFinite(center) && upper > lower)) {
