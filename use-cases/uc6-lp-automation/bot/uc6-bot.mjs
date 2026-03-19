@@ -97,6 +97,7 @@ const SETTINGS_PATH = path.join(ENV.dataDir, "settings.json");
 const STATE_PATH = path.join(ENV.dataDir, "state.json");
 const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
 const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
+const CORRECTIONS_PATH = path.join(ENV.dataDir, "corrections.json");
 const POOL_RANKINGS_PATH = path.join(ENV.dataDir, "pool_rankings.json");
 const POOL_TVL_HISTORY_PATH = path.join(ENV.dataDir, "pool_tvl_history.jsonl");
 const USED_NONCES_PATH = path.join(ENV.dataDir, "used_nonces.jsonl");
@@ -2802,11 +2803,12 @@ class Uc6Bot {
     if (this.state.events.length > EVENT_RING_LIMIT) {
       this.state.events = this.state.events.slice(-EVENT_RING_LIMIT);
     }
+    // ledgerEvents no longer used for accounting (summarizeRecordsInWindow replaces summarizeEvents)
+    // Keep writing for backward compat but stop using for stats
     this.state.ledgerEvents.push(next);
     if (this.state.ledgerEvents.length > ACCOUNTING_EVENT_LIMIT) {
       this.state.ledgerEvents = this.state.ledgerEvents.slice(-ACCOUNTING_EVENT_LIMIT);
     }
-    this.ledgerRepairDirty = true;
   }
 
   emptyLifecycleAccounting() {
@@ -2829,7 +2831,7 @@ class Uc6Bot {
       poolAddress: seed.poolAddress || this.slipstreamPool,
       pair: { base: "WETH", quote: "USDC" },
       selector: seed.selector || { type: "tickSpacing", value: 0, humanLabel: undefined },
-      band: seed.band || { bandHalfBps: 0, tickLower: 0, tickUpper: 0 },
+      band: seed.band || { bandHalfBps: 0, bandHalfBpsUp: null, bandHalfBpsDown: null, tickLower: 0, tickUpper: 0 },
       entry: {
         openedAtIso: seed.openedAtIso || nowIso(),
         entrySnapshotAtIso: null,
@@ -2888,6 +2890,10 @@ class Uc6Bot {
       notes: null,
       createdAtIso: seed.createdAtIso || nowIso(),
       updatedAtIso: nowIso(),
+      _meta: {
+        openedAtMs: null,
+        closedAtMs: null,
+      },
       _internal: {
         baselineWeth: 0,
         baselineUsdc: 0,
@@ -2920,6 +2926,8 @@ class Uc6Bot {
     const p = this.state.position || {};
     return {
       bandHalfBps: Number(p.bandHalfBps || this.settings.bandHalfBps || 0),
+      bandHalfBpsUp: p.bandHalfBpsUp != null ? Number(p.bandHalfBpsUp) : null,
+      bandHalfBpsDown: p.bandHalfBpsDown != null ? Number(p.bandHalfBpsDown) : null,
       tickLower: Number(p.tickLower ?? 0),
       tickUpper: Number(p.tickUpper ?? 0),
     };
@@ -2981,6 +2989,12 @@ class Uc6Bot {
 
   async loadLifecycleStores() {
     this.positionLifecycleEvents = await readJsonLinesIfExists(POSITION_EVENTS_PATH);
+    // Load corrections overlay for historical event data repair
+    const correctionsFile = await readJsonIfExists(CORRECTIONS_PATH);
+    this.lifecycleCorrections = correctionsFile?.corrections && typeof correctionsFile.corrections === "object"
+      ? correctionsFile.corrections : {};
+    const correctionCount = Object.keys(this.lifecycleCorrections).length;
+    if (correctionCount > 0) console.log(`[UC6] loaded ${correctionCount} lifecycle event corrections`);
     this.positionRecordsById = new Map();
     this.positionRecords = [];
     this.lifecycleCurrentTokenByRunId = new Map();
@@ -2993,10 +3007,48 @@ class Uc6Bot {
       }
     }
     this.repairLifecycleRecordsMissingEntrySnapshots();
+    this.validatePositionRecordIntegrity();
     // Always persist the rebuilt derived records on startup so positions.json
     // reflects the current reducer logic (including historical backfills that
     // may be reconstructed during replay before the explicit repair pass).
     await this.persistPositionRecords();
+  }
+
+  validatePositionRecordIntegrity() {
+    let warnings = 0;
+    for (const rec of this.positionRecords) {
+      const id = rec.id?.slice(0, 8) || "?";
+      // Band sanity
+      if (rec.band.bandHalfBps > 5000 || rec.band.bandHalfBps === 0) {
+        const fromTicks = this.estimateBandHalfBpsFromTicks(rec.band.tickLower, rec.band.tickUpper);
+        if (fromTicks && fromTicks > 0 && fromTicks <= 5000) {
+          rec.band.bandHalfBps = fromTicks;
+        } else if (rec.band.bandHalfBps > 5000) {
+          console.warn(`[UC6] [integrity] record ${id}: bandHalfBps=${rec.band.bandHalfBps} is unreasonable`);
+          warnings++;
+        }
+      }
+      // Exit value sanity for closed positions
+      if (rec.status === "CLOSED" && (rec.exit.exitValueUsd == null || rec.exit.exitValueUsd === 0)) {
+        console.warn(`[UC6] [integrity] record ${id}: CLOSED but exitValueUsd=0`);
+        warnings++;
+      }
+      // Entry value sanity
+      if (rec.entry.entryValueUsd === 0 && rec.status === "CLOSED") {
+        console.warn(`[UC6] [integrity] record ${id}: entryValueUsd=0`);
+        warnings++;
+      }
+      // Ensure _meta timestamps
+      if (!rec._meta) rec._meta = {};
+      if (!rec._meta.openedAtMs && rec.entry?.openedAtIso) {
+        rec._meta.openedAtMs = Date.parse(rec.entry.openedAtIso) || null;
+      }
+      if (!rec._meta.closedAtMs && rec.exit?.closedAtIso) {
+        rec._meta.closedAtMs = Date.parse(rec.exit.closedAtIso) || null;
+      }
+    }
+    if (warnings > 0) console.warn(`[UC6] [integrity] ${warnings} warnings found across ${this.positionRecords.length} records`);
+    else console.log(`[UC6] [integrity] all ${this.positionRecords.length} position records passed validation`);
   }
 
   async loadPoolComparisonCache() {
@@ -3020,7 +3072,7 @@ class Uc6Bot {
   getPoolComparisonGasBaselineUsd() {
     try {
       const now = Date.now();
-      const stats7d = this.summarizeEvents(this.getEventsSince(now - 7 * 24 * 60 * 60 * 1000));
+      const stats7d = this.summarizeRecordsInWindow(now - 7 * 24 * 60 * 60 * 1000, now);
       const rebalances = Math.max(0, Number(stats7d?.rebalances || 0));
       const gasUsd = Math.max(0, Number(stats7d?.gasUsd || 0));
       if (rebalances > 0 && Number.isFinite(gasUsd)) {
@@ -3268,6 +3320,10 @@ class Uc6Bot {
   applyPendingOpenToRecord(rec, pending) {
     if (!rec || !pending) return;
     rec.entry.openedAtIso = rec.entry.openedAtIso || pending.openedAtIso || rec.entry.openedAtIso;
+    if (rec.entry.openedAtIso && !rec._meta?.openedAtMs) {
+      if (!rec._meta) rec._meta = {};
+      rec._meta.openedAtMs = Date.parse(rec.entry.openedAtIso) || null;
+    }
     if (pending.selector) rec.selector = { ...rec.selector, ...pending.selector };
     if (pending.band) {
       rec.band = {
@@ -3299,6 +3355,8 @@ class Uc6Bot {
       ? Number(exitValueUsd)
       : (spot > 0 ? computedExitValueUsd : Number(rec.exit?.exitValueUsd || 0) || null);
     rec.exit.closedAtIso = atIso || rec.exit.closedAtIso || nowIso();
+    if (!rec._meta) rec._meta = {};
+    rec._meta.closedAtMs = Date.parse(rec.exit.closedAtIso) || null;
     rec.status = "CLOSED";
 
     const baselineWeth = Number(rec._internal?.baselineWeth || 0);
@@ -3882,6 +3940,13 @@ class Uc6Bot {
 
   applyLifecycleEventToRecords(ev) {
     if (!ev || typeof ev !== "object") return;
+    // Apply corrections overlay for historical data repair
+    const correction = this.lifecycleCorrections?.[ev.id];
+    if (correction) {
+      if (correction.band && ev.band) ev.band = { ...ev.band, ...correction.band };
+      if (correction.accounting && ev.accounting) ev.accounting = { ...ev.accounting, ...correction.accounting };
+      if (correction.details) ev.details = { ...ev.details, ...correction.details };
+    }
     const type = String(ev.type || "");
     const runId = String(ev.positionRunId || "");
     // Emissions events logged before the positionRunId fix lack a runId.
@@ -3922,10 +3987,20 @@ class Uc6Bot {
       if (ev.poolAddress) rec.poolAddress = ev.poolAddress;
       if (ev.details?.selector) rec.selector = { ...rec.selector, ...ev.details.selector };
       if (ev.band && typeof ev.band === "object") {
+        const tl = Number(ev.band.tickLower ?? rec.band.tickLower ?? 0);
+        const tu = Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0);
+        let bps = Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0);
+        // Sanitize: bandHalfBps > 5000 (50%) is physically impossible for CLPool bands — recalculate from ticks
+        if (bps > 5000 && Number.isFinite(tl) && Number.isFinite(tu) && tu > tl) {
+          const fromTicks = this.estimateBandHalfBpsFromTicks(tl, tu);
+          if (fromTicks && fromTicks > 0 && fromTicks <= 5000) bps = fromTicks;
+        }
         rec.band = {
-          bandHalfBps: Number(ev.band.bandHalfBps || rec.band.bandHalfBps || 0),
-          tickLower: Number(ev.band.tickLower ?? rec.band.tickLower ?? 0),
-          tickUpper: Number(ev.band.tickUpper ?? rec.band.tickUpper ?? 0),
+          bandHalfBps: bps,
+          bandHalfBpsUp: Number(ev.band.bandHalfBpsUp ?? rec.band.bandHalfBpsUp ?? null) || null,
+          bandHalfBpsDown: Number(ev.band.bandHalfBpsDown ?? rec.band.bandHalfBpsDown ?? null) || null,
+          tickLower: tl,
+          tickUpper: tu,
         };
       }
       if (ev.accounting) this.addAccountingToRecord(rec, ev.accounting);
@@ -3998,6 +4073,10 @@ class Uc6Bot {
         touchRecordCommon(rec);
         rec.status = "OPEN";
         rec.entry.openedAtIso = ev.atIso || rec.entry.openedAtIso;
+        if (rec.entry.openedAtIso) {
+          if (!rec._meta) rec._meta = {};
+          rec._meta.openedAtMs = rec._meta.openedAtMs || Date.parse(rec.entry.openedAtIso) || null;
+        }
         this.addUniqueTxHashes(rec.tx.openTxHashes, txHashes);
         if (ev.band) rec.band = { ...rec.band, ...ev.band };
         const rawMintValueUsd = Number(ev.details?.rawMintValueUsd || 0);
@@ -4705,6 +4784,46 @@ class Uc6Bot {
     };
   }
 
+  /**
+   * Single-source-of-truth summarizer: derives fee/cost/reward stats for ANY time window
+   * from position lifecycle records. Replaces both summarizeEvents() and summarizeLifecycleRecords().
+   */
+  summarizeRecordsInWindow(startMs, endMs) {
+    let feesUsd = 0, rewardsUsd = 0, gasUsd = 0, swapCostsUsd = 0, mintBurnUsd = 0, rebalances = 0;
+    const records = Array.isArray(this.positionRecords) ? this.positionRecords : [];
+    for (const rec of records) {
+      if (!rec?.performance) continue;
+      const openMs = rec._meta?.openedAtMs || Date.parse(rec.entry?.openedAtIso || rec.entry?.entrySnapshotAtIso || "") || 0;
+      if (!openMs) continue;
+      const closeMs = rec.status === "CLOSED"
+        ? (rec._meta?.closedAtMs || Date.parse(rec.exit?.closedAtIso || "") || endMs)
+        : endMs;
+      // Skip records that don't overlap the window
+      if (closeMs <= startMs || openMs >= endMs) continue;
+      const totalMs = Math.max(1, closeMs - openMs);
+      const overlapMs = Math.min(closeMs, endMs) - Math.max(openMs, startMs);
+      const ratio = Math.min(1, overlapMs / totalMs);
+      const perf = rec.performance;
+      feesUsd += Number(perf.feesCollectedUsd || 0) * ratio;
+      rewardsUsd += Number(perf.rewardsUsd || 0) * ratio;
+      gasUsd += Number(perf.gasUsd || 0) * ratio;
+      swapCostsUsd += Number(perf.swapCostUsd || 0) * ratio;
+      mintBurnUsd += Number(perf.mintBurnUsd || 0) * ratio;
+      rebalances += Math.round(Number(rec.activity?.rebalances || 0) * ratio);
+      // Active position: include live accrued amounts (not prorated — they're current)
+      if (rec.status === "OPEN" && rec._live) {
+        feesUsd += Number(rec._live.uncollectedFeesUsd || 0);
+        rewardsUsd += Number(rec._live.claimableAeroUsd || 0);
+      }
+    }
+    const totalCostsUsd = gasUsd + swapCostsUsd;
+    const netUsd = feesUsd + rewardsUsd - totalCostsUsd;
+    return {
+      feesUsd, rewardsUsd, gasUsd, swapCostsUsd, mintBurnUsd, totalCostsUsd, netUsd, rebalances,
+      churnRatio: feesUsd > 0 ? totalCostsUsd / feesUsd : totalCostsUsd > 0 ? Number.POSITIVE_INFINITY : 0,
+    };
+  }
+
   estimateTrackedLpUsdValueFromLatest() {
     const latest = this.state.latest || {};
     const activePool = latest.primary || latest.fallback || null;
@@ -5365,7 +5484,20 @@ class Uc6Bot {
     } finally {
       this.markRefreshStamp("collectableMs", "collectableAtIso");
     }
+    // Update live accrual on the active position record for unified stats
+    this.updateActiveRecordLiveAccrual();
     return this.state.latest.collectableNow;
+  }
+
+  updateActiveRecordLiveAccrual() {
+    const activeRec = this.getActiveLifecycleRecordInternal();
+    if (activeRec) {
+      activeRec._live = {
+        uncollectedFeesUsd: Number(this.state.latest?.collectableNow?.usd || 0),
+        claimableAeroUsd: this.getClaimableAeroUsd(),
+        updatedAtMs: Date.now(),
+      };
+    }
   }
 
   async maybeRefreshPositionFromChain({ force = false } = {}) {
@@ -5761,7 +5893,7 @@ class Uc6Bot {
         }
       }
       const now = Date.now();
-      const stats24h = this.summarizeEvents(this.getEventsSince(now - 24 * 60 * 60 * 1000));
+      const stats24h = this.summarizeRecordsInWindow(now - 24 * 60 * 60 * 1000, now);
       const recentRebalanceCostUsd =
         stats24h.rebalances > 0 ? stats24h.totalCostsUsd / stats24h.rebalances : this.estimateRecentRebalanceCostUsd();
       const feesPerHour = stats24h.feesUsd / 24;
@@ -8009,7 +8141,7 @@ class Uc6Bot {
 
     if (this.settings.churnProtectionEnabled) {
       const start24h = Date.now() - 24 * 60 * 60 * 1000;
-      const stats24h = this.summarizeEvents(this.getEventsSince(start24h));
+      const stats24h = this.summarizeRecordsInWindow(start24h, Date.now());
       const ratio = stats24h.churnRatio;
       const maxRatio = Number(this.settings.churnMaxCostToFeeRatio || 0);
       const shouldBlock =
@@ -10141,16 +10273,13 @@ class Uc6Bot {
 
     const now = Date.now();
     const todayStart = Date.parse(`${utcDayKey()}T00:00:00.000Z`);
-    const events24h = this.getEventsSince(now - 24 * 60 * 60 * 1000);
-    const events7d = this.getEventsSince(now - 7 * 24 * 60 * 60 * 1000);
-    const events30d = this.getEventsSince(now - 30 * 24 * 60 * 60 * 1000);
-    const eventsToday = this.getEventsSince(todayStart);
+    // Single source of truth: all time-windowed stats come from lifecycle records
+    const todayStats = this.summarizeRecordsInWindow(todayStart, now);
+    const stats24h = this.summarizeRecordsInWindow(now - 24 * 60 * 60 * 1000, now);
+    const stats7d = this.summarizeRecordsInWindow(now - 7 * 24 * 60 * 60 * 1000, now);
+    const stats30d = this.summarizeRecordsInWindow(now - 30 * 24 * 60 * 60 * 1000, now);
+    const statsAll = this.summarizeRecordsInWindow(0, now);
     const eventsAll = this.getEventsSince(null);
-    const todayStats = this.summarizeEvents(eventsToday);
-    const stats24h = this.summarizeEvents(events24h);
-    const stats7d = this.summarizeEvents(events7d);
-    const stats30d = this.summarizeEvents(events30d);
-    const statsAll = this.summarizeLifecycleRecords();
     const bandPerformance = this.summarizeBandPerformance(eventsAll);
 
     const collectableNow = latest.collectableNow || { usdc: 0, weth: 0, usd: 0, isEstimated: true };
@@ -10294,6 +10423,7 @@ class Uc6Bot {
         rewards30dUsd: stats30d.rewardsUsd,
         rewardsTotalUsd: statsAll.rewardsUsd,
         pendingCompoundUsd: Number(this.state.pendingCompoundUsd || 0),
+        includesLiveAccrual: true,
       },
       costs: {
         gasTodayUsd: todayStats.gasUsd,

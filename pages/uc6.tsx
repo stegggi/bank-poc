@@ -2841,9 +2841,10 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   const [tab, setTab] = useState<"TODAY"|"7D"|"30D"|"ALL">("TODAY");
   const { isMobile: fwIsMobile } = useBreakpoint();
   const nLocal = (v: unknown, fb: number) => { const x = Number(v); return Number.isFinite(x) ? x : fb; };
-  // Active position's unrealized fees & rewards (not yet collected/claimed)
-  const liveFeesUsd = nLocal(st?.fees?.collectableNow?.usd, 0);
-  const liveRewardsUsd = nLocal(st?.emissions?.claimable?.usd, 0);
+  // When bot includes live accrual in its stats, don't double-add
+  const botIncludesLive = Boolean((st?.fees as any)?.includesLiveAccrual);
+  const liveFeesUsd = botIncludesLive ? 0 : nLocal(st?.fees?.collectableNow?.usd, 0);
+  const liveRewardsUsd = botIncludesLive ? 0 : nLocal(st?.emissions?.claimable?.usd, 0);
   const liveTotal = liveFeesUsd + liveRewardsUsd;
   const data = {
     TODAY: { fees: nLocal(st?.fees?.collectedTodayUsd,0) + liveFeesUsd, rewards: nLocal(st?.fees?.rewardsTodayUsd,0) + liveRewardsUsd, gas: nLocal(st?.costs?.gasTodayUsd,0), swap: nLocal(st?.costs?.swapCostsTodayUsd,0), mintBurn: nLocal(st?.costs?.mintBurnTodayUsd,0), net: nLocal(st?.pnl?.netTodayUsd,0) + liveTotal },
