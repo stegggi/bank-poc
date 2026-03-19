@@ -8563,7 +8563,29 @@ class Uc6Bot {
     if (trendCtx?.direction === "up") holdTarget = cfg.uptrendHold;
     if (trendCtx?.direction === "down") holdTarget = cfg.downtrendHold;
 
-    const mkBlocked = (reason, diag = null) => ({
+    // Compute diagnostics upfront so they're always available (even on early block)
+    const regimeLabel = String(trendCtx?.regimeLabel || "unknown");
+    const regimeConfidence = Number(trendCtx?.regimeConfidence || 0);
+    const distMetrics = this.state.position?.tokenId
+      ? this.getPositionDistanceMetrics(Number(primary?.tick ?? this.state.latest?.primary?.tick ?? 0))
+      : { edgeProgress: 0, approachingSide: null, upperHalfWidth: 0, lowerHalfWidth: 0 };
+    const edgeProgress = distMetrics.edgeProgress || 0;
+    const approachingSide = distMetrics.approachingSide || null;
+    const trendMovePct = Number(trendCtx?.trendMovePct || 0);
+    const actualConfirmSec = Number(trendCtx?.trendingConfirmSec || 0);
+    const requiredConfirmSec = Math.max(5, Math.round(cfg.baseConfirmSec * (1 - regimeConfidence)));
+
+    // Base diagnostics — always returned, even on early block
+    const baseDiag = {
+      edgeProgress, regimeConfidence, regimeLabel,
+      trendMovePct, actualConfirmSec, requiredConfirmSec,
+      approachingSide,
+      urgencyThreshold: cfg.urgencyThreshold,
+      minEdgeProgressToConsider: cfg.minEdgeProgressToConsider,
+      baseConfirmSec: cfg.baseConfirmSec,
+    };
+
+    const mkBlocked = (reason, extraDiag = null) => ({
       enabled: cfg.enabled,
       eligible: false,
       holdTargetIfEscape: holdTarget,
@@ -8573,7 +8595,7 @@ class Uc6Bot {
       emergencyAllowed,
       hodlSnapshot: hodl,
       urgency: null,
-      diagnostics: diag,
+      diagnostics: { ...baseDiag, ...extraDiag },
     });
 
     // Hard prerequisites
@@ -8586,17 +8608,8 @@ class Uc6Bot {
     if (!this.settings?.regime?.enabled) return mkBlocked("regime_disabled");
 
     // Tier 1: Regime label + confidence floor
-    const regimeLabel = String(trendCtx?.regimeLabel || "unknown");
-    const regimeConfidence = Number(trendCtx?.regimeConfidence || 0);
     if (regimeLabel !== cfg.requireRegimeLabel) return mkBlocked("regime_label_mismatch");
     if (regimeConfidence < cfg.minRegimeConfidence) return mkBlocked("regime_confidence_below_floor");
-
-    // Tier 2: Edge progress gate
-    const distMetrics = this.getPositionDistanceMetrics(
-      Number(primary?.tick ?? this.state.latest?.primary?.tick ?? 0)
-    );
-    const edgeProgress = distMetrics.edgeProgress || 0;
-    const approachingSide = distMetrics.approachingSide || null;
     if (edgeProgress < cfg.minEdgeProgressToConsider) {
       return mkBlocked("edge_progress_too_low", {
         edgeProgress, minRequired: cfg.minEdgeProgressToConsider, regimeConfidence,
@@ -8604,17 +8617,10 @@ class Uc6Bot {
     }
 
     // Tier 3: Trend magnitude
-    const trendMovePct = Number(trendCtx?.trendMovePct || 0);
     if (!Number.isFinite(trendMovePct)) return mkBlocked("trend_move_unavailable");
     if (Math.abs(trendMovePct) < cfg.minTrendMovePct) {
-      return mkBlocked("trend_move_too_small", {
-        trendMovePct, minRequired: cfg.minTrendMovePct, edgeProgress, regimeConfidence,
-      });
+      return mkBlocked("trend_move_too_small");
     }
-
-    // Tier 3b: Confidence-scaled confirm timer
-    const requiredConfirmSec = Math.max(5, Math.round(cfg.baseConfirmSec * (1 - regimeConfidence)));
-    const actualConfirmSec = Number(trendCtx?.trendingConfirmSec || 0);
 
     // Tier 3c: Composite urgency score
     const edgeRange = 1 - cfg.minEdgeProgressToConsider;
