@@ -11227,6 +11227,7 @@ class Uc6Bot {
       try {
         await this.handleHttp(req, res);
       } catch (err) {
+        console.error("[UC6] HTTP handler error:", err?.message || err, err?.stack?.split("\n").slice(0, 3).join(" "));
         this.setLastError(err);
         jsonResponse(res, 500, { error: "Internal server error" });
       }
