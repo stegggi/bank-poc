@@ -3277,7 +3277,7 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
           <Uc6Metric label="Trend move" value={`${((diag.trendMovePct ?? 0) * 100).toFixed(2)}%`} />
         </div>
       )}
-      {cooldownUntilIso && <Uc6Metric label="Cooldown until" value={fmtIsoLocal(cooldownUntilIso)} />}
+      {cooldownUntilIso && Date.parse(cooldownUntilIso) > Date.now() && <Uc6Metric label="Cooldown until" value={fmtIsoLocal(cooldownUntilIso)} />}
       {!diag && trendDirection !== "flat" && (
         <Uc6Metric label="Trend" value={`${trendDirection} ${trendMovePct != null ? `${trendMovePct > 0 ? "+" : ""}${trendMovePct.toFixed(2)}%` : ""}`} />
       )}
