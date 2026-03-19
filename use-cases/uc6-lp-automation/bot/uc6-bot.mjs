@@ -10288,7 +10288,7 @@ class Uc6Bot {
     const avgCapital30d = this.averageDeployedUsdSince(now - 30 * 24 * 60 * 60 * 1000, aggregatedLpUsdValue, now);
     const aprToday = avgCapitalToday > 0 ? (todayStats.netUsd / avgCapitalToday) * (365 / 1) : null;
     const apr7d = avgCapital7d > 0 ? (stats7d.netUsd / avgCapital7d) * (365 / 7) : null;
-    const apr30d = events30d.length > 0 && avgCapital30d > 0 ? (stats30d.netUsd / avgCapital30d) * (365 / 30) : null;
+    const apr30d = avgCapital30d > 0 ? (stats30d.netUsd / avgCapital30d) * (365 / 30) : null;
     const churnRatioToday = Number.isFinite(todayStats.churnRatio) ? todayStats.churnRatio : null;
     const rangeStats = this.state.rangeStats || {};
     const inRangeEligibleMs = Number(rangeStats.inRangeMs || 0);
