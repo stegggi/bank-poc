@@ -9981,6 +9981,7 @@ class Uc6Bot {
     // Force rebalance bypasses this gate (owner override).
     if (
       !forceRebalance &&
+      !recoveryRetry &&
       effectiveTrigger.trigger &&
       effectiveTrigger.reason === "no_position" &&
       this.settings?.regime?.enabled
@@ -10137,8 +10138,7 @@ class Uc6Bot {
       return;
     }
 
-    if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
-    if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
+    // Don't clear force flag yet — clear it after success so retry keeps the bypass
     const activeRec = this.getActiveLifecycleRecordInternal();
     if (activeRec) {
       activeRec.activity.closeGateOverrideReason =
@@ -10185,6 +10185,9 @@ class Uc6Bot {
         throw new Error("Rebalance finished without an active LP position (tokenId missing)");
       }
       this.markRebalanceSuccess(effectiveTrigger.reason, "slipstream");
+      // Clear force flags only after full success (close + mint completed)
+      if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
+      if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
       this.finalizeActiveAction("recenter", effectiveTrigger.reason, {
         ...preRecenterMeta,
         ...(forceRebalance ? { requestedAt: forceRequestedAt } : {}),
