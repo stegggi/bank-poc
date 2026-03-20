@@ -4435,11 +4435,13 @@ class Uc6Bot {
       if (!row.lastClosedAtIso || closedAtIso > row.lastClosedAtIso) row.lastClosedAtIso = closedAtIso;
     }
 
-    // Override start value with manual setting if available
     const manualStart = Number(this.state.manualStartValueUsd || 0);
+    // Find the earliest year to apply manual start value only to the starting year
+    const earliestYear = byYear.size > 0 ? Math.min(...Array.from(byYear.keys())) : null;
     const years = Array.from(byYear.values())
       .map((row) => {
-        if (manualStart > 0) row.assetValueStartUsd = manualStart;
+        // Manual start value only applies to the earliest year (mid-year start)
+        if (manualStart > 0 && row.year === earliestYear) row.assetValueStartUsd = manualStart;
         const startUsd = Number(row.assetValueStartUsd || 0);
         if (Number(row.year) === currentYear || (latestYearSeen != null && Number(row.year) === Number(latestYearSeen) && !byYear.has(currentYear))) {
           row.assetValueTodayUsd = totalAssetValueTodayUsd;

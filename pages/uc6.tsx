@@ -3692,6 +3692,13 @@ function TaxSummary({ taxSummary, onSetStartValue }: { taxSummary: NonNullable<U
           {totals?.totalAssetValueTodayUsd != null && (
             <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
           )}
+          <Uc6Metric label="Start value" value={
+            <span>
+              <span style={{ fontFamily:"monospace" }}>{fmtUsd((totals as any)?.manualStartValueUsd)}</span>
+              {(totals as any)?.manualStartValueUsd ? <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>manual</span> : ""}
+              {onSetStartValue && <button onClick={onSetStartValue} style={{ fontSize:9, padding:"1px 5px", marginLeft:4, cursor:"pointer", background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", borderRadius:4, color:"#06b6d4" }}>Set</button>}
+            </span>
+          } />
         </div>
       </div>
 
@@ -3723,13 +3730,9 @@ function TaxSummary({ taxSummary, onSetStartValue }: { taxSummary: NonNullable<U
                 {hasPortfolioData && (
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.03)", borderRadius:6 }}>
                     <Uc6Metric label="Start value" value={
-                      <span>
-                        {startUsd != null
-                          ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
-                          : <span style={{ color:"rgba(232,232,240,0.3)" }}>{"\u2014"}</span>}
-                        {(totals as any)?.manualStartValueUsd ? <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>manual</span> : ""}
-                        {onSetStartValue && <button onClick={onSetStartValue} style={{ fontSize:9, padding:"1px 5px", marginLeft:4, cursor:"pointer", background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", borderRadius:4, color:"#06b6d4" }}>Set</button>}
-                      </span>
+                      startUsd != null
+                        ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
+                        : <span style={{ color:"rgba(232,232,240,0.3)" }}>{"\u2014"}</span>
                     } />
                     <Uc6Metric label="End value" value={
                       endUsd != null
