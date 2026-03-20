@@ -46,6 +46,7 @@ type Uc6DraftSettings = {
   compoundMode: CompoundMode;
   harvestThresholdUsd: number;
   failureCooldownSec: number;
+  manualStartValueUsd: number;
   churnProtectionEnabled: boolean;
   churnMaxCostToFeeRatio: number; // percentage in UI
   regimeEnabled: boolean;
@@ -114,6 +115,7 @@ type OwnerPayload = {
   compoundMode: CompoundMode;
   harvestThresholdUsd: number;
   failureCooldownSec: number;
+  manualStartValueUsd?: number | null;
   churnProtectionEnabled: boolean;
   churnMaxCostToFeeRatio: number;
   regime: {
@@ -823,6 +825,7 @@ function defaultDraft(): Uc6DraftSettings {
     compoundMode: "threshold_harvest",
     harvestThresholdUsd: 0.2,
     failureCooldownSec: 900,
+    manualStartValueUsd: 0,
     churnProtectionEnabled: false,
     churnMaxCostToFeeRatio: 40,
     regimeEnabled: false,
@@ -911,6 +914,7 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     compoundMode: settings.compoundMode === "threshold_harvest" ? "threshold_harvest" : "on_rebalance",
     harvestThresholdUsd: n(settings.harvestThresholdUsd, d.harvestThresholdUsd),
     failureCooldownSec: n(settings.failureCooldownSec, d.failureCooldownSec),
+    manualStartValueUsd: n((settings as any).manualStartValueUsd, d.manualStartValueUsd),
     churnProtectionEnabled: churnEnabled,
     churnMaxCostToFeeRatio: churnRatio * 100,
     regimeEnabled: Boolean(regime.enabled ?? d.regimeEnabled),
@@ -1002,6 +1006,7 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
     compoundMode: draft.compoundMode,
     harvestThresholdUsd: draft.harvestThresholdUsd,
     failureCooldownSec: draft.failureCooldownSec,
+    manualStartValueUsd: draft.manualStartValueUsd > 0 ? draft.manualStartValueUsd : null,
     churnProtectionEnabled: draft.churnProtectionEnabled,
     churnMaxCostToFeeRatio: Math.max(0, draft.churnMaxCostToFeeRatio) / 100,
     regime: {
@@ -2428,24 +2433,7 @@ export default function Uc6Page() {
               {positionsTaxSummary && (
                 <details style={{ marginTop:16 }}>
                   <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13 }}>Tax Summary (closed positions only)</summary>
-                  <TaxSummary taxSummary={positionsTaxSummary} onSetStartValue={async () => {
-                    const val = n(positionsTaxSummary?.totals?.totalAssetValueTodayUsd, 0);
-                    if (!val || val <= 0) return;
-                    try {
-                      setBusy("set-start-value");
-                      await submitSignedOwnerAction({
-                        action: "update_settings" as OwnerAction,
-                        payload: { manualStartValueUsd: val },
-                        endpoint: "/api/uc6/owner/settings",
-                        successPrefix: `Start value set to $${val.toFixed(2)}`,
-                      });
-                      await refreshStatus();
-                    } catch (err) {
-                      setError(err instanceof Error ? err.message : "Failed to set start value");
-                    } finally {
-                      setBusy("");
-                    }
-                  }} />
+                  <TaxSummary taxSummary={positionsTaxSummary} />
                 </details>
               )}
             </div>
@@ -2487,6 +2475,7 @@ export default function Uc6Page() {
                   <SelectField label="churnProtection" value={draft.churnProtectionEnabled ? "true" : "false"} onChange={(v) => updateBool("churnProtectionEnabled", v === "true")} options={["false", "true"]} />
                   <NumberField label="churnMaxCostToFeeRatio%" value={draft.churnMaxCostToFeeRatio} step="1" onChange={(v) => updateNumber("churnMaxCostToFeeRatio", v)} />
                   <NumberField label="failureCooldownSec" value={draft.failureCooldownSec} onChange={(v) => updateNumber("failureCooldownSec", v)} />
+                  <NumberField label="manualStartValueUsd" value={draft.manualStartValueUsd} step="0.01" onChange={(v) => updateNumber("manualStartValueUsd", v)} />
                 </div>
               </details>
 
@@ -3672,7 +3661,7 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
   );
 }
 
-function TaxSummary({ taxSummary, onSetStartValue }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]>; onSetStartValue?: () => void }) {
+function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]> }) {
   const totals = taxSummary.totals;
   const signColor = (v: number | null | undefined) => (v ?? 0) >= 0 ? "#22c55e" : "#ef4444";
 
@@ -3692,13 +3681,9 @@ function TaxSummary({ taxSummary, onSetStartValue }: { taxSummary: NonNullable<U
           {totals?.totalAssetValueTodayUsd != null && (
             <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
           )}
-          <Uc6Metric label="Start value" value={
-            <span>
-              <span style={{ fontFamily:"monospace" }}>{fmtUsd((totals as any)?.manualStartValueUsd)}</span>
-              {(totals as any)?.manualStartValueUsd ? <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>manual</span> : ""}
-              {onSetStartValue && <button onClick={onSetStartValue} style={{ fontSize:9, padding:"1px 5px", marginLeft:4, cursor:"pointer", background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", borderRadius:4, color:"#06b6d4" }}>Set</button>}
-            </span>
-          } />
+          {(totals as any)?.manualStartValueUsd != null && (
+            <Uc6Metric label="Start value" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd((totals as any).manualStartValueUsd)} <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)" }}>manual</span></span>} />
+          )}
         </div>
       </div>
 

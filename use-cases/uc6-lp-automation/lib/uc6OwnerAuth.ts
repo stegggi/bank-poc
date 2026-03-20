@@ -582,6 +582,10 @@ export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSett
         value,
         POOL_COMPARISON_SETTING_RULES
       );
+    } else if (key === "manualStartValueUsd") {
+      // Pass through to bot — handled as state, not a setting
+      const v = Number(value);
+      out[key] = Number.isFinite(v) && v > 0 ? v : null;
     } else if (TOP_LEVEL_SETTING_RULES[key]) {
       out[key] = validateSettingRule("", key, value, TOP_LEVEL_SETTING_RULES[key]) as Primitive;
     } else {
