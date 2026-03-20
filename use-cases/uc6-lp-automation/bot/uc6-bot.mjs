@@ -2195,6 +2195,8 @@ class Uc6Bot {
     if (em?.staked) return false;
     const tokenId = this.state.position?.tokenId;
     if (!tokenId) return false;
+    // Never stake a burned NFT
+    if (Array.isArray(this.state._deadTokenIds) && this.state._deadTokenIds.includes(String(tokenId))) return false;
 
     // Don't stake while top-up is pending retry (top-up failed recently)
     const topUpRetryAt = Date.parse(this.state.topUpRetryAfterIso || "");
@@ -7264,6 +7266,13 @@ class Uc6Bot {
     if (this._nftBurnedByGauge) {
       this._nftBurnedByGauge = false;
       console.log(`[UC6] closePosition: NFT ${tokenId} was burned by gauge — skipping on-chain close ops`);
+      // Add to dead-list to prevent re-adoption by enforceSinglePositionInvariant
+      if (!Array.isArray(this.state._deadTokenIds)) this.state._deadTokenIds = [];
+      if (!this.state._deadTokenIds.includes(String(tokenId))) {
+        this.state._deadTokenIds.push(String(tokenId));
+        // Keep dead-list bounded (last 50)
+        if (this.state._deadTokenIds.length > 50) this.state._deadTokenIds = this.state._deadTokenIds.slice(-50);
+      }
       // Use pre-close fee estimate (captured before unstake) instead of hardcoding 0
       const burnedFees = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
         ? { usdc: Math.max(0, Number(feeBreakdownOverride.usdc || 0)),
@@ -7273,14 +7282,14 @@ class Uc6Bot {
       // Estimate principal from tracked LP value (gauge returned tokens during withdraw)
       const spot = this.getSpotUsdcPerWeth();
       const trackedLpUsd = this.estimateTrackedLpUsdValueFromLatest() || 0;
-      const estimatedPrincipalUsd = Math.max(0, trackedLpUsd - burnedFees.usd);
       // Best-effort principal breakdown from latest position snapshot
       const latestLpTokens = this.state.latest?.lpTokens || {};
       const principalOut = {
         usdc: Number(latestLpTokens.usdc || 0),
         weth: Number(latestLpTokens.weth || 0),
       };
-      console.log(`[UC6] closePosition: NFT burned — accounting fees=$${burnedFees.usd.toFixed(4)} principal=$${estimatedPrincipalUsd.toFixed(2)}`);
+      const exitValueUsd = (principalOut.usdc + principalOut.weth * spot) || trackedLpUsd;
+      console.log(`[UC6] closePosition: NFT burned — accounting fees=$${burnedFees.usd.toFixed(4)} exitValue=$${exitValueUsd.toFixed(2)}`);
       // Record fees in active action so push event (for TODAY/7D/30D stats) includes them
       this.addFeesToActiveAction(burnedFees.usd);
       const phaseCtx = this.lifecyclePhaseContext;
@@ -7297,18 +7306,16 @@ class Uc6Bot {
             details: { closedTokenId: String(tokenId), nftBurnedByGauge: true, principalOut, feesOut: { usdc: burnedFees.usdc, weth: burnedFees.weth } },
           })
         ).catch((err) => this.setLastError(err));
-        if (phaseCtx.phase === "final_close") {
-          const exitValueUsd = principalOut.usdc + principalOut.weth * spot;
-          await this.appendLifecycleEvent(
-            this.lifecycleCommonFields({
-              type: "EXIT_SNAPSHOT",
-              positionRunId: String(phaseCtx.positionRunId),
-              tokenId: tokenId,
-              txHashes: [],
-              details: { exitTokens: principalOut, exitValueUsd, spotPriceUsdcPerWeth: spot, nftBurnedByGauge: true },
-            })
-          ).catch((err) => this.setLastError(err));
-        }
+        // Emit EXIT_SNAPSHOT for both rebalance_close and final_close (fixes $0 exit value)
+        await this.appendLifecycleEvent(
+          this.lifecycleCommonFields({
+            type: "EXIT_SNAPSHOT",
+            positionRunId: String(phaseCtx.positionRunId),
+            tokenId: tokenId,
+            txHashes: [],
+            details: { exitTokens: principalOut, exitValueUsd, spotPriceUsdcPerWeth: spot, nftBurnedByGauge: true },
+          })
+        ).catch((err) => this.setLastError(err));
       }
       this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
       if (this.state.emissions?.stakedTokenId === String(tokenId)) {
@@ -9330,6 +9337,9 @@ class Uc6Bot {
     const only = inventory.active[0];
     if (!only?.tokenId) return;
 
+    // Never re-adopt a burned NFT
+    if (Array.isArray(this.state._deadTokenIds) && this.state._deadTokenIds.includes(String(only.tokenId))) return;
+
     const trackedTokenId = this.state.position?.tokenId ? String(this.state.position.tokenId) : null;
     if (trackedTokenId === String(only.tokenId)) return;
 
@@ -9582,6 +9592,8 @@ class Uc6Bot {
       if (this.state.latest?.positionInventory) {
         this.state.latest.positionInventory = { active: [], activeCount: 0, deadTokenIds: [], updatedAtIso: null };
       }
+      // Refresh wallet balances — critical after NFT burn where gauge returned tokens
+      await this.refreshWalletBalancesHeavy().catch(() => {});
     }
 
     // Do not force a full normalization leg on close; this creates avoidable churn.
@@ -9869,6 +9881,9 @@ class Uc6Bot {
     }
 
     if (!minted) {
+      // Ensure tokenId stays null so we don't re-adopt a dead token on next loop
+      this.state.position = { ...this.state.position, tokenId: null };
+      await this.persistState().catch(() => {});
       throw new Error(
         `mint_retry_failed: ${preflightErrors.join(" | ") || (lastMintErr instanceof Error ? lastMintErr.message : String(lastMintErr || "unknown"))}`
       );
