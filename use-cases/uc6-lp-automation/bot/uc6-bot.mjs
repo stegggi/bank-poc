@@ -1970,6 +1970,15 @@ class Uc6Bot {
       this.setLastError(err);
     }
 
+    // Clear stale position if it's in the dead-list (e.g., burned NFT from previous run)
+    if (this.state.position?.tokenId &&
+        Array.isArray(this.state._deadTokenIds) &&
+        this.state._deadTokenIds.includes(String(this.state.position.tokenId))) {
+      console.log(`[UC6] startup: clearing dead tokenId ${this.state.position.tokenId} from position state`);
+      this.state.position = { ...this.state.position, tokenId: null, liquidity: null, inRange: null };
+      this.setStrategyModeState("LP_ACTIVE", { holdStartedAtIso: null, escapeCooldownUntilIso: null });
+    }
+
     try {
       await this.loadPoolComparisonCache();
     } catch (err) {
@@ -9127,12 +9136,15 @@ class Uc6Bot {
       });
       const pos = this.parsePositionResult(posRaw);
       if (!pos || pos.liquidity === 0n) {
+        console.log(`[UC6] reconcilePositionFromChain: position ${tokenId} has no liquidity — clearing`);
         this.state.position = {
           ...this.state.position,
           tokenId: null,
           liquidity: null,
           inRange: null,
         };
+        // Reset to LP_ACTIVE so bot will attempt to open a new position
+        this.setStrategyModeState("LP_ACTIVE", { holdStartedAtIso: null, escapeCooldownUntilIso: null });
         return;
       }
 
@@ -9154,6 +9166,7 @@ class Uc6Bot {
       // Slipstream/Uniswap position managers revert with reason `ID` when tokenId no longer exists
       // (e.g. just burned during a recenter). Treat this as a state reconciliation signal, not an error.
       if (msg.includes('function "positions" reverted') && /\bID\b/.test(msg)) {
+        console.log(`[UC6] reconcilePositionFromChain: position ${tokenId} no longer exists on-chain — clearing`);
         this.state.position = {
           ...this.state.position,
           tokenId: null,
@@ -9163,6 +9176,7 @@ class Uc6Bot {
           liquidity: null,
           inRange: null,
         };
+        this.setStrategyModeState("LP_ACTIVE", { holdStartedAtIso: null, escapeCooldownUntilIso: null });
         return;
       }
       this.setLastError(err);
@@ -9911,6 +9925,10 @@ class Uc6Bot {
       return;
     }
 
+    // Verify tracked position still exists on-chain (detects manual withdrawals, burns, etc.)
+    if (this.state.position?.tokenId) {
+      await this.maybeRefreshPositionFromChain({ force: true }).catch(() => {});
+    }
     // Defensive adoption before trigger evaluation to avoid false `no_position`
     // decisions when local tokenId briefly desyncs from on-chain inventory.
     if (!this.state.position?.tokenId) {
