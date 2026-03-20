@@ -2428,7 +2428,24 @@ export default function Uc6Page() {
               {positionsTaxSummary && (
                 <details style={{ marginTop:16 }}>
                   <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13 }}>Tax Summary (closed positions only)</summary>
-                  <TaxSummary taxSummary={positionsTaxSummary} />
+                  <TaxSummary taxSummary={positionsTaxSummary} onSetStartValue={async () => {
+                    const val = n(positionsTaxSummary?.totals?.totalAssetValueTodayUsd, 0);
+                    if (!val || val <= 0) return;
+                    try {
+                      setBusy("set-start-value");
+                      await submitSignedOwnerAction({
+                        action: "settings" as OwnerAction,
+                        payload: { manualStartValueUsd: val },
+                        endpoint: "/api/uc6/owner/settings",
+                        successPrefix: `Start value set to $${val.toFixed(2)}`,
+                      });
+                      await refreshStatus();
+                    } catch (err) {
+                      setError(err instanceof Error ? err.message : "Failed to set start value");
+                    } finally {
+                      setBusy("");
+                    }
+                  }} />
                 </details>
               )}
             </div>
@@ -3655,7 +3672,7 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
   );
 }
 
-function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]> }) {
+function TaxSummary({ taxSummary, onSetStartValue }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]>; onSetStartValue?: () => void }) {
   const totals = taxSummary.totals;
   const signColor = (v: number | null | undefined) => (v ?? 0) >= 0 ? "#22c55e" : "#ef4444";
 
@@ -3706,9 +3723,13 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
                 {hasPortfolioData && (
                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.03)", borderRadius:6 }}>
                     <Uc6Metric label="Start value" value={
-                      startUsd != null
-                        ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
-                        : <span style={{ color:"rgba(232,232,240,0.3)" }}>—</span>
+                      <span>
+                        {startUsd != null
+                          ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
+                          : <span style={{ color:"rgba(232,232,240,0.3)" }}>{"\u2014"}</span>}
+                        {(totals as any)?.manualStartValueUsd ? <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>manual</span> : ""}
+                        {onSetStartValue && <button onClick={onSetStartValue} style={{ fontSize:9, padding:"1px 5px", marginLeft:4, cursor:"pointer", background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", borderRadius:4, color:"#06b6d4" }}>Set</button>}
+                      </span>
                     } />
                     <Uc6Metric label="End value" value={
                       endUsd != null

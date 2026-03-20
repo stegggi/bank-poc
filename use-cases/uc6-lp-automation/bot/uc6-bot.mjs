@@ -3868,13 +3868,15 @@ class Uc6Bot {
       rec.status === "CLOSED" &&
       exitSpot > 0 &&
       (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0) &&
-      (Math.abs(exitWeth) > 0 || Math.abs(exitUsdc) > 0)
+      (Math.abs(exitWeth) > 0 || Math.abs(exitUsdc) > 0) &&
+      Number(rec.exit?.exitValueUsd || 0) > 0 // Guard: don't compute IL with missing exit data
     ) {
       const hodlExitUsd = baselineUsdc + baselineWeth * exitSpot;
       const lpExitPrincipalUsd = exitUsdc + exitWeth * exitSpot;
       perf.impermanentLossUsd = lpExitPrincipalUsd - hodlExitUsd;
     } else {
-      perf.impermanentLossUsd = Number(perf.impermanentLossUsd || 0);
+      // Zero out IL when exit data is invalid (NFT burned, missing data) to prevent garbage accumulation
+      perf.impermanentLossUsd = rec.status === "CLOSED" && Number(rec.exit?.exitValueUsd || 0) <= 0 ? 0 : Number(perf.impermanentLossUsd || 0);
     }
     // Signed benchmark delta: LP principal value minus HODL principal value at exit.
     perf.divergenceVsHodlUsd = Number(perf.impermanentLossUsd || 0);
@@ -4433,8 +4435,11 @@ class Uc6Bot {
       if (!row.lastClosedAtIso || closedAtIso > row.lastClosedAtIso) row.lastClosedAtIso = closedAtIso;
     }
 
+    // Override start value with manual setting if available
+    const manualStart = Number(this.state.manualStartValueUsd || 0);
     const years = Array.from(byYear.values())
       .map((row) => {
+        if (manualStart > 0) row.assetValueStartUsd = manualStart;
         const startUsd = Number(row.assetValueStartUsd || 0);
         if (Number(row.year) === currentYear || (latestYearSeen != null && Number(row.year) === Number(latestYearSeen) && !byYear.has(currentYear))) {
           row.assetValueTodayUsd = totalAssetValueTodayUsd;
@@ -4463,6 +4468,7 @@ class Uc6Bot {
         alphaVsHodlUsd: totalAlphaVsHodlUsd,
         realizedNetProfitUsd: totalRealizedNetProfitUsd,
         totalAssetValueTodayUsd,
+        manualStartValueUsd: manualStart > 0 ? manualStart : null,
       },
       years,
     };
@@ -10795,6 +10801,15 @@ class Uc6Bot {
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
       this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
+      // Handle manualStartValueUsd as a state field (not a setting)
+      if ("manualStartValueUsd" in payload) {
+        const val = Number(payload.manualStartValueUsd);
+        this.state.manualStartValueUsd = Number.isFinite(val) && val > 0 ? val : null;
+        this.state.manualStartValueSetAtIso = this.state.manualStartValueUsd ? nowIso() : null;
+        await this.persistState();
+        this.auditOwnerAction("set_start_value", req, { manualStartValueUsd: this.state.manualStartValueUsd });
+        return jsonResponse(res, 200, { ok: true, manualStartValueUsd: this.state.manualStartValueUsd });
+      }
       const nextSettings = normalizeSettings(payload, this.settings);
       if (this.settings.killSwitch && !nextSettings.killSwitch) {
         const allowReset = String(process.env.UC6_ALLOW_KILL_SWITCH_RESET || "")
@@ -11254,6 +11269,32 @@ class Uc6Bot {
     }
   }
 
+  async handleOwnerSetStartValue(req, res) {
+    const ip = extractIp(req);
+    const rl = this.ownerActionRateLimiter.take(ip);
+    if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+    const auth = String(req.headers.authorization || "");
+    if (!safeBearerMatch(ENV.adminToken, auth)) return unauthorized(res);
+    try {
+      const body = await readJsonBody(req, HTTP_JSON_MAX_BYTES);
+      const value = Number(body.value);
+      if (body.value === null || body.value === 0) {
+        this.state.manualStartValueUsd = null;
+        await this.persistState();
+        return jsonResponse(res, 200, { ok: true, manualStartValueUsd: null });
+      }
+      if (!Number.isFinite(value) || value < 0) {
+        return jsonResponse(res, 400, { error: "value must be a positive number or null to clear" });
+      }
+      this.state.manualStartValueUsd = value;
+      this.state.manualStartValueSetAtIso = nowIso();
+      await this.persistState();
+      return jsonResponse(res, 200, { ok: true, manualStartValueUsd: value });
+    } catch (err) {
+      return jsonResponse(res, 400, { error: sanitizeErrorMessage(err, "Bad request") });
+    }
+  }
+
   async handleHttp(req, res) {
     if (!req.url) return jsonResponse(res, 404, { error: "Not found" });
     const u = new URL(req.url, `http://${req.headers.host || "localhost"}`);
@@ -11300,6 +11341,9 @@ class Uc6Bot {
       }
       if (req.method === "POST" && u.pathname === "/owner/emissions/claim") {
         return await this.handleOwnerEmissionsClaim(req, res);
+      }
+      if (req.method === "POST" && u.pathname === "/owner/set-start-value") {
+        return await this.handleOwnerSetStartValue(req, res);
       }
       return jsonResponse(res, 405, { error: "Method not allowed" });
     }
