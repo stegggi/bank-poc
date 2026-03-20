@@ -2831,7 +2831,7 @@ class Uc6Bot {
       poolAddress: seed.poolAddress || this.slipstreamPool,
       pair: { base: "WETH", quote: "USDC" },
       selector: seed.selector || { type: "tickSpacing", value: 0, humanLabel: undefined },
-      band: seed.band || { bandHalfBps: 0, bandHalfBpsUp: null, bandHalfBpsDown: null, tickLower: 0, tickUpper: 0 },
+      band: seed.band || { bandHalfBps: 0, bandHalfBpsUp: null, bandHalfBpsDown: null, centerTick: null, tickLower: 0, tickUpper: 0 },
       entry: {
         openedAtIso: seed.openedAtIso || nowIso(),
         entrySnapshotAtIso: null,
@@ -3999,6 +3999,7 @@ class Uc6Bot {
           bandHalfBps: bps,
           bandHalfBpsUp: Number(ev.band.bandHalfBpsUp ?? rec.band.bandHalfBpsUp ?? null) || null,
           bandHalfBpsDown: Number(ev.band.bandHalfBpsDown ?? rec.band.bandHalfBpsDown ?? null) || null,
+          centerTick: Number.isFinite(Number(ev.band.centerTick)) ? Number(ev.band.centerTick) : (rec.band.centerTick ?? null),
           tickLower: tl,
           tickUpper: tu,
         };
@@ -7100,6 +7101,9 @@ class Uc6Bot {
               band: {
                 bandHalfBps:
                   Number(phaseCtx.band?.bandHalfBps || this.estimateBandHalfBpsFromTicks(tickLower, tickUpper) || 0),
+                bandHalfBpsUp: phaseCtx.band?.bandHalfBpsUp ?? null,
+                bandHalfBpsDown: phaseCtx.band?.bandHalfBpsDown ?? null,
+                centerTick: Number(this.state.latest?.primary?.tick ?? Math.round((tickLower + tickUpper) / 2)),
                 tickLower,
                 tickUpper,
               },

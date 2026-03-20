@@ -177,6 +177,7 @@ type PositionLifecycleRecord = {
     bandHalfBps?: number;
     bandHalfBpsUp?: number;
     bandHalfBpsDown?: number;
+    centerTick?: number | null;
     targetBandHalfBps?: number;
     tickLower?: number;
     tickUpper?: number;
@@ -2792,6 +2793,13 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
         {spotPrice > 0 ? `$${spotPrice.toFixed(2)}` : "\u2014"}
         <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginLeft:4 }}>now</span>
       </div>
+
+      {centerPrice != null && (
+        <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.45)" }}>
+          <span>Mint price</span>
+          <span style={{ fontFamily:"monospace" }}>${centerPrice.toFixed(2)}</span>
+        </div>
+      )}
 
       <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.55)" }}>
         <span>Entry</span>
