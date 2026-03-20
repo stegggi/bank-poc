@@ -7149,7 +7149,7 @@ class Uc6Bot {
           liquidity: pos?.liquidity?.toString() || null,
           tickLower: pos?.tickLower ?? tickLower,
           tickUpper: pos?.tickUpper ?? tickUpper,
-          centerTick: Math.round((tickLower + tickUpper) / 2),
+          centerTick: Number(this.state.latest?.primary?.tick ?? Math.round((tickLower + tickUpper) / 2)),
           venue,
           amount0Used,
           amount1Used,
