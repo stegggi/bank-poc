@@ -6625,8 +6625,8 @@ class Uc6Bot {
     }
 
     if (best) {
-      const center = Math.round((best.tickLower + best.tickUpper) / 2);
-      return { centerTick: center, tickLower: best.tickLower, tickUpper: best.tickUpper };
+      // Use actual market tick as center (not midpoint) — critical for asymmetric bands
+      return { centerTick: tick, tickLower: best.tickLower, tickUpper: best.tickUpper };
     }
 
     const deltaDown = this.toTickDelta(downBps, spacing);
@@ -6634,8 +6634,7 @@ class Uc6Bot {
     let tickLower = this.floorTick(tick - deltaDown, spacing);
     let tickUpper = this.ceilTick(tick + deltaUp, spacing);
     if (tickUpper <= tickLower) tickUpper = tickLower + spacing;
-    const center = Math.round((tickLower + tickUpper) / 2);
-    return { centerTick: center, tickLower, tickUpper };
+    return { centerTick: tick, tickLower, tickUpper };
   }
 
   parsePositionResult(pos) {
@@ -9128,7 +9127,10 @@ class Uc6Bot {
 
       this.state.position.tickLower = pos.tickLower;
       this.state.position.tickUpper = pos.tickUpper;
-      this.state.position.centerTick = Math.round((pos.tickLower + pos.tickUpper) / 2);
+      // Preserve mint-time centerTick — only set if missing (e.g., legacy positions)
+      if (!Number.isFinite(Number(this.state.position.centerTick))) {
+        this.state.position.centerTick = Math.round((pos.tickLower + pos.tickUpper) / 2);
+      }
       if (!(Number.isFinite(Number(this.state.position.bandHalfBps)) && Number(this.state.position.bandHalfBps) > 0)) {
         this.state.position.bandHalfBps = this.estimateBandHalfBpsFromTicks(pos.tickLower, pos.tickUpper);
       }

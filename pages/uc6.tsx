@@ -2719,6 +2719,19 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
     return Math.max(0, Math.min(100, ((currentTick - tickLower) / total) * 100));
   })();
 
+  // Mint point (center tick) position on the bar
+  const centerPct = (() => {
+    if (tickLower == null || tickUpper == null || centerTick == null) return null;
+    const total = tickUpper - tickLower;
+    if (total <= 0) return null;
+    return Math.max(0, Math.min(100, ((centerTick - tickLower) / total) * 100));
+  })();
+
+  const centerPrice = (() => {
+    if (!spotPrice || centerTick == null || currentTick == null) return null;
+    return spotPrice * Math.pow(1.0001, centerTick - currentTick);
+  })();
+
   const lowerEdgePrice = (() => {
     if (!spotPrice || tickLower == null || currentTick == null) return null;
     return spotPrice * Math.pow(1.0001, tickLower - currentTick);
@@ -2766,6 +2779,10 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
       <div style={{ position:"relative", height:28, borderRadius:14, background:trackColor, border:`1px solid ${inRange ? "rgba(6,182,212,0.3)" : "rgba(239,68,68,0.3)"}`, overflow:"visible" }}>
         {/* Fill from left to dot */}
         <div style={{ position:"absolute", top:0, left:0, bottom:0, width:`${priceDotPct}%`, background:fillColor, borderRadius:"14px 0 0 14px" }} />
+        {/* Mint point marker */}
+        {centerPct != null && (
+          <div title={`Mint point${centerPrice ? ` $${centerPrice.toFixed(0)}` : ""}`} style={{ position:"absolute", top:2, bottom:2, left:`${centerPct}%`, transform:"translateX(-50%)", width:2, background:"rgba(232,232,240,0.3)", borderRadius:1, zIndex:1 }} />
+        )}
         {/* Price dot */}
         <div style={{ position:"absolute", top:"50%", left:`${priceDotPct}%`, transform:"translate(-50%, -50%)", width:18, height:18, borderRadius:"50%", background:dotColor, border:"2px solid #07080f", boxShadow:`0 0 10px ${dotColor}`, zIndex:2 }} />
       </div>
