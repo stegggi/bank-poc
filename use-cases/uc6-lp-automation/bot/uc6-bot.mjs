@@ -2267,9 +2267,11 @@ class Uc6Bot {
       );
     } catch (unstakeErr) {
       const errMsg = unstakeErr instanceof Error ? unstakeErr.message : String(unstakeErr || "");
+      console.warn(`[UC6] [emissions] unstake error: ${errMsg.slice(0, 200)}`);
       // If the gauge says "NA" — the NFT isn't staked there.
       // Treat as success and clear the stale flag.
-      if (errMsg.includes('"NA"') || errMsg.includes('reason:\nNA') || errMsg.includes("NA")) {
+      // IMPORTANT: only match the exact gauge revert reason, not random substrings like "InvalidParams"
+      if (errMsg.includes('"NA"') || errMsg.includes('reason:\nNA')) {
         console.log(`[UC6] [emissions] unstake got NA (not staked on-chain) — clearing stale flag`);
         em.staked = false;
         em.stakedTokenId = null;
