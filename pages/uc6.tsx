@@ -2318,7 +2318,7 @@ export default function Uc6Page() {
               />
             </Uc6Card>
 
-            <Uc6Card title="Re-Entry Gate">
+            <Uc6Card title="Position Gate">
               <ReEntryCard
                 enabled={Boolean(reEntryView?.enabled ?? status?.settings?.reEntry?.enabled)}
                 eligible={Boolean(reEntryView?.eligible)}
@@ -2337,6 +2337,8 @@ export default function Uc6Page() {
                 meanRevertConfirmSec={Number(reEntryView?.meanRevertConfirmSec || 0)}
                 requiredMeanRevertConfirmSec={Number(reEntryView?.requiredMeanRevertConfirmSec || 0)}
                 maxDistanceFromMuPct={Number(reEntryView?.maxDistanceFromMuPct || 0)}
+                tokenId={status?.position?.tokenId ?? null}
+                entryGate={(status as any)?.entryGate ?? null}
               />
             </Uc6Card>
 
@@ -3314,18 +3316,68 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   strategyMode, holdElapsedSec, holdRequiredSec, escapeCooldownUntilIso, reEntryCooldownUntilIso,
   regimeLabel, regimeConfidence, requiredRegimeLabel, requiredMinConfidence,
   meanRevertConfirmSec, requiredMeanRevertConfirmSec, maxDistanceFromMuPct,
+  tokenId, entryGate,
 }: {
   enabled: boolean; eligible: boolean; reasonIfBlocked: string|null; eligibleAtIso: string|null; distanceFromMuPct: number|null;
   strategyMode: string; holdElapsedSec: number; holdRequiredSec: number;
   escapeCooldownUntilIso: string|null; reEntryCooldownUntilIso: string|null;
   regimeLabel: string; regimeConfidence: number; requiredRegimeLabel: string; requiredMinConfidence: number;
   meanRevertConfirmSec: number; requiredMeanRevertConfirmSec: number; maxDistanceFromMuPct: number;
+  tokenId?: string | null;
+  entryGate?: { reason: string; regimeLabel: string; regimeConfidence: number; regimeOk: boolean; requiredLabel: string; requiredMinConfidence: number; cooldownRemainingSec: number; tradingEnabled: boolean } | null;
 }) {
   if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
 
-  // Mode A: position active — gate is irrelevant
-  if (!strategyMode.startsWith("HOLD_")) {
-    return <div style={{ color:"rgba(232,232,240,0.3)", fontSize:12, textAlign:"center", padding:"10px 0" }}>N/A — Position active</div>;
+  const condRowStyle: CSSProperties = { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.04)" };
+  const labelStyle: CSSProperties = { fontSize:11, color:"rgba(232,232,240,0.5)" };
+  const valOk = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
+
+  // Mode A: LP_ACTIVE with position — gate is irrelevant
+  if (!strategyMode.startsWith("HOLD_") && tokenId) {
+    return <div style={{ color:"rgba(232,232,240,0.3)", fontSize:12, textAlign:"center", padding:"10px 0" }}>Position active</div>;
+  }
+
+  // Mode B: LP_ACTIVE without position — show entry conditions
+  if (!strategyMode.startsWith("HOLD_") && !tokenId && entryGate) {
+    const eg = entryGate;
+    const regOk = eg.regimeOk && eg.regimeLabel === eg.requiredLabel && eg.regimeConfidence >= eg.requiredMinConfidence;
+    const cooldownOk = eg.cooldownRemainingSec <= 0;
+    const allOk = regOk && cooldownOk && eg.tradingEnabled;
+    return (
+      <div style={{ display:"grid", gap:6 }}>
+        <div style={{ fontSize:14, fontWeight:800, color: allOk ? "#22c55e" : "#f59e0b", marginBottom:2 }}>
+          {allOk ? "READY TO ENTER" : "WAITING FOR ENTRY"}
+        </div>
+        <div style={condRowStyle}>
+          <span style={labelStyle}>Trading</span>
+          <span style={valOk(eg.tradingEnabled)}>{eg.tradingEnabled ? "enabled" : "disabled"}</span>
+        </div>
+        <div style={condRowStyle}>
+          <span style={labelStyle}>Regime</span>
+          <span style={{ ...valOk(eg.regimeOk && eg.regimeLabel === eg.requiredLabel), color: eg.regimeOk && eg.regimeLabel === eg.requiredLabel ? "#22c55e" : "#ef4444" }}>
+            {!eg.regimeOk ? "warming up" : `${eg.regimeLabel} (${(eg.regimeConfidence * 100).toFixed(0)}%)`}
+          </span>
+        </div>
+        <div style={condRowStyle}>
+          <span style={labelStyle}>Required</span>
+          <span style={valOk(regOk)}>{eg.requiredLabel} ≥ {(eg.requiredMinConfidence * 100).toFixed(0)}%</span>
+        </div>
+        {eg.cooldownRemainingSec > 0 && (
+          <div style={condRowStyle}>
+            <span style={labelStyle}>Cooldown</span>
+            <span style={valOk(false)}>{Math.round(eg.cooldownRemainingSec)}s remaining</span>
+          </div>
+        )}
+        <div style={{ fontSize:10, color:"rgba(232,232,240,0.35)", marginTop:4, fontStyle:"italic" }}>
+          {eg.reason === "ready" ? "All conditions met — will enter on next cycle" : eg.reason.replace(/_/g, " ")}
+        </div>
+      </div>
+    );
+  }
+
+  // Mode B fallback: LP_ACTIVE without position, no entryGate data
+  if (!strategyMode.startsWith("HOLD_") && !tokenId) {
+    return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:12, textAlign:"center", padding:"10px 0" }}>No position — waiting for entry conditions</div>;
   }
 
   // Mode B: hold mode — show condition checklist
@@ -3347,9 +3399,7 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   const confirmOk = meanRevertConfirmSec >= requiredMeanRevertConfirmSec;
   const distOk = distanceFromMuPct != null && maxDistanceFromMuPct > 0 && distanceFromMuPct <= maxDistanceFromMuPct * 100;
 
-  const condRowStyle: CSSProperties = { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.04)" };
-  const labelStyle: CSSProperties = { fontSize:11, color:"rgba(232,232,240,0.5)" };
-  const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" });
+  const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
 
   return (
     <div style={{ display:"grid", gap:6 }}>

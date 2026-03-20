@@ -10593,6 +10593,32 @@ class Uc6Bot {
         requiredMeanRevertConfirmSec: Number(reEntryEval.requiredMeanRevertConfirmSec || 0),
         maxDistanceFromMuPct: Number(reEntryEval.maxDistanceFromMuPct || 0),
       },
+      entryGate: (() => {
+        if (hasActivePosition || strategyMode !== "LP_ACTIVE") return null;
+        const reEntryCfg = this.getReEntrySettings();
+        const regimeEst = this.state.latest?.regime;
+        const regLabel = String(regimeEst?.label || "unknown");
+        const regConf = Number(regimeEst?.confidence || 0);
+        const regOk = Boolean(regimeEst?.ok);
+        const cooldownSec = this.cooldownRemainingSec(this.state.rebalanceFailureCooldownUntil);
+        const labelOk = regLabel === reEntryCfg.requireRegimeLabel;
+        const confOk = regConf >= reEntryCfg.minRegimeConfidence;
+        let reason = "ready";
+        if (!regOk) reason = "regime_warming_up";
+        else if (!labelOk) reason = `regime_is_${regLabel}`;
+        else if (!confOk) reason = "regime_confidence_low";
+        else if (cooldownSec > 0) reason = "cooldown";
+        return {
+          reason,
+          regimeLabel: regLabel,
+          regimeConfidence: regConf,
+          regimeOk: regOk,
+          requiredLabel: reEntryCfg.requireRegimeLabel,
+          requiredMinConfidence: reEntryCfg.minRegimeConfidence,
+          cooldownRemainingSec: Math.max(0, cooldownSec),
+          tradingEnabled: tradingAllowed,
+        };
+      })(),
       hodlGate: {
         enabled: Boolean(hodlGateSnapshot.enabled),
         marginUsd: Number(hodlGateSnapshot.marginUsd || 0),
