@@ -493,43 +493,13 @@ export async function unstakeNft(
   const effectiveGasPrice = receipt.effectiveGasPrice ?? 0n;
   const gasCostWei = gasUsed * effectiveGasPrice;
 
-  // Verify NFT still exists after withdrawal (gauge may burn it)
-  // Retry with backoff to avoid false burn detection from RPC 429s/timeouts
-  let nftExists = false;
-  if (npmAddress && receipt.status === "success") {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        if (attempt > 0) await new Promise((r) => setTimeout(r, 2000 * attempt));
-        const owner = await publicClient.readContract({
-          address: npmAddress,
-          abi: ERC721_ABI,
-          functionName: "ownerOf",
-          args: [tid],
-        });
-        nftExists = owner?.toLowerCase() === accountAddress.toLowerCase();
-        break; // got a definitive answer
-      } catch (err) {
-        const msg = String(err?.message || err || "");
-        // ERC721 revert = NFT genuinely doesn't exist
-        if (msg.includes("ERC721") || msg.includes("nonexistent") || msg.includes("invalid token")) {
-          _log(`ownerOf reverted with ERC721 error — NFT is genuinely burned`);
-          nftExists = false;
-          break;
-        }
-        // Network/RPC error — retry
-        _log(`ownerOf check attempt ${attempt + 1}/3 failed (${msg.slice(0, 80)})`);
-        if (attempt === 2) {
-          // After 3 failed attempts, assume NFT exists (safe default)
-          nftExists = true;
-          _log("⚠ ownerOf check failed after 3 attempts (RPC issues) — assuming NFT exists");
-        }
-      }
-    }
-    _log(nftExists ? "NFT confirmed owned after withdraw" : "⚠ NFT no longer exists after withdraw (gauge burned it)");
-  } else if (receipt.status === "success") {
-    // No npmAddress provided — assume NFT exists (backwards compat)
-    nftExists = true;
-  }
+  // After gauge withdraw, always assume NFT exists and let the actual close operations
+  // (decreaseLiquidity/collect/burn) determine if it's valid. The ownerOf check was
+  // causing false burn detection due to RPC lag — the gauge returns the NFT but the
+  // RPC node may not reflect the ownership change immediately.
+  // If the NFT is truly burned, decreaseLiquidity will revert and closePosition handles it.
+  const nftExists = receipt.status === "success";
+  _log(nftExists ? "Withdraw successful — proceeding with close" : `Withdraw receipt status: ${receipt.status}`);
 
   return {
     txHash: withdrawTx,
