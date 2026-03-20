@@ -3875,8 +3875,8 @@ class Uc6Bot {
       const lpExitPrincipalUsd = exitUsdc + exitWeth * exitSpot;
       perf.impermanentLossUsd = lpExitPrincipalUsd - hodlExitUsd;
     } else {
-      // Zero out IL when exit data is invalid (NFT burned, missing data) to prevent garbage accumulation
-      perf.impermanentLossUsd = rec.status === "CLOSED" && Number(rec.exit?.exitValueUsd || 0) <= 0 ? 0 : Number(perf.impermanentLossUsd || 0);
+      // Zero out IL when exit data is incomplete (NFT burned, missing tokens) to prevent garbage accumulation
+      perf.impermanentLossUsd = 0;
     }
     // Signed benchmark delta: LP principal value minus HODL principal value at exit.
     perf.divergenceVsHodlUsd = Number(perf.impermanentLossUsd || 0);

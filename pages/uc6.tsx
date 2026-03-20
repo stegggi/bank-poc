@@ -2434,7 +2434,7 @@ export default function Uc6Page() {
                     try {
                       setBusy("set-start-value");
                       await submitSignedOwnerAction({
-                        action: "settings" as OwnerAction,
+                        action: "update_settings" as OwnerAction,
                         payload: { manualStartValueUsd: val },
                         endpoint: "/api/uc6/owner/settings",
                         successPrefix: `Start value set to $${val.toFixed(2)}`,
