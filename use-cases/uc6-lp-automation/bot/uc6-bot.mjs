@@ -10880,14 +10880,12 @@ class Uc6Bot {
       this.ownerNonceUsed.set(parsed.nonce, nonceExpiry);
       this.persistUsedNonce(parsed.nonce, nonceExpiry);
 
-      // Handle manualStartValueUsd as a state field (not a setting)
-      if ("manualStartValueUsd" in payload) {
+      // Handle manualStartValueUsd as a state field (not a setting) — extract before normalizing
+      if (payload.manualStartValueUsd !== undefined) {
         const val = Number(payload.manualStartValueUsd);
         this.state.manualStartValueUsd = Number.isFinite(val) && val > 0 ? val : null;
         this.state.manualStartValueSetAtIso = this.state.manualStartValueUsd ? nowIso() : null;
-        await this.persistState();
-        this.auditOwnerAction("set_start_value", req, { manualStartValueUsd: this.state.manualStartValueUsd });
-        return jsonResponse(res, 200, { ok: true, manualStartValueUsd: this.state.manualStartValueUsd });
+        delete payload.manualStartValueUsd; // remove so normalizeSettings doesn't reject it
       }
       const nextSettings = normalizeSettings(payload, this.settings);
       if (this.settings.killSwitch && !nextSettings.killSwitch) {
