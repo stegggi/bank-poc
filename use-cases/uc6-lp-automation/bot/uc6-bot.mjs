@@ -8839,9 +8839,6 @@ class Uc6Bot {
     if (!cfg.enabled) {
       eligible = false;
       reasonIfBlocked = "disabled";
-    } else if (this.settings.venue === "uniswapv3") {
-      eligible = false;
-      reasonIfBlocked = "venue_read_only";
     } else if (!mode.startsWith("HOLD_")) {
       eligible = false;
       reasonIfBlocked = "not_in_hold_mode";
@@ -8859,25 +8856,9 @@ class Uc6Bot {
           : Number.isFinite(escapeCooldownMs) && Date.now() < escapeCooldownMs
             ? "escape_cooldown"
             : "reentry_cooldown";
-    } else if (!this.settings?.regime?.enabled) {
-      eligible = false;
-      reasonIfBlocked = "regime_disabled";
-    } else if (String(trendCtx?.regimeLabel || "unknown") !== cfg.requireRegimeLabel) {
-      eligible = false;
-      reasonIfBlocked = "regime_label_mismatch";
-    } else if (Number(trendCtx?.regimeConfidence || 0) < cfg.minRegimeConfidence) {
-      eligible = false;
-      reasonIfBlocked = "regime_confidence_low";
-    } else if (Number(trendCtx?.meanRevertConfirmSec || 0) < cfg.minMeanRevertConfirmSec) {
-      eligible = false;
-      reasonIfBlocked = "mean_revert_not_confirmed";
-    } else if (!Number.isFinite(Number(trendCtx?.distanceFromMuPct))) {
-      eligible = false;
-      reasonIfBlocked = "distance_from_mu_unavailable";
-    } else if (Number(trendCtx?.distanceFromMuPct || 0) > cfg.maxDistanceFromMuPct) {
-      eligible = false;
-      reasonIfBlocked = "too_far_from_mu";
     }
+    // Regime no longer gates re-entry — it determines band width at mint time instead.
+    // The bot re-enters after cooldown + minHoldSec regardless of regime state.
     return {
       enabled: cfg.enabled,
       eligible,
@@ -8885,7 +8866,7 @@ class Uc6Bot {
       meanRevertConfirmSec: Number(trendCtx?.meanRevertConfirmSec || 0),
       distanceFromMuPct:
         Number.isFinite(Number(trendCtx?.distanceFromMuPct)) ? Number(trendCtx.distanceFromMuPct) : null,
-      eligibleAtIso: Number.isFinite(eligibleAtMs) && eligibleAtMs > 0 ? new Date(eligibleAtMs).toISOString() : null,
+      eligibleAtIso: Number.isFinite(eligibleAtMs) && eligibleAtMs > Date.now() ? new Date(eligibleAtMs).toISOString() : null,
       holdElapsedSec: Number.isFinite(holdStartedAtMs)
         ? Math.max(0, (Date.now() - holdStartedAtMs) / 1000)
         : 0,
@@ -8898,6 +8879,10 @@ class Uc6Bot {
       requiredMinConfidence: cfg.minRegimeConfidence,
       requiredMeanRevertConfirmSec: cfg.minMeanRevertConfirmSec,
       maxDistanceFromMuPct: cfg.maxDistanceFromMuPct,
+      regimeAtReEntry: {
+        label: String(trendCtx?.regimeLabel || "unknown"),
+        confidence: Number(trendCtx?.regimeConfidence || 0),
+      },
     };
   }
 
@@ -10096,28 +10081,8 @@ class Uc6Bot {
         reason: "regime_wait_near_edge",
       };
     }
-    // Block initial mint when regime is not mean-reverting (same rule as re-entry).
-    // Force rebalance bypasses this gate (owner override).
-    if (
-      !forceRebalance &&
-      !recoveryRetry &&
-      effectiveTrigger.trigger &&
-      effectiveTrigger.reason === "no_position" &&
-      this.settings?.regime?.enabled
-    ) {
-      const regimeEst = regimeDecisionCtx?.est;
-      const regimeLabel = String(regimeEst?.label || "unknown");
-      const regimeOk = Boolean(regimeEst?.ok);
-      const reEntryCfg = this.getReEntrySettings();
-      const regimeConfidence = clamp(Number(regimeEst?.confidence || 0), 0, 1);
-      if (!regimeOk || regimeLabel !== reEntryCfg.requireRegimeLabel || regimeConfidence < reEntryCfg.minRegimeConfidence) {
-        effectiveTrigger = {
-          ...effectiveTrigger,
-          trigger: false,
-          reason: regimeOk ? `regime_blocks_entry_${regimeLabel}` : "regime_not_ready",
-        };
-      }
-    }
+    // Regime no longer gates initial position entry — it determines band width at mint time.
+    // The bot enters LP as soon as it has no position, regardless of regime state.
     if (effectiveTrigger.trigger && effectiveTrigger.reason === "no_position" && (forceRebalance || recoveryRetry || gate.allowed)) {
       await this.maybeRefreshPositionInventory({ force: true });
       this.enforceSinglePositionInvariant();
@@ -10708,29 +10673,23 @@ class Uc6Bot {
         requiredMinConfidence: Number(reEntryEval.requiredMinConfidence || 0),
         requiredMeanRevertConfirmSec: Number(reEntryEval.requiredMeanRevertConfirmSec || 0),
         maxDistanceFromMuPct: Number(reEntryEval.maxDistanceFromMuPct || 0),
+        regimeAtReEntry: reEntryEval.regimeAtReEntry || null,
       },
       entryGate: (() => {
         if (hasActivePosition || strategyMode !== "LP_ACTIVE") return null;
-        const reEntryCfg = this.getReEntrySettings();
         const regimeEst = this.state.latest?.regime;
         const regLabel = String(regimeEst?.label || "unknown");
         const regConf = Number(regimeEst?.confidence || 0);
         const regOk = Boolean(regimeEst?.ok);
         const cooldownSec = this.cooldownRemainingSec(this.state.rebalanceFailureCooldownUntil);
-        const labelOk = regLabel === reEntryCfg.requireRegimeLabel;
-        const confOk = regConf >= reEntryCfg.minRegimeConfidence;
         let reason = "ready";
-        if (!regOk) reason = "regime_warming_up";
-        else if (!labelOk) reason = `regime_is_${regLabel}`;
-        else if (!confOk) reason = "regime_confidence_low";
+        if (!tradingAllowed) reason = "trading_disabled";
         else if (cooldownSec > 0) reason = "cooldown";
         return {
           reason,
           regimeLabel: regLabel,
           regimeConfidence: regConf,
           regimeOk: regOk,
-          requiredLabel: reEntryCfg.requireRegimeLabel,
-          requiredMinConfidence: reEntryCfg.minRegimeConfidence,
           cooldownRemainingSec: Math.max(0, cooldownSec),
           tradingEnabled: tradingAllowed,
         };

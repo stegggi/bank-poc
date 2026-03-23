@@ -3202,8 +3202,8 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
                     {!sameVal && (
                       <>
                         <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
-                        <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{effPct}%</span>
-                        <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#06b6d4" }}>
+                        <span style={{ color: adjBps > 0 ? "#f59e0b" : "#22c55e", fontWeight:700 }}>{effPct}%</span>
+                        <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#22c55e" }}>
                           ({adjBps > 0 ? "+" : ""}{adjBps})
                         </span>
                       </>
@@ -3232,8 +3232,8 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
                 {!sameVal && (
                   <>
                     <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
-                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#06b6d4", fontWeight:700 }}>{"\u00b1"}{effPct}%</span>
-                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#06b6d4" }}>
+                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#22c55e", fontWeight:700 }}>{"\u00b1"}{effPct}%</span>
+                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#22c55e" }}>
                       ({adjBps > 0 ? "+" : ""}{adjBps} bps)
                     </span>
                   </>
@@ -3348,9 +3348,8 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   // Mode B: LP_ACTIVE without position — show entry conditions
   if (!strategyMode.startsWith("HOLD_") && !tokenId && entryGate) {
     const eg = entryGate;
-    const regOk = eg.regimeOk && eg.regimeLabel === eg.requiredLabel && eg.regimeConfidence >= eg.requiredMinConfidence;
     const cooldownOk = eg.cooldownRemainingSec <= 0;
-    const allOk = regOk && cooldownOk && eg.tradingEnabled;
+    const allOk = cooldownOk && eg.tradingEnabled;
     return (
       <div style={{ display:"grid", gap:6 }}>
         <div style={{ fontSize:14, fontWeight:800, color: allOk ? "#22c55e" : "#f59e0b", marginBottom:2 }}>
@@ -3362,13 +3361,10 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
         </div>
         <div style={condRowStyle}>
           <span style={labelStyle}>Regime</span>
-          <span style={{ ...valOk(eg.regimeOk && eg.regimeLabel === eg.requiredLabel), color: eg.regimeOk && eg.regimeLabel === eg.requiredLabel ? "#22c55e" : "#ef4444" }}>
+          <span style={{ fontSize:11, color:"rgba(232,232,240,0.6)" }}>
             {!eg.regimeOk ? "warming up" : `${eg.regimeLabel} (${(eg.regimeConfidence * 100).toFixed(0)}%)`}
+            <span style={{ fontSize:10, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>{"\u2192"} sets band width</span>
           </span>
-        </div>
-        <div style={condRowStyle}>
-          <span style={labelStyle}>Required</span>
-          <span style={valOk(regOk)}>{eg.requiredLabel} ≥ {(eg.requiredMinConfidence * 100).toFixed(0)}%</span>
         </div>
         {eg.cooldownRemainingSec > 0 && (
           <div style={condRowStyle}>
@@ -3377,7 +3373,7 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
           </div>
         )}
         <div style={{ fontSize:10, color:"rgba(232,232,240,0.35)", marginTop:4, fontStyle:"italic" }}>
-          {eg.reason === "ready" ? "All conditions met — will enter on next cycle" : eg.reason.replace(/_/g, " ")}
+          {eg.reason === "ready" ? "All conditions met \u2014 will enter on next cycle" : eg.reason.replace(/_/g, " ")}
         </div>
       </div>
     );
@@ -3403,9 +3399,6 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   const escapeOk = isoInPast(escapeCooldownUntilIso);
   const reentryOk = isoInPast(reEntryCooldownUntilIso);
   const cooldownOk = escapeOk && reentryOk;
-  const regimeOk = regimeLabel === requiredRegimeLabel && regimeConfidence >= requiredMinConfidence;
-  const confirmOk = meanRevertConfirmSec >= requiredMeanRevertConfirmSec;
-  const distOk = distanceFromMuPct != null && maxDistanceFromMuPct > 0 && distanceFromMuPct <= maxDistanceFromMuPct * 100;
 
   const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
 
@@ -3426,21 +3419,10 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
       </div>
 
       <div style={condRowStyle}>
-        <span style={labelStyle}>Regime</span>
-        <span style={{ ...valStyle(regimeOk), color: regimeOk ? "#22c55e" : "#ef4444" }}>
+        <span style={labelStyle}>Regime at entry</span>
+        <span style={{ fontSize:11, color:"rgba(232,232,240,0.6)" }}>
           {regimeLabel === "unknown" ? "no data" : `${regimeLabel} (${(regimeConfidence * 100).toFixed(0)}%)`}
-        </span>
-      </div>
-
-      <div style={condRowStyle}>
-        <span style={labelStyle}>Mean-revert confirmed</span>
-        <span style={valStyle(confirmOk)}>{confirmOk ? `${fmtSec(meanRevertConfirmSec)}` : `${fmtSec(meanRevertConfirmSec)} / ${fmtSec(requiredMeanRevertConfirmSec)}`}</span>
-      </div>
-
-      <div style={condRowStyle}>
-        <span style={labelStyle}>Distance from mean</span>
-        <span style={{ ...valStyle(distOk), color: distanceFromMuPct == null ? "rgba(232,232,240,0.3)" : distOk ? "#22c55e" : "#ef4444" }}>
-          {distanceFromMuPct != null ? `${distanceFromMuPct.toFixed(2)}%${maxDistanceFromMuPct > 0 ? ` / ${(maxDistanceFromMuPct * 100).toFixed(1)}%` : ""}` : "no data"}
+          <span style={{ fontSize:10, color:"rgba(232,232,240,0.3)", marginLeft:4 }}>{"\u2192"} sets band width</span>
         </span>
       </div>
 
