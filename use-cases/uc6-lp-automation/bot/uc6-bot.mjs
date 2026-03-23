@@ -16,6 +16,7 @@ import {
   getAddress,
   http as viemHttp,
   maxUint256,
+  parseAbi,
   parseUnits,
   zeroAddress,
 } from "viem";
