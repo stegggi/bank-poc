@@ -2392,6 +2392,10 @@ export default function Uc6Page() {
               computedAtIso={poolComparison?.computedAtIso ?? null}
             />
           </Uc6Card>
+
+          <Uc6Card title="Pool Discovery">
+            <PoolDiscoveryPanel />
+          </Uc6Card>
         </div>
 
         {/* ZONE 6: Position History */}
@@ -3592,6 +3596,122 @@ function PnlWindows({ status: st }: { status: Uc6Status | null }) {
         )}
       </div>
     </div>
+  );
+}
+
+type DiscoveredPool = {
+  venue: "slipstream" | "uniswapv3";
+  poolAddress: string;
+  selector: { type: string; value: number };
+  feeEquivalent: string;
+  currentTick: number;
+  currentPrice: number | null;
+  sqrtPriceX96: string;
+  liquidity: string | null;
+  liquidityUsd: number | null;
+  token0: string;
+  token1: string;
+  basescanUrl: string;
+};
+type DiscoveryResult = {
+  ok: boolean;
+  discoveredAtIso: string;
+  tokenA: { address: string; symbol: string; decimals: number };
+  tokenB: { address: string; symbol: string; decimals: number };
+  pools: DiscoveredPool[];
+};
+
+function PoolDiscoveryPanel() {
+  const [tokenA, setTokenA] = useState("");
+  const [tokenB, setTokenB] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [result, setResult] = useState<DiscoveryResult | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const KNOWN_TOKENS = [
+    { symbol: "WETH", address: "0x4200000000000000000000000000000000000006" },
+    { symbol: "USDC", address: "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913" },
+    { symbol: "AERO", address: "0x940181a94A35A4569E4529A3CDfB74e38FD98631" },
+    { symbol: "cbBTC", address: "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf" },
+    { symbol: "USDT", address: "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2" },
+    { symbol: "DAI", address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb" },
+  ];
+
+  const inputStyle: CSSProperties = { background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, padding:"6px 8px", color:"#e8e8f0", fontSize:12, width:"100%", fontFamily:"monospace" };
+
+  async function discover() {
+    if (!tokenA || !tokenB) return;
+    setLoading(true); setError(null);
+    try {
+      const r = await fetch(`/api/uc6/discover-pools?tokenA=${encodeURIComponent(tokenA)}&tokenB=${encodeURIComponent(tokenB)}`);
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.error || "Discovery failed");
+      setResult(data);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Unknown error");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <details>
+      <summary style={{ cursor:"pointer", color:"rgba(232,232,240,0.6)", fontSize:13, padding:"4px 0", marginBottom:8 }}>
+        Pool Discovery Tool
+      </summary>
+      <div style={{ display:"grid", gap:12, marginTop:8 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+          <div>
+            <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", marginBottom:4 }}>Token A</div>
+            <select style={inputStyle} value={tokenA} onChange={(e) => setTokenA(e.target.value)}>
+              <option value="">Select token...</option>
+              {KNOWN_TOKENS.map(t => <option key={t.address} value={t.address}>{t.symbol}</option>)}
+            </select>
+            <input style={{ ...inputStyle, marginTop:4 }} placeholder="Or paste address" value={tokenA} onChange={(e) => setTokenA(e.target.value.trim())} />
+          </div>
+          <div>
+            <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", marginBottom:4 }}>Token B</div>
+            <select style={inputStyle} value={tokenB} onChange={(e) => setTokenB(e.target.value)}>
+              <option value="">Select token...</option>
+              {KNOWN_TOKENS.map(t => <option key={t.address} value={t.address}>{t.symbol}</option>)}
+            </select>
+            <input style={{ ...inputStyle, marginTop:4 }} placeholder="Or paste address" value={tokenB} onChange={(e) => setTokenB(e.target.value.trim())} />
+          </div>
+        </div>
+        <button onClick={discover} disabled={loading || !tokenA || !tokenB} style={{ padding:"8px 16px", borderRadius:6, cursor: loading || !tokenA || !tokenB ? "not-allowed" : "pointer", opacity: loading || !tokenA || !tokenB ? 0.4 : 1, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", color:"#06b6d4", fontSize:13, fontWeight:600 }}>
+          {loading ? "Searching..." : "Discover pools"}
+        </button>
+        {error && <div style={{ color:"#ef4444", fontSize:12 }}>{error}</div>}
+        {result && (
+          <div>
+            <div style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:8 }}>
+              Found {result.pools.length} pool(s) for {result.tokenA.symbol}/{result.tokenB.symbol}
+            </div>
+            {result.pools.length === 0 ? (
+              <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, padding:"12px 0" }}>No pools found.</div>
+            ) : (
+              <DarkTable
+                headers={["Venue", "Pool", "Fee", "Price", "Approx TVL", "Link"]}
+                rows={result.pools.map(pool => [
+                  pool.venue === "slipstream" ? "Slipstream" : "Uni V3",
+                  <span key="addr" style={{ fontFamily:"monospace", fontSize:11, cursor:"pointer" }} title={`Click to copy: ${pool.poolAddress}`}
+                    onClick={() => navigator.clipboard?.writeText(pool.poolAddress)}>
+                    {pool.poolAddress.slice(0, 8)}...{pool.poolAddress.slice(-6)}
+                  </span>,
+                  pool.feeEquivalent,
+                  pool.currentPrice != null ? Number(pool.currentPrice).toPrecision(6) : "\u2014",
+                  pool.liquidityUsd != null ? `$${Number(pool.liquidityUsd).toLocaleString()}` : "\u2014",
+                  <a key="link" href={pool.basescanUrl} target="_blank" rel="noreferrer noopener" style={{ color:"#06b6d4", fontSize:11 }}>Verify</a>,
+                ])}
+              />
+            )}
+            <div style={{ fontSize:10, color:"rgba(232,232,240,0.3)", marginTop:8, lineHeight:1.5 }}>
+              Click pool address to copy. Set in .env as UC6_SLIPSTREAM_POOL or UC6_UNISWAP_POOL and restart.
+            </div>
+          </div>
+        )}
+      </div>
+    </details>
   );
 }
 

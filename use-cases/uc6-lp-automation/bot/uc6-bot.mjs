@@ -113,6 +113,16 @@ const POSITION_EVENTS_PATH = path.join(ENV.dataDir, "events.jsonl");
 const POSITION_RECORDS_PATH = path.join(ENV.dataDir, "positions.json");
 const CORRECTIONS_PATH = path.join(ENV.dataDir, "corrections.json");
 const POOL_RANKINGS_PATH = path.join(ENV.dataDir, "pool_rankings.json");
+
+// Factory contracts for pool discovery (immutable on Base)
+const SLIPSTREAM_FACTORY = "0x5e7BB104d84c7CB9B682AaC2F3d509f5F406809A";
+const UNISWAP_V3_FACTORY = "0x33128a8fC17869897dcE68Ed026d694621f6FDfD";
+const FACTORY_ABI = parseAbi([
+  "function getPool(address tokenA, address tokenB, int24 tickSpacingOrFee) view returns (address)",
+]);
+const SLIPSTREAM_TICK_SPACINGS = [1, 2, 5, 10, 20, 50, 100, 200];
+const UNISWAP_FEE_TIERS = [100, 500, 3000, 10000];
+const LIQUIDITY_ABI = parseAbi(["function liquidity() view returns (uint128)"]);
 const POOL_TVL_HISTORY_PATH = path.join(ENV.dataDir, "pool_tvl_history.jsonl");
 const USED_NONCES_PATH = path.join(ENV.dataDir, "used_nonces.jsonl");
 const OWNER_AUDIT_PATH = path.join(ENV.dataDir, "owner_audit.jsonl");
@@ -11337,6 +11347,107 @@ class Uc6Bot {
     }
   }
 
+  // ── Pool Discovery (read-only) ─────────────────────────────────────────
+  tickSpacingToApproxFee(ts) {
+    const MAP = { 1:"~0.01%", 2:"~0.02%", 5:"~0.04%", 10:"~0.04%", 20:"~0.08%", 50:"~0.20%", 100:"~0.40%", 200:"~1.00%" };
+    return MAP[ts] || `ts=${ts}`;
+  }
+
+  async resolveTokenMeta(tokenAddr) {
+    const addr = getAddress(tokenAddr);
+    const KNOWN = {
+      "0x4200000000000000000000000000000000000006": { symbol: "WETH", decimals: 18 },
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913": { symbol: "USDC", decimals: 6 },
+      "0x940181a94A35A4569E4529A3CDfB74e38FD98631": { symbol: "AERO", decimals: 18 },
+      "0xcbB7C0000aB88B473b1f5aFd9ef808440eed33Bf": { symbol: "cbBTC", decimals: 8 },
+      "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2": { symbol: "USDT", decimals: 6 },
+      "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb": { symbol: "DAI", decimals: 18 },
+    };
+    for (const [k, v] of Object.entries(KNOWN)) {
+      if (sameAddress(addr, k)) return { address: addr, ...v };
+    }
+    try {
+      const [symbol, decimals] = await Promise.all([
+        this.publicClient.readContract({ address: addr, abi: parseAbi(["function symbol() view returns (string)"]), functionName: "symbol" }),
+        this.publicClient.readContract({ address: addr, abi: parseAbi(["function decimals() view returns (uint8)"]), functionName: "decimals" }),
+      ]);
+      return { address: addr, symbol: String(symbol), decimals: Number(decimals) };
+    } catch {
+      return { address: addr, symbol: "???", decimals: 18 };
+    }
+  }
+
+  async discoverPoolsForPair(tokenA, tokenB) {
+    const pools = [];
+    const ZERO = "0x0000000000000000000000000000000000000000";
+
+    // Aerodrome Slipstream
+    for (const ts of SLIPSTREAM_TICK_SPACINGS) {
+      try {
+        const poolAddr = await this.publicClient.readContract({
+          address: SLIPSTREAM_FACTORY, abi: FACTORY_ABI, functionName: "getPool", args: [tokenA, tokenB, ts],
+        });
+        if (!poolAddr || poolAddr === ZERO) continue;
+        const snapshot = await this.getPoolSnapshot(poolAddr, "slipstream").catch(() => null);
+        if (!snapshot) continue;
+        let liquidityRaw = null;
+        try { liquidityRaw = await this.publicClient.readContract({ address: poolAddr, abi: LIQUIDITY_ABI, functionName: "liquidity" }); } catch {}
+        pools.push({
+          venue: "slipstream", poolAddress: getAddress(poolAddr),
+          selector: { type: "tickSpacing", value: ts }, feeEquivalent: this.tickSpacingToApproxFee(ts),
+          currentTick: snapshot.tick, currentPrice: snapshot.priceQuotePerBase, sqrtPriceX96: snapshot.sqrtPriceX96,
+          liquidity: liquidityRaw?.toString() || null, liquidityUsd: null,
+          token0: snapshot.token0, token1: snapshot.token1,
+          basescanUrl: `https://basescan.org/address/${getAddress(poolAddr)}`,
+        });
+      } catch {}
+    }
+
+    // Uniswap V3
+    for (const fee of UNISWAP_FEE_TIERS) {
+      try {
+        const poolAddr = await this.publicClient.readContract({
+          address: UNISWAP_V3_FACTORY, abi: FACTORY_ABI, functionName: "getPool", args: [tokenA, tokenB, fee],
+        });
+        if (!poolAddr || poolAddr === ZERO) continue;
+        const snapshot = await this.getPoolSnapshot(poolAddr, "uniswapv3").catch(() => null);
+        if (!snapshot) continue;
+        let liquidityRaw = null;
+        try { liquidityRaw = await this.publicClient.readContract({ address: poolAddr, abi: LIQUIDITY_ABI, functionName: "liquidity" }); } catch {}
+        pools.push({
+          venue: "uniswapv3", poolAddress: getAddress(poolAddr),
+          selector: { type: "fee", value: fee }, feeEquivalent: `${(fee / 10000).toFixed(fee % 100 === 0 ? 2 : 4)}%`,
+          currentTick: snapshot.tick, currentPrice: snapshot.priceQuotePerBase, sqrtPriceX96: snapshot.sqrtPriceX96,
+          liquidity: liquidityRaw?.toString() || null, liquidityUsd: null,
+          token0: snapshot.token0, token1: snapshot.token1,
+          basescanUrl: `https://basescan.org/address/${getAddress(poolAddr)}`,
+        });
+      } catch {}
+    }
+
+    // Enrich with approximate USD liquidity
+    for (const pool of pools) {
+      if (!pool.liquidity || !pool.sqrtPriceX96) continue;
+      try {
+        const sqrtPrice = Number(BigInt(pool.sqrtPriceX96)) / 2 ** 96;
+        const L = Number(pool.liquidity);
+        if (L > 0 && sqrtPrice > 0) {
+          const dec0 = this.tokenDecimals(pool.token0);
+          const dec1 = this.tokenDecimals(pool.token1);
+          const human0 = (L / sqrtPrice) / (10 ** dec0);
+          const human1 = (L * sqrtPrice) / (10 ** dec1);
+          const usd0 = human0 * this.getTokenUsdPrice(pool.token0);
+          const usd1 = human1 * this.getTokenUsdPrice(pool.token1);
+          pool.liquidityUsd = Math.round(usd0 + usd1);
+        }
+      } catch {}
+    }
+
+    pools.sort((a, b) => (Number(b.liquidityUsd) || 0) - (Number(a.liquidityUsd) || 0));
+    const [tokenAMeta, tokenBMeta] = await Promise.all([this.resolveTokenMeta(tokenA), this.resolveTokenMeta(tokenB)]);
+    return { ok: true, discoveredAtIso: nowIso(), tokenA: tokenAMeta, tokenB: tokenBMeta, pools };
+  }
+
   async handleOwnerSetStartValue(req, res) {
     const ip = extractIp(req);
     const rl = this.ownerActionRateLimiter.take(ip);
@@ -11381,6 +11492,20 @@ class Uc6Bot {
       const rl = this.publicStatusRateLimiter.take(extractIp(req));
       if (!rl.ok) return tooMany(res, rl.retryAfterSec);
       return jsonResponse(res, 200, this.statusPayload());
+    }
+
+    if (req.method === "GET" && u.pathname === "/discover-pools") {
+      const rl = this.publicPositionsRateLimiter.take(extractIp(req));
+      if (!rl.ok) return tooMany(res, rl.retryAfterSec);
+      const tokenA = u.searchParams.get("tokenA");
+      const tokenB = u.searchParams.get("tokenB");
+      if (!tokenA || !tokenB) return jsonResponse(res, 400, { error: "tokenA and tokenB query params required" });
+      try {
+        const result = await this.discoverPoolsForPair(tokenA, tokenB);
+        return jsonResponse(res, 200, result);
+      } catch (err) {
+        return jsonResponse(res, 500, { error: "Discovery failed", message: err instanceof Error ? err.message : String(err) });
+      }
     }
 
     if (req.method === "GET" && u.pathname === "/positions") {
