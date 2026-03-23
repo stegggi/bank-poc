@@ -345,10 +345,10 @@ type Uc6Status = {
   market?: {
     chain?: { name?: string; chainId?: number };
     venueActive?: Uc6Venue;
-    pair?: { base?: string; quote?: string };
+    pair?: { base?: string | { symbol?: string; address?: string; decimals?: number }; quote?: string | { symbol?: string; address?: string; decimals?: number } };
     selector?: { type?: "tickSpacing" | "fee"; value?: number };
     poolAddress?: string | null;
-    spotPrice?: { usdcPerWeth?: number; updatedAtIso?: string | null };
+    spotPrice?: { quotePerBase?: number; usdcPerWeth?: number; updatedAtIso?: string | null };
     tick?: { current?: number; spacing?: number };
     primary?: unknown;
     fallback?: unknown;
@@ -1851,7 +1851,9 @@ export default function Uc6Page() {
   const lpWethSideUsd = n(status?.position?.amountsInLP?.sideUsd?.weth, 0);
   const lpSplitUsdcPct = lpValueUsd > 0 ? (lpUsdcSideUsd / lpValueUsd) * 100 : 0;
   const lpSplitWethPct = lpValueUsd > 0 ? (lpWethSideUsd / lpValueUsd) * 100 : 0;
-  const activePairLabel = `${activeLifecycleRecord?.pair?.base || status?.market?.pair?.base || "WETH"}/${activeLifecycleRecord?.pair?.quote || status?.market?.pair?.quote || "USDC"}`;
+  const _pairBase = (() => { const b = status?.market?.pair?.base; return typeof b === "object" ? b?.symbol : b; })() || activeLifecycleRecord?.pair?.base || "WETH";
+  const _pairQuote = (() => { const q = status?.market?.pair?.quote; return typeof q === "object" ? q?.symbol : q; })() || activeLifecycleRecord?.pair?.quote || "USDC";
+  const activePairLabel = `${_pairBase}/${_pairQuote}`;
   const activeBandTicksLabel = `${String(status?.position?.tickLower ?? "—")} .. ${String(status?.position?.tickUpper ?? "—")}`;
   const holdTargetLabel =
     strategyMode === "HOLD_WETH"
@@ -2018,7 +2020,7 @@ export default function Uc6Page() {
         {/* Spot price */}
         <span style={{ fontFamily:"monospace", fontSize:18, fontWeight:700, color:"#e8e8f0" }}>
           {fmtSpotPrice(status?.market?.spotPrice?.usdcPerWeth)}
-          <span style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginLeft:4 }}>WETH/USDC</span>
+          <span style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginLeft:4 }}>{activePairLabel}</span>
         </span>
 
         {/* Separator */}

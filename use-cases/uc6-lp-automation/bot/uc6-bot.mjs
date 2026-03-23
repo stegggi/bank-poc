@@ -91,6 +91,20 @@ const ENV = {
   uniswapRouter: process.env.UC6_UNISWAP_ROUTER || "0x2626664c2603336E57B271c5C0b26F421741e481",
   uniswapQuoter: process.env.UC6_UNISWAP_QUOTER || "0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a",
   uniswapNpm: process.env.UC6_UNISWAP_NPM || "0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1",
+
+  // Configurable token pair — defaults to WETH/USDC for backward compat
+  pair: {
+    base: {
+      symbol: process.env.UC6_PAIR_BASE_SYMBOL || "WETH",
+      address: process.env.UC6_PAIR_BASE_ADDRESS || (process.env.UC6_TOKEN_WETH || "0x4200000000000000000000000000000000000006"),
+      decimals: Number(process.env.UC6_PAIR_BASE_DECIMALS || 18),
+    },
+    quote: {
+      symbol: process.env.UC6_PAIR_QUOTE_SYMBOL || "USDC",
+      address: process.env.UC6_PAIR_QUOTE_ADDRESS || (process.env.UC6_TOKEN_USDC || "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"),
+      decimals: Number(process.env.UC6_PAIR_QUOTE_DECIMALS || 6),
+    },
+  },
 };
 
 const SETTINGS_PATH = path.join(ENV.dataDir, "settings.json");
@@ -1849,6 +1863,14 @@ class Uc6Bot {
     this.ownerAddress = getAddress(ENV.ownerAddress);
     this.usdc = getAddress(ENV.usdc);
     this.weth = getAddress(ENV.weth);
+
+    // Configurable pair tokens (defaults to WETH/USDC)
+    this.tokenBase = getAddress(ENV.pair.base.address);
+    this.tokenQuote = getAddress(ENV.pair.quote.address);
+    this.tokenBaseDecimals = ENV.pair.base.decimals;
+    this.tokenQuoteDecimals = ENV.pair.quote.decimals;
+    this.tokenBaseSymbol = ENV.pair.base.symbol;
+    this.tokenQuoteSymbol = ENV.pair.quote.symbol;
     this.slipstreamPool = getAddress(ENV.slipstreamPool);
     this.slipstreamRouter = getAddress(ENV.slipstreamRouter);
     this.slipstreamQuoter = getAddress(ENV.slipstreamQuoter);
@@ -2735,7 +2757,106 @@ class Uc6Bot {
     }
   }
 
+  // ── Generic pair helpers ──────────────────────────────────────────────────
+  isTokenBase(addr) { return sameAddress(addr, this.tokenBase); }
+  isTokenQuote(addr) { return sameAddress(addr, this.tokenQuote); }
+
+  identifyPairTokens(token0, token1) {
+    if (sameAddress(token0, this.tokenBase) && sameAddress(token1, this.tokenQuote)) return { baseIs: 0 };
+    if (sameAddress(token0, this.tokenQuote) && sameAddress(token1, this.tokenBase)) return { baseIs: 1 };
+    return { baseIs: 0 }; // fallback
+  }
+
+  tokenDecimals(addr) {
+    if (sameAddress(addr, this.tokenBase)) return this.tokenBaseDecimals;
+    if (sameAddress(addr, this.tokenQuote)) return this.tokenQuoteDecimals;
+    if (sameAddress(addr, this.usdc)) return 6;
+    if (sameAddress(addr, this.weth)) return 18;
+    return 18;
+  }
+
+  toQuotePerBasePrice(sqrtPriceX96, token0, token1) {
+    const sqrt = Number(sqrtPriceX96) / 2 ** 96;
+    const raw = sqrt * sqrt;
+    if (!Number.isFinite(raw) || raw <= 0) return null;
+    const dec0 = this.tokenDecimals(token0);
+    const dec1 = this.tokenDecimals(token1);
+    const humanToken1PerToken0 = raw * 10 ** (dec0 - dec1);
+    const { baseIs } = this.identifyPairTokens(token0, token1);
+    if (baseIs === 0) return humanToken1PerToken0; // token0=base, token1=quote
+    if (humanToken1PerToken0 === 0) return null;
+    return 1 / humanToken1PerToken0; // token0=quote, token1=base → invert
+  }
+
+  getSpotPrice() {
+    const primary = this.state.latest?.primary?.priceQuotePerBase ?? this.state.latest?.primary?.priceUsdcPerWeth;
+    if (Number.isFinite(primary) && primary > 0) return primary;
+    const fallback = this.state.latest?.fallback?.priceQuotePerBase ?? this.state.latest?.fallback?.priceUsdcPerWeth;
+    if (Number.isFinite(fallback) && fallback > 0) return fallback;
+    return 0;
+  }
+
+  isStablecoin(addr) {
+    const STABLES = [
+      "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913", // USDC Base
+      "0xfde4C96c8593536E31F229EA8f37b2ADa2699bb2", // USDT Base
+      "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb", // DAI Base
+    ];
+    return STABLES.some(s => sameAddress(addr, s));
+  }
+
+  getTokenUsdPrice(tokenAddr) {
+    if (this.isStablecoin(tokenAddr)) return 1.0;
+    if (sameAddress(tokenAddr, this.weth)) {
+      // If pair includes WETH and a stablecoin quote, derive from spot
+      if (sameAddress(this.tokenBase, this.weth) && this.isStablecoin(this.tokenQuote)) {
+        return this.getSpotPrice() || this._cachedWethUsdPrice || 0;
+      }
+      return this._cachedWethUsdPrice || 0;
+    }
+    // Derive from pair relationship
+    const spot = this.getSpotPrice();
+    if (sameAddress(tokenAddr, this.tokenBase)) {
+      const quoteUsd = this.getTokenUsdPrice(this.tokenQuote);
+      return spot * quoteUsd;
+    }
+    if (sameAddress(tokenAddr, this.tokenQuote)) {
+      const baseUsd = this.getTokenUsdPrice(this.tokenBase);
+      return spot > 0 ? baseUsd / spot : 0;
+    }
+    return 0;
+  }
+
+  async refreshExternalWethUsdPrice() {
+    // Only needed when pair doesn't include a stablecoin
+    if (this.isStablecoin(this.tokenQuote) && sameAddress(this.tokenBase, this.weth)) return;
+    if (this.isStablecoin(this.tokenBase) && sameAddress(this.tokenQuote, this.weth)) return;
+    const CANONICAL_POOL = "0xb2cc224c1c9fee385f8ad6a55b4d94e92359dc59";
+    try {
+      const slot0 = await this.readSlot0(CANONICAL_POOL);
+      const sqrtPriceX96 = slot0.sqrtPriceX96 ?? slot0[0];
+      const meta = await this.getPoolMetaCached(CANONICAL_POOL);
+      const sqrt = Number(sqrtPriceX96) / 2 ** 96;
+      const raw = sqrt * sqrt;
+      const dec0 = sameAddress(meta.token0, this.usdc) ? 6 : 18;
+      const dec1 = sameAddress(meta.token1, this.usdc) ? 6 : 18;
+      const t1PerT0 = raw * 10 ** (dec0 - dec1);
+      this._cachedWethUsdPrice = sameAddress(meta.token0, this.weth) ? t1PerT0 : (1 / t1PerT0);
+      this._cachedWethUsdPriceAtMs = Date.now();
+    } catch {}
+  }
+  // ── End generic pair helpers ────────────────────────────────────────────
+
   getSpotUsdcPerWeth() {
+    // Backward compat — for WETH/USDC pair, same as getSpotPrice
+    if (sameAddress(this.tokenBase, this.weth) && this.isStablecoin(this.tokenQuote)) {
+      return this.getSpotPrice();
+    }
+    return this.getTokenUsdPrice(this.weth) || 0;
+  }
+
+  // Legacy alias — kept for call sites that haven't migrated yet
+  _legacyGetSpotUsdcPerWeth() {
     const primary = this.state.latest?.primary?.priceUsdcPerWeth;
     if (Number.isFinite(primary) && primary > 0) return primary;
     const fallback = this.state.latest?.fallback?.priceUsdcPerWeth;
@@ -2775,11 +2896,11 @@ class Uc6Bot {
 
   toUsdForTokenAmountRaw(tokenAddress, amountRaw, spotUsdcPerWeth) {
     if (!amountRaw || amountRaw <= 0n) return 0;
-    if (sameAddress(tokenAddress, this.usdc)) {
-      return Number(formatUnits(amountRaw, USDC_DECIMALS));
+    if (this.isTokenQuote(tokenAddress)) {
+      return Number(formatUnits(amountRaw, this.tokenQuoteDecimals));
     }
-    if (sameAddress(tokenAddress, this.weth)) {
-      return Number(formatUnits(amountRaw, WETH_DECIMALS)) * spotUsdcPerWeth;
+    if (this.isTokenBase(tokenAddress)) {
+      return Number(formatUnits(amountRaw, this.tokenBaseDecimals)) * spotUsdcPerWeth;
     }
     return 0;
   }
@@ -2842,7 +2963,7 @@ class Uc6Bot {
       chain: { name: "Base", chainId: base.id },
       venue: seed.venue || "slipstream",
       poolAddress: seed.poolAddress || this.slipstreamPool,
-      pair: { base: "WETH", quote: "USDC" },
+      pair: { base: this.tokenBaseSymbol, quote: this.tokenQuoteSymbol },
       selector: seed.selector || { type: "tickSpacing", value: 0, humanLabel: undefined },
       band: seed.band || { bandHalfBps: 0, bandHalfBpsUp: null, bandHalfBpsDown: null, centerTick: null, tickLower: 0, tickUpper: 0 },
       entry: {
@@ -2908,8 +3029,8 @@ class Uc6Bot {
         closedAtMs: null,
       },
       _internal: {
-        baselineWeth: 0,
-        baselineUsdc: 0,
+        baselineBase: 0,
+        baselineQuote: 0,
         entryCaptured: false,
         openPhaseDone: false,
       },
@@ -3099,6 +3220,8 @@ class Uc6Bot {
 
   symbolForPoolCompareAddress(addr) {
     if (!addr) return null;
+    if (this.isTokenBase(addr)) return this.tokenBaseSymbol || "WETH";
+    if (this.isTokenQuote(addr)) return this.tokenQuoteSymbol || "USDC";
     if (sameAddress(addr, this.weth)) return "WETH";
     if (sameAddress(addr, this.usdc)) return "USDC";
     return null;
@@ -3118,10 +3241,10 @@ class Uc6Bot {
     const refCapitalUsd = this.estimateAggregatedLpUsdValueFromLatest();
     const gasBaselineUsd = this.getPoolComparisonGasBaselineUsd();
 
-    const token0 = activePool?.token0 || this.weth;
-    const token1 = activePool?.token1 || this.usdc;
-    const baseSymbol = this.symbolForPoolCompareAddress(token0) || "WETH";
-    const quoteSymbol = this.symbolForPoolCompareAddress(token1) || "USDC";
+    const token0 = activePool?.token0 || this.tokenBase;
+    const token1 = activePool?.token1 || this.tokenQuote;
+    const baseSymbol = this.symbolForPoolCompareAddress(token0) || this.tokenBaseSymbol || "WETH";
+    const quoteSymbol = this.symbolForPoolCompareAddress(token1) || this.tokenQuoteSymbol || "USDC";
 
     return {
       poolAddress: String(activePool?.pool || ENV.slipstreamPool || "").toLowerCase() || null,
@@ -3372,12 +3495,12 @@ class Uc6Bot {
     rec._meta.closedAtMs = Date.parse(rec.exit.closedAtIso) || null;
     rec.status = "CLOSED";
 
-    const baselineWeth = Number(rec._internal?.baselineWeth || 0);
-    const baselineUsdc = Number(rec._internal?.baselineUsdc || 0);
-    const hasBaseline = Boolean(rec?._internal?.entryCaptured) && (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0);
+    const baselineBase = Number(rec._internal?.baselineBase || rec._internal?.baselineWeth || 0);
+    const baselineQuote = Number(rec._internal?.baselineQuote || rec._internal?.baselineUsdc || 0);
+    const hasBaseline = Boolean(rec?._internal?.entryCaptured) && (Math.abs(baselineBase) > 0 || Math.abs(baselineQuote) > 0);
     const pExit = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
     if (pExit > 0 && hasBaseline) {
-      const hodlExit = baselineWeth * pExit + baselineUsdc;
+      const hodlExit = baselineBase * pExit + baselineQuote;
       const lpExitPrincipal = exitTokens.weth * pExit + exitTokens.usdc;
       if (Number.isFinite(hodlExit) && Number.isFinite(lpExitPrincipal)) {
         rec.performance.impermanentLossUsd = lpExitPrincipal - hodlExit;
@@ -3416,15 +3539,15 @@ class Uc6Bot {
     } catch {
       return null;
     }
-    const wethLower = String(this.weth || ENV.weth || "").toLowerCase();
-    const usdcLower = String(this.usdc || ENV.usdc || "").toLowerCase();
-    if (!wethLower || !usdcLower) return null;
-    const token0IsWeth = wethLower < usdcLower;
-    const wethRaw = token0IsWeth ? amount0Used : amount1Used;
-    const usdcRaw = token0IsWeth ? amount1Used : amount0Used;
+    const baseLower = String(this.tokenBase || this.weth || ENV.weth || "").toLowerCase();
+    const quoteLower = String(this.tokenQuote || this.usdc || ENV.usdc || "").toLowerCase();
+    if (!baseLower || !quoteLower) return null;
+    const token0IsBase = baseLower < quoteLower;
+    const baseRaw = token0IsBase ? amount0Used : amount1Used;
+    const quoteRaw = token0IsBase ? amount1Used : amount0Used;
     return {
-      weth: Number(formatUnits(wethRaw, WETH_DECIMALS)),
-      usdc: Number(formatUnits(usdcRaw, USDC_DECIMALS)),
+      weth: Number(formatUnits(baseRaw, this.tokenBaseDecimals)),
+      usdc: Number(formatUnits(quoteRaw, this.tokenQuoteDecimals)),
     };
   }
 
@@ -3707,9 +3830,9 @@ class Uc6Bot {
     }
     rec.entry.entrySnapshotApprox = Boolean(baseline.approx);
     if (baseline.note) rec.entry.entrySnapshotNote = String(baseline.note);
-    rec._internal.baselineWeth = Number(rec.entry.entryTokens?.weth || 0);
-    rec._internal.baselineUsdc = Number(rec.entry.entryTokens?.usdc || 0);
-    rec._internal.entryCaptured = (Math.abs(rec._internal.baselineWeth) > 0 || Math.abs(rec._internal.baselineUsdc) > 0);
+    rec._internal.baselineBase = Number(rec.entry.entryTokens?.weth || 0);
+    rec._internal.baselineQuote = Number(rec.entry.entryTokens?.usdc || 0);
+    rec._internal.entryCaptured = (Math.abs(rec._internal.baselineBase) > 0 || Math.abs(rec._internal.baselineQuote) > 0);
     rec._internal.openPhaseDone = true;
     this.appendLifecycleRecordNote(rec, baseline.note || "entry snapshot fallback applied");
     const afterKey = JSON.stringify({
@@ -3835,16 +3958,16 @@ class Uc6Bot {
         return 0n;
       }
     })();
-    if (sameAddress(tokenIn, this.weth)) rec._internal.baselineWeth -= Number(formatUnits(actualIn, WETH_DECIMALS));
-    if (sameAddress(tokenOut, this.weth)) rec._internal.baselineWeth += Number(formatUnits(actualOut, WETH_DECIMALS));
-    if (sameAddress(tokenIn, this.usdc)) rec._internal.baselineUsdc -= Number(formatUnits(actualIn, USDC_DECIMALS));
-    if (sameAddress(tokenOut, this.usdc)) rec._internal.baselineUsdc += Number(formatUnits(actualOut, USDC_DECIMALS));
+    if (this.isTokenBase(tokenIn)) rec._internal.baselineBase -= Number(formatUnits(actualIn, this.tokenBaseDecimals));
+    if (this.isTokenBase(tokenOut)) rec._internal.baselineBase += Number(formatUnits(actualOut, this.tokenBaseDecimals));
+    if (this.isTokenQuote(tokenIn)) rec._internal.baselineQuote -= Number(formatUnits(actualIn, this.tokenQuoteDecimals));
+    if (this.isTokenQuote(tokenOut)) rec._internal.baselineQuote += Number(formatUnits(actualOut, this.tokenQuoteDecimals));
   }
 
   updateBaselineFromPrincipalAdd(rec, principal = {}) {
     if (!rec?._internal?.entryCaptured) return;
-    rec._internal.baselineWeth += Number(principal.weth || 0);
-    rec._internal.baselineUsdc += Number(principal.usdc || 0);
+    rec._internal.baselineBase += Number(principal.weth || 0);
+    rec._internal.baselineQuote += Number(principal.usdc || 0);
   }
 
   recomputeLifecycleRecordDerived(rec) {
@@ -3858,20 +3981,20 @@ class Uc6Bot {
     // Use swap-adjusted baseline when available (consistent with live HODL gate
     // and closeLifecycleRecordFromPrincipalOut). Fall back to original entry tokens.
     const hasAdjustedBaseline = Boolean(rec._internal?.entryCaptured) &&
-      (Math.abs(Number(rec._internal?.baselineWeth || 0)) > 0 || Math.abs(Number(rec._internal?.baselineUsdc || 0)) > 0);
-    const baselineWeth = hasAdjustedBaseline ? Number(rec._internal.baselineWeth) : Number(rec.entry?.entryTokens?.weth || 0);
-    const baselineUsdc = hasAdjustedBaseline ? Number(rec._internal.baselineUsdc) : Number(rec.entry?.entryTokens?.usdc || 0);
+      (Math.abs(Number(rec._internal?.baselineBase || rec._internal?.baselineWeth || 0)) > 0 || Math.abs(Number(rec._internal?.baselineQuote || rec._internal?.baselineUsdc || 0)) > 0);
+    const baselineBase = hasAdjustedBaseline ? Number(rec._internal.baselineBase ?? rec._internal.baselineWeth) : Number(rec.entry?.entryTokens?.weth || 0);
+    const baselineQuote = hasAdjustedBaseline ? Number(rec._internal.baselineQuote ?? rec._internal.baselineUsdc) : Number(rec.entry?.entryTokens?.usdc || 0);
     const exitWeth = Number(rec.exit?.exitTokens?.weth || 0);
     const exitUsdc = Number(rec.exit?.exitTokens?.usdc || 0);
     const exitSpot = Number(rec.exit?.spotPriceUsdcPerWeth || 0);
     if (
       rec.status === "CLOSED" &&
       exitSpot > 0 &&
-      (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0) &&
+      (Math.abs(baselineBase) > 0 || Math.abs(baselineQuote) > 0) &&
       (Math.abs(exitWeth) > 0 || Math.abs(exitUsdc) > 0) &&
       Number(rec.exit?.exitValueUsd || 0) > 0 // Guard: don't compute IL with missing exit data
     ) {
-      const hodlExitUsd = baselineUsdc + baselineWeth * exitSpot;
+      const hodlExitUsd = baselineQuote + baselineBase * exitSpot;
       const lpExitPrincipalUsd = exitUsdc + exitWeth * exitSpot;
       perf.impermanentLossUsd = lpExitPrincipalUsd - hodlExitUsd;
     } else {
@@ -4149,8 +4272,8 @@ class Uc6Bot {
         if (Number(ev.details?.rawMintValueUsd || 0) > 0) {
           rec.entry.rawMintValueUsd = Number(ev.details.rawMintValueUsd);
         }
-        rec._internal.baselineWeth = rec.entry.entryTokens.weth;
-        rec._internal.baselineUsdc = rec.entry.entryTokens.usdc;
+        rec._internal.baselineBase = rec.entry.entryTokens.weth;
+        rec._internal.baselineQuote = rec.entry.entryTokens.usdc;
         rec._internal.entryCaptured = true;
         rec._internal.openPhaseDone = true;
         this.recomputeLifecycleRecordDerived(rec);
@@ -4553,17 +4676,17 @@ class Uc6Bot {
       this.applyEntryBaselineFallbackToRecord(rec, historicalBaseline);
     }
 
-    let baselineWeth = Number(rec?._internal?.baselineWeth || 0);
-    let baselineUsdc = Number(rec?._internal?.baselineUsdc || 0);
+    let baselineBase = Number(rec?._internal?.baselineBase || rec?._internal?.baselineWeth || 0);
+    let baselineQuote = Number(rec?._internal?.baselineQuote || rec?._internal?.baselineUsdc || 0);
     const hasHistoricalBaseline = Boolean(rec?._internal?.entryCaptured) &&
-      (Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0);
+      (Math.abs(baselineBase) > 0 || Math.abs(baselineQuote) > 0);
 
     // If no historical baseline can be reconstructed, adopt current LP
     // composition as a degraded baseline to keep gate math coherent.
     const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
     if (!hasHistoricalBaseline && hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96) {
-      const token0 = activePool?.token0 || this.weth;
-      const token1 = activePool?.token1 || this.usdc;
+      const token0 = activePool?.token0 || this.tokenBase;
+      const token1 = activePool?.token1 || this.tokenQuote;
       const amounts = this.lpAmountsFromLiquidity(
         liquidityRaw,
         tickLower,
@@ -4572,12 +4695,12 @@ class Uc6Bot {
         token0,
         token1
       );
-      baselineUsdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
-      baselineWeth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+      baselineQuote = Number(formatUnits(amounts.quoteRaw, this.tokenQuoteDecimals));
+      baselineBase = Number(formatUnits(amounts.baseRaw, this.tokenBaseDecimals));
     }
 
     const spot = Number(this.getSpotUsdcPerWeth() || 0);
-    const entryValueUsd = baselineUsdc + (spot > 0 ? baselineWeth * spot : 0);
+    const entryValueUsd = baselineQuote + (spot > 0 ? baselineBase * spot : 0);
     rec.status = "OPEN";
     rec.tokenId = tokenId;
     rec.venue = venue;
@@ -4591,16 +4714,16 @@ class Uc6Bot {
     };
     rec.entry.openedAtIso = rec.entry.openedAtIso || now;
     rec.entry.entrySnapshotAtIso = rec.entry.entrySnapshotAtIso || now;
-    rec.entry.entryTokens = { weth: baselineWeth, usdc: baselineUsdc };
+    rec.entry.entryTokens = { weth: baselineBase, usdc: baselineQuote };
     rec.entry.entryValueUsd = entryValueUsd > 0 ? entryValueUsd : Number(rec.entry.entryValueUsd || 0);
     rec.entry.spotPriceUsdcPerWeth = spot > 0 ? spot : Number(rec.entry.spotPriceUsdcPerWeth || 0);
     rec.entry.entrySnapshotApprox = true;
     if (!hasHistoricalBaseline) {
       rec.entry.entrySnapshotNote = "entry snapshot fallback (adopted active on-chain position)";
     }
-    rec._internal.baselineWeth = baselineWeth;
-    rec._internal.baselineUsdc = baselineUsdc;
-    rec._internal.entryCaptured = Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0;
+    rec._internal.baselineBase = baselineBase;
+    rec._internal.baselineQuote = baselineQuote;
+    rec._internal.entryCaptured = Math.abs(baselineBase) > 0 || Math.abs(baselineQuote) > 0;
     rec._internal.openPhaseDone = true;
     this.appendLifecycleRecordNote(rec, "adopted active on-chain position after lifecycle gap");
     this.recomputeLifecycleRecordDerived(rec);
@@ -4627,12 +4750,12 @@ class Uc6Bot {
       lower,
       upper,
       BigInt(activePool.sqrtPriceX96),
-      activePool.token0 || this.weth,
-      activePool.token1 || this.usdc
+      activePool.token0 || this.tokenBase,
+      activePool.token1 || this.tokenQuote
     );
     const entryTokens = {
-      weth: Number(formatUnits(amounts.wethRaw, WETH_DECIMALS)),
-      usdc: Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS)),
+      weth: Number(formatUnits(amounts.baseRaw, this.tokenBaseDecimals)),
+      usdc: Number(formatUnits(amounts.quoteRaw, this.tokenQuoteDecimals)),
     };
     const spot = this.getSpotUsdcPerWeth();
     const entryValueUsd = entryTokens.usdc + entryTokens.weth * spot;
@@ -4855,8 +4978,8 @@ class Uc6Bot {
     const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
     const liquidityRaw = pos.liquidity ? BigInt(pos.liquidity) : 0n;
     if (!(hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96)) return 0;
-    const token0 = activePool?.token0 || this.weth;
-    const token1 = activePool?.token1 || this.usdc;
+    const token0 = activePool?.token0 || this.tokenBase;
+    const token1 = activePool?.token1 || this.tokenQuote;
     const amounts = this.lpAmountsFromLiquidity(
       liquidityRaw,
       tickLower,
@@ -4865,8 +4988,8 @@ class Uc6Bot {
       token0,
       token1
     );
-    const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
-    const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+    const usdc = Number(formatUnits(amounts.quoteRaw, this.tokenQuoteDecimals));
+    const weth = Number(formatUnits(amounts.baseRaw, this.tokenBaseDecimals));
     return usdc + weth * this.getSpotUsdcPerWeth();
   }
 
@@ -5117,11 +5240,11 @@ class Uc6Bot {
 
   lpAmountsFromLiquidity(liquidityRaw, tickLower, tickUpper, sqrtPriceX96Raw, token0, token1) {
     const liquidity = BigInt(liquidityRaw || 0);
-    if (liquidity <= 0n) return { usdcRaw: 0n, wethRaw: 0n };
+    if (liquidity <= 0n) return { quoteRaw: 0n, baseRaw: 0n };
     const sqrtP = BigInt(sqrtPriceX96Raw || 0n);
     const sqrtA = this.approxSqrtPriceX96FromTick(tickLower);
     const sqrtB = this.approxSqrtPriceX96FromTick(tickUpper);
-    if (sqrtP <= 0n || sqrtA <= 0n || sqrtB <= 0n || sqrtB <= sqrtA) return { usdcRaw: 0n, wethRaw: 0n };
+    if (sqrtP <= 0n || sqrtA <= 0n || sqrtB <= 0n || sqrtB <= sqrtA) return { quoteRaw: 0n, baseRaw: 0n };
 
     let amount0 = 0n;
     let amount1 = 0n;
@@ -5135,13 +5258,17 @@ class Uc6Bot {
       amount1 = (liquidity * (sqrtB - sqrtA)) / Q96;
     }
 
-    let usdcRaw = 0n;
-    let wethRaw = 0n;
-    if (sameAddress(token0, this.usdc)) usdcRaw = amount0;
-    if (sameAddress(token1, this.usdc)) usdcRaw = amount1;
-    if (sameAddress(token0, this.weth)) wethRaw = amount0;
-    if (sameAddress(token1, this.weth)) wethRaw = amount1;
-    return { usdcRaw, wethRaw };
+    const { baseIs } = this.identifyPairTokens(token0, token1);
+    let baseRaw = 0n;
+    let quoteRaw = 0n;
+    if (baseIs === 0) {
+      baseRaw = amount0;
+      quoteRaw = amount1;
+    } else {
+      baseRaw = amount1;
+      quoteRaw = amount0;
+    }
+    return { quoteRaw, baseRaw };
   }
 
   distanceToEdge(position, currentTick) {
@@ -5312,7 +5439,9 @@ class Uc6Bot {
     const spacing = Number(meta.tickSpacing);
     const feeTier = Number(meta.fee);
 
-    const priceUsdcPerWeth = this.toUsdcPerWethPrice(sqrtPriceX96, token0Addr, token1Addr);
+    const priceQuotePerBase = this.toQuotePerBasePrice(sqrtPriceX96, token0Addr, token1Addr);
+    // Backward compat alias
+    const priceUsdcPerWeth = priceQuotePerBase;
 
     return {
       venue,
@@ -5323,7 +5452,8 @@ class Uc6Bot {
       tickSpacing: spacing,
       tick,
       sqrtPriceX96: sqrtPriceX96.toString(),
-      priceUsdcPerWeth,
+      priceQuotePerBase,
+      priceUsdcPerWeth, // backward compat
       updatedAt: nowIso(),
     };
   }
@@ -5358,22 +5488,7 @@ class Uc6Bot {
   }
 
   toUsdcPerWethPrice(sqrtPriceX96, token0, token1) {
-    const sqrt = Number(sqrtPriceX96) / 2 ** 96;
-    const raw = sqrt * sqrt;
-    if (!Number.isFinite(raw) || raw <= 0) return null;
-
-    const dec0 = sameAddress(token0, this.usdc) ? USDC_DECIMALS : WETH_DECIMALS;
-    const dec1 = sameAddress(token1, this.usdc) ? USDC_DECIMALS : WETH_DECIMALS;
-    const humanToken1PerToken0 = raw * 10 ** (dec0 - dec1);
-
-    if (sameAddress(token0, this.weth) && sameAddress(token1, this.usdc)) {
-      return humanToken1PerToken0;
-    }
-    if (sameAddress(token0, this.usdc) && sameAddress(token1, this.weth)) {
-      if (humanToken1PerToken0 === 0) return null;
-      return 1 / humanToken1PerToken0;
-    }
-    return null;
+    return this.toQuotePerBasePrice(sqrtPriceX96, token0, token1);
   }
 
   async refreshSnapshots(options = {}) {
@@ -5402,30 +5517,30 @@ class Uc6Bot {
   }
 
   async refreshWalletBalancesHeavy() {
-    const [{ usdcBalanceRaw, wethBalanceRaw }, ethBalanceRaw] = await Promise.all([
+    const [{ quoteBalanceRaw, baseBalanceRaw }, ethBalanceRaw] = await Promise.all([
       this.readWalletPairBalances(),
       this.publicClient.getBalance({ address: this.account.address }),
     ]);
     const primary = this.state.latest?.primary || null;
     const fallback = this.state.latest?.fallback || null;
     const spot = this.toNumberOrZero(primary?.priceUsdcPerWeth) || this.toNumberOrZero(fallback?.priceUsdcPerWeth);
-    const usdcValue = Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS));
-    const wethValue = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)) * spot;
+    const quoteValue = Number(formatUnits(quoteBalanceRaw, this.tokenQuoteDecimals));
+    const baseValue = Number(formatUnits(baseBalanceRaw, this.tokenBaseDecimals)) * spot;
     const ethValue = Number(formatUnits(ethBalanceRaw, 18)) * spot;
     this.state.latest.wallet = {
-      usdc: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
-      weth: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
+      usdc: Number(formatUnits(quoteBalanceRaw, this.tokenQuoteDecimals)),
+      weth: Number(formatUnits(baseBalanceRaw, this.tokenBaseDecimals)),
       eth: Number(formatUnits(ethBalanceRaw, 18)),
       valuesUsd: {
-        usdc: usdcValue,
-        weth: wethValue,
+        usdc: quoteValue,
+        weth: baseValue,
         eth: ethValue,
-        total: usdcValue + wethValue + ethValue,
+        total: quoteValue + baseValue + ethValue,
       },
       updatedAt: nowIso(),
     };
     this.markRefreshStamp("balancesMs", "balancesAtIso");
-    return { usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
+    return { quoteBalanceRaw, baseBalanceRaw, ethBalanceRaw };
   }
 
   async refreshSnapshotsSelective({ forceSlot0 = false, forceBalances = false, headSeen = false } = {}) {
@@ -5443,8 +5558,8 @@ class Uc6Bot {
 
     let primary = this.state.latest?.primary || null;
     let fallback = this.state.latest?.fallback || null;
-    let usdcBalanceRaw = null;
-    let wethBalanceRaw = null;
+    let quoteBalanceRaw = null;
+    let baseBalanceRaw = null;
     let ethBalanceRaw = null;
 
     if (needSlot0) {
@@ -5461,15 +5576,15 @@ class Uc6Bot {
     if (needBalances) {
       try {
         const out = await this.refreshWalletBalancesHeavy();
-        usdcBalanceRaw = out.usdcBalanceRaw;
-        wethBalanceRaw = out.wethBalanceRaw;
+        quoteBalanceRaw = out.quoteBalanceRaw;
+        baseBalanceRaw = out.baseBalanceRaw;
         ethBalanceRaw = out.ethBalanceRaw;
       } catch (err) {
         this.setLastError(err);
         if (!this.state.latest?.wallet) throw err;
       }
     }
-    return { primary, fallback, usdcBalanceRaw, wethBalanceRaw, ethBalanceRaw };
+    return { primary, fallback, quoteBalanceRaw, baseBalanceRaw, ethBalanceRaw };
   }
 
   async refreshCollectableNowMaybe({ force = false } = {}) {
@@ -6067,14 +6182,14 @@ class Uc6Bot {
 
   async collectableNowSnapshot() {
     const tokenId = this.state.position?.tokenId;
-    if (!tokenId) return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+    if (!tokenId) return { quote: 0, base: 0, usdc: 0, weth: 0, usd: 0, isEstimated: true };
     const npm = this.state.position?.venue === "uniswapv3" ? this.uniswapNpm : this.slipstreamNpm;
     const venueActive = this.state.position?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
     const activePool = venueActive === "uniswapv3"
       ? this.state.latest?.fallback || this.state.latest?.primary || null
       : this.state.latest?.primary || this.state.latest?.fallback || null;
-    const token0 = getAddress(activePool?.token0 || this.weth);
-    const token1 = getAddress(activePool?.token1 || this.usdc);
+    const token0 = getAddress(activePool?.token0 || this.tokenBase);
+    const token1 = getAddress(activePool?.token1 || this.tokenQuote);
     const staked = Boolean(this.state.emissions?.staked);
     let out0 = 0n;
     let out1 = 0n;
@@ -6156,22 +6271,23 @@ class Uc6Bot {
         console.log(`[UC6] [collectable] feeGrowth compute tokenId=${tokenId} out0=${out0} out1=${out1} liq=${liquidity} tick=${currentTick} range=[${tickLower},${tickUpper}]`);
       } catch (err) {
         console.log(`[UC6] [collectable] feeGrowth compute FAILED tokenId=${tokenId} err=${err?.shortMessage || err?.message || err}`);
-        return { usdc: 0, weth: 0, usd: 0, isEstimated: true };
+        return { quote: 0, base: 0, usdc: 0, weth: 0, usd: 0, isEstimated: true };
       }
     }
-    let usdcRaw = 0n;
-    let wethRaw = 0n;
-    if (sameAddress(token0, this.usdc)) usdcRaw = out0;
-    if (sameAddress(token1, this.usdc)) usdcRaw = out1;
-    if (sameAddress(token0, this.weth)) wethRaw = out0;
-    if (sameAddress(token1, this.weth)) wethRaw = out1;
+    const { baseIs } = this.identifyPairTokens(token0, token1);
+    let quoteRaw = 0n;
+    let baseRaw = 0n;
+    if (baseIs === 0) { baseRaw = out0; quoteRaw = out1; }
+    else { quoteRaw = out0; baseRaw = out1; }
     const spot = this.getSpotUsdcPerWeth();
-    const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
-    const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+    const quote = Number(formatUnits(quoteRaw, this.tokenQuoteDecimals));
+    const base = Number(formatUnits(baseRaw, this.tokenBaseDecimals));
     return {
-      usdc,
-      weth,
-      usd: usdc + weth * spot,
+      quote,
+      base,
+      usdc: quote,
+      weth: base,
+      usd: quote + base * spot,
       isEstimated: estimated,
     };
   }
@@ -6191,32 +6307,32 @@ class Uc6Bot {
         allowFailure: true,
         contracts: [
           {
-            address: this.usdc,
+            address: this.tokenQuote,
             abi: erc20Abi,
             functionName: "balanceOf",
             args: [this.account.address],
           },
           {
-            address: this.weth,
+            address: this.tokenBase,
             abi: erc20Abi,
             functionName: "balanceOf",
             args: [this.account.address],
           },
         ],
       });
-      const usdcBalanceRaw = results?.[0]?.status === "success" ? BigInt(results[0].result || 0n) : null;
-      const wethBalanceRaw = results?.[1]?.status === "success" ? BigInt(results[1].result || 0n) : null;
-      if (usdcBalanceRaw != null && wethBalanceRaw != null) {
-        return { usdcBalanceRaw, wethBalanceRaw };
+      const quoteBalanceRaw = results?.[0]?.status === "success" ? BigInt(results[0].result || 0n) : null;
+      const baseBalanceRaw = results?.[1]?.status === "success" ? BigInt(results[1].result || 0n) : null;
+      if (quoteBalanceRaw != null && baseBalanceRaw != null) {
+        return { quoteBalanceRaw, baseBalanceRaw };
       }
     } catch {
       // Fall back to individual reads when multicall is unavailable or degraded.
     }
-    const [usdcBalanceRaw, wethBalanceRaw] = await Promise.all([
-      this.readTokenBalance(this.usdc),
-      this.readTokenBalance(this.weth),
+    const [quoteBalanceRaw, baseBalanceRaw] = await Promise.all([
+      this.readTokenBalance(this.tokenQuote),
+      this.readTokenBalance(this.tokenBase),
     ]);
-    return { usdcBalanceRaw, wethBalanceRaw };
+    return { quoteBalanceRaw, baseBalanceRaw };
   }
 
   async readAllowance(tokenAddress, spender) {
@@ -6249,19 +6365,19 @@ class Uc6Bot {
   }
 
   priceEstimateOut(amountIn, tokenIn, tokenOut, snapshot) {
-    const price = snapshot?.priceUsdcPerWeth;
+    const price = snapshot?.priceQuotePerBase ?? snapshot?.priceUsdcPerWeth;
     if (!price || !Number.isFinite(price) || price <= 0) return 0n;
 
-    if (sameAddress(tokenIn, this.usdc) && sameAddress(tokenOut, this.weth)) {
-      const usdcIn = Number(formatUnits(amountIn, USDC_DECIMALS));
-      const out = usdcIn / price;
-      return out > 0 ? parseUnits(out.toFixed(18), WETH_DECIMALS) : 0n;
+    if (sameAddress(tokenIn, this.tokenQuote) && sameAddress(tokenOut, this.tokenBase)) {
+      const quoteIn = Number(formatUnits(amountIn, this.tokenQuoteDecimals));
+      const out = quoteIn / price;
+      return out > 0 ? parseUnits(out.toFixed(18), this.tokenBaseDecimals) : 0n;
     }
 
-    if (sameAddress(tokenIn, this.weth) && sameAddress(tokenOut, this.usdc)) {
-      const wethIn = Number(formatUnits(amountIn, WETH_DECIMALS));
-      const out = wethIn * price;
-      return out > 0 ? parseUnits(out.toFixed(6), USDC_DECIMALS) : 0n;
+    if (sameAddress(tokenIn, this.tokenBase) && sameAddress(tokenOut, this.tokenQuote)) {
+      const baseIn = Number(formatUnits(amountIn, this.tokenBaseDecimals));
+      const out = baseIn * price;
+      return out > 0 ? parseUnits(out.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals) : 0n;
     }
 
     return 0n;
@@ -6343,15 +6459,15 @@ class Uc6Bot {
 
   toNumberTokenAmount(tokenAddress, amountRaw) {
     if (!amountRaw || amountRaw <= BigInt(0)) return 0;
-    if (sameAddress(tokenAddress, this.usdc)) return Number(formatUnits(amountRaw, USDC_DECIMALS));
-    if (sameAddress(tokenAddress, this.weth)) return Number(formatUnits(amountRaw, WETH_DECIMALS));
+    if (this.isTokenQuote(tokenAddress)) return Number(formatUnits(amountRaw, this.tokenQuoteDecimals));
+    if (this.isTokenBase(tokenAddress)) return Number(formatUnits(amountRaw, this.tokenBaseDecimals));
     return 0;
   }
 
   usdValueForTokenOutDelta(tokenAddress, amountRaw, spotUsdcPerWeth) {
     if (!amountRaw || amountRaw <= BigInt(0)) return 0;
-    if (sameAddress(tokenAddress, this.usdc)) return Number(formatUnits(amountRaw, USDC_DECIMALS));
-    if (sameAddress(tokenAddress, this.weth)) return Number(formatUnits(amountRaw, WETH_DECIMALS)) * spotUsdcPerWeth;
+    if (this.isTokenQuote(tokenAddress)) return Number(formatUnits(amountRaw, this.tokenQuoteDecimals));
+    if (this.isTokenBase(tokenAddress)) return Number(formatUnits(amountRaw, this.tokenBaseDecimals)) * spotUsdcPerWeth;
     return 0;
   }
 
@@ -6382,10 +6498,10 @@ class Uc6Bot {
   async swapExactInputSingle({ router, tokenIn, tokenOut, amountIn, slippageBps, fee, tickSpacing, snapshot }) {
     if (amountIn <= 0n) return;
     const minSwapIn =
-      sameAddress(tokenIn, this.usdc)
-        ? BigInt(1000) // 0.001 USDC dust floor
-        : sameAddress(tokenIn, this.weth)
-          ? BigInt("1000000000000") // 1e-6 WETH dust floor
+      this.isTokenQuote(tokenIn)
+        ? BigInt(1000) // 0.001 quote-token dust floor
+        : this.isTokenBase(tokenIn)
+          ? BigInt("1000000000000") // 1e-6 base-token dust floor
           : BigInt(1);
     if (amountIn < minSwapIn) return null;
 
@@ -6848,8 +6964,8 @@ class Uc6Bot {
       const txHashes = Array.isArray(ev.txHashes) ? ev.txHashes.filter((h) => typeof h === "string" && h.startsWith("0x")) : [];
       if (txHashes.length === 0) continue;
 
-      let usdcRaw = 0n;
-      let wethRaw = 0n;
+      let quoteRaw = 0n;
+      let baseRaw = 0n;
       let sawCollect = false;
       for (const hash of txHashes) {
         try {
@@ -6858,10 +6974,10 @@ class Uc6Bot {
           const collectOnUni = this.receiptHasCollectLog(receipt, this.uniswapNpm);
           if (!collectOnSlip && !collectOnUni) continue;
           sawCollect = true;
-          const usdcDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.usdc);
-          const wethDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.weth);
-          usdcRaw += BigInt(usdcDelta.inflow || 0n);
-          wethRaw += BigInt(wethDelta.inflow || 0n);
+          const quoteDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.tokenQuote);
+          const baseDelta = this.extractWalletErc20DeltaFromReceipt(receipt, this.tokenBase);
+          quoteRaw += BigInt(quoteDelta.inflow || 0n);
+          baseRaw += BigInt(baseDelta.inflow || 0n);
         } catch {
           // ignore tx receipt failures; try other txs/events
         }
@@ -6869,8 +6985,8 @@ class Uc6Bot {
       if (!sawCollect) continue;
 
       const feesUsd =
-        Number(formatUnits(usdcRaw, USDC_DECIMALS)) +
-        Number(formatUnits(wethRaw, WETH_DECIMALS)) * spot;
+        Number(formatUnits(quoteRaw, this.tokenQuoteDecimals)) +
+        Number(formatUnits(baseRaw, this.tokenBaseDecimals)) * spot;
       if (feesUsd > 0) {
         ev.feesCollectedUsd = feesUsd;
         ev.feesBackfilled = true;
@@ -7036,16 +7152,13 @@ class Uc6Bot {
           if (typeof sim.result[2] === "bigint") amount0Used = sim.result[2];
           if (typeof sim.result[3] === "bigint") amount1Used = sim.result[3];
         }
-        const simulatedUsdc = sameAddress(token0, this.usdc)
-          ? Number(formatUnits(amount0Used, USDC_DECIMALS))
-          : sameAddress(token1, this.usdc)
-            ? Number(formatUnits(amount1Used, USDC_DECIMALS))
-            : 0;
-        const simulatedWeth = sameAddress(token0, this.weth)
-          ? Number(formatUnits(amount0Used, WETH_DECIMALS))
-          : sameAddress(token1, this.weth)
-            ? Number(formatUnits(amount1Used, WETH_DECIMALS))
-            : 0;
+        const { baseIs: mintBaseIs } = this.identifyPairTokens(token0, token1);
+        const simulatedUsdc = mintBaseIs === 0
+          ? Number(formatUnits(amount1Used, this.tokenQuoteDecimals))
+          : Number(formatUnits(amount0Used, this.tokenQuoteDecimals));
+        const simulatedWeth = mintBaseIs === 0
+          ? Number(formatUnits(amount0Used, this.tokenBaseDecimals))
+          : Number(formatUnits(amount1Used, this.tokenBaseDecimals));
         const rawMintValueUsd = simulatedUsdc + simulatedWeth * this.getSpotUsdcPerWeth();
         const minMintUsd = this.getMinimumMintNotionalUsd();
         if (rawMintValueUsd > 0 && rawMintValueUsd < minMintUsd) {
@@ -7103,16 +7216,12 @@ class Uc6Bot {
             const gasPrice = BigInt(receipt?.effectiveGasPrice || 0n);
             return Number(formatUnits(gasUsed * gasPrice, 18)) * this.getSpotUsdcPerWeth();
           })();
-          const usedUsdc = sameAddress(token0, this.usdc)
-            ? Number(formatUnits(amount0Used, USDC_DECIMALS))
-            : sameAddress(token1, this.usdc)
-              ? Number(formatUnits(amount1Used, USDC_DECIMALS))
-              : 0;
-          const usedWeth = sameAddress(token0, this.weth)
-            ? Number(formatUnits(amount0Used, WETH_DECIMALS))
-            : sameAddress(token1, this.weth)
-              ? Number(formatUnits(amount1Used, WETH_DECIMALS))
-              : 0;
+          const usedUsdc = mintBaseIs === 0
+            ? Number(formatUnits(amount1Used, this.tokenQuoteDecimals))
+            : Number(formatUnits(amount0Used, this.tokenQuoteDecimals));
+          const usedWeth = mintBaseIs === 0
+            ? Number(formatUnits(amount0Used, this.tokenBaseDecimals))
+            : Number(formatUnits(amount1Used, this.tokenBaseDecimals));
           const rawMintValueUsd = usedUsdc + usedWeth * this.getSpotUsdcPerWeth();
           await this.appendLifecycleEvent(
             this.lifecycleCommonFields({
@@ -7388,8 +7497,8 @@ class Uc6Bot {
       amount0Max: UINT128_MAX,
       amount1Max: UINT128_MAX,
     };
-    const preUsdc = await this.readTokenBalance(this.usdc);
-    const preWeth = await this.readTokenBalance(this.weth);
+    const preUsdc = await this.readTokenBalance(this.tokenQuote);
+    const preWeth = await this.readTokenBalance(this.tokenBase);
 
     let hashMulticall = null;
     let recMulticall = null;
@@ -7510,8 +7619,8 @@ class Uc6Bot {
       ? this.extractCollectedAmountsFromReceipt(collectReceipt, npmAddress, id)
       : null;
 
-    const postUsdc = await this.readTokenBalance(this.usdc);
-    const postWeth = await this.readTokenBalance(this.weth);
+    const postUsdc = await this.readTokenBalance(this.tokenQuote);
+    const postWeth = await this.readTokenBalance(this.tokenBase);
     const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
     const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
     let collectUsdcRaw = usdcDelta;
@@ -7519,18 +7628,18 @@ class Uc6Bot {
     if (decodedCollect && (decodedCollect.amount0 > 0n || decodedCollect.amount1 > 0n)) {
       let mappedUsdc = 0n;
       let mappedWeth = 0n;
-      if (sameAddress(pos.token0, this.usdc)) mappedUsdc = decodedCollect.amount0;
-      if (sameAddress(pos.token1, this.usdc)) mappedUsdc = decodedCollect.amount1;
-      if (sameAddress(pos.token0, this.weth)) mappedWeth = decodedCollect.amount0;
-      if (sameAddress(pos.token1, this.weth)) mappedWeth = decodedCollect.amount1;
+      if (this.isTokenQuote(pos.token0)) mappedUsdc = decodedCollect.amount0;
+      if (this.isTokenQuote(pos.token1)) mappedUsdc = decodedCollect.amount1;
+      if (this.isTokenBase(pos.token0)) mappedWeth = decodedCollect.amount0;
+      if (this.isTokenBase(pos.token1)) mappedWeth = decodedCollect.amount1;
       if (mappedUsdc > 0n || mappedWeth > 0n) {
         collectUsdcRaw = mappedUsdc;
         collectWethRaw = mappedWeth;
       }
     }
     const feesUsd =
-      Number(formatUnits(usdcDelta, USDC_DECIMALS)) +
-      Number(formatUnits(wethDelta, WETH_DECIMALS)) * this.getSpotUsdcPerWeth();
+      Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)) +
+      Number(formatUnits(wethDelta, this.tokenBaseDecimals)) * this.getSpotUsdcPerWeth();
     // For rebalance close, collect() contains principal + fees after decreaseLiquidity.
     // We attribute only pre-close collectable fees (or fallback computed value if override absent).
     this.addFeesToActiveAction(feeValueOverrideUsd == null ? feesUsd : feeValueOverrideUsd);
@@ -7543,13 +7652,13 @@ class Uc6Bot {
           usd: Math.max(0, Number(feeBreakdownOverride.usd || 0)),
         }
       : {
-          usdc: Number(formatUnits(usdcDelta, USDC_DECIMALS)),
-          weth: Number(formatUnits(wethDelta, WETH_DECIMALS)),
+          usdc: Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)),
+          weth: Number(formatUnits(wethDelta, this.tokenBaseDecimals)),
           usd: feeValueOverrideUsd == null ? feesUsd : Number(feeValueOverrideUsd || 0),
         };
     const collectOut = {
-      usdc: Number(formatUnits(collectUsdcRaw, USDC_DECIMALS)),
-      weth: Number(formatUnits(collectWethRaw, WETH_DECIMALS)),
+      usdc: Number(formatUnits(collectUsdcRaw, this.tokenQuoteDecimals)),
+      weth: Number(formatUnits(collectWethRaw, this.tokenBaseDecimals)),
     };
     const principalOut = {
       usdc: Math.max(0, collectOut.usdc - feeBreakdown.usdc),
@@ -7677,41 +7786,41 @@ class Uc6Bot {
     try {
       const maxSwapCount = Math.max(0, Math.min(1, Number(caps.maxSwapsOnOpen || 0)));
       let swapsUsed = 0;
-      let { usdcBalanceRaw, wethBalanceRaw } = await this.readWalletPairBalances();
+      let { quoteBalanceRaw, baseBalanceRaw } = await this.readWalletPairBalances();
       const syncWalletPairBalances = async () => {
-        ({ usdcBalanceRaw, wethBalanceRaw } = await this.readWalletPairBalances());
+        ({ quoteBalanceRaw, baseBalanceRaw } = await this.readWalletPairBalances());
       };
       const applySwapDelta = (swapRes) => {
         if (!swapRes) return;
         const actualIn = BigInt(swapRes.actualIn || 0);
         const actualOut = BigInt(swapRes.actualOut || 0);
-        if (sameAddress(swapRes.tokenIn, this.usdc)) {
-          usdcBalanceRaw = usdcBalanceRaw > actualIn ? usdcBalanceRaw - actualIn : 0n;
-        } else if (sameAddress(swapRes.tokenIn, this.weth)) {
-          wethBalanceRaw = wethBalanceRaw > actualIn ? wethBalanceRaw - actualIn : 0n;
+        if (sameAddress(swapRes.tokenIn, this.tokenQuote)) {
+          quoteBalanceRaw = quoteBalanceRaw > actualIn ? quoteBalanceRaw - actualIn : 0n;
+        } else if (sameAddress(swapRes.tokenIn, this.tokenBase)) {
+          baseBalanceRaw = baseBalanceRaw > actualIn ? baseBalanceRaw - actualIn : 0n;
         }
-        if (sameAddress(swapRes.tokenOut, this.usdc)) {
-          usdcBalanceRaw += actualOut;
-        } else if (sameAddress(swapRes.tokenOut, this.weth)) {
-          wethBalanceRaw += actualOut;
+        if (sameAddress(swapRes.tokenOut, this.tokenQuote)) {
+          quoteBalanceRaw += actualOut;
+        } else if (sameAddress(swapRes.tokenOut, this.tokenBase)) {
+          baseBalanceRaw += actualOut;
         }
       };
 
-      let freeUsdcRaw = usdcBalanceRaw > keepReserveTopUpRaw ? usdcBalanceRaw - keepReserveTopUpRaw : 0n;
-      let deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+      let freeQuoteRaw = quoteBalanceRaw > keepReserveTopUpRaw ? quoteBalanceRaw - keepReserveTopUpRaw : 0n;
+      let deployableQuoteRaw = freeQuoteRaw < maxDeployRaw ? freeQuoteRaw : maxDeployRaw;
 
-      // If wallet is WETH-heavy and no deployable USDC remains, convert to USDC first.
+      // If wallet is base-heavy and no deployable quote remains, convert to quote first.
       if (
-        deployableUsdcRaw <= minUsdcDeployRaw &&
-        wethBalanceRaw > 0n &&
+        deployableQuoteRaw <= minUsdcDeployRaw &&
+        baseBalanceRaw > 0n &&
         swapsUsed < maxSwapCount &&
-        Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)) * spot >= Number(caps.minSwapUsd || 0)
+        Number(formatUnits(baseBalanceRaw, this.tokenBaseDecimals)) * spot >= Number(caps.minSwapUsd || 0)
       ) {
         const swapRes = await this.swapExactInputSingle({
           router,
-          tokenIn: this.weth,
-          tokenOut: this.usdc,
-          amountIn: wethBalanceRaw,
+          tokenIn: this.tokenBase,
+          tokenOut: this.tokenQuote,
+          amountIn: baseBalanceRaw,
           slippageBps: this.settings.slippageBps,
           fee: snapshot.fee,
           tickSpacing: snapshot.tickSpacing,
@@ -7722,20 +7831,20 @@ class Uc6Bot {
           swapsUsed += 1;
           await syncWalletPairBalances();
         }
-        freeUsdcRaw = usdcBalanceRaw > keepReserveTopUpRaw ? usdcBalanceRaw - keepReserveTopUpRaw : 0n;
-        deployableUsdcRaw = freeUsdcRaw < maxDeployRaw ? freeUsdcRaw : maxDeployRaw;
+        freeQuoteRaw = quoteBalanceRaw > keepReserveTopUpRaw ? quoteBalanceRaw - keepReserveTopUpRaw : 0n;
+        deployableQuoteRaw = freeQuoteRaw < maxDeployRaw ? freeQuoteRaw : maxDeployRaw;
       }
 
-      if (deployableUsdcRaw <= 0n && wethBalanceRaw <= 0n) {
+      if (deployableQuoteRaw <= 0n && baseBalanceRaw <= 0n) {
         this.activeAction = null;
         return false;
       }
 
       // Estimate the in-range token ratio for the current position and solve for a larger
-      // one-shot USDC->WETH swap amount instead of defaulting to a 50/50 USD split.
+      // one-shot quote->base swap amount instead of defaulting to a 50/50 USD split.
       let swapIn = BigInt(0);
-      if (deployableUsdcRaw > minUsdcDeployRaw) {
-        let targetUsdcPerWeth = spot > 0 ? spot : Number(snapshot?.priceUsdcPerWeth || 0);
+      if (deployableQuoteRaw > minUsdcDeployRaw) {
+        let targetQuotePerBase = spot > 0 ? spot : Number((snapshot?.priceQuotePerBase ?? snapshot?.priceUsdcPerWeth) || 0);
         try {
           const lower = Number(this.state.position?.tickLower);
           const upper = Number(this.state.position?.tickUpper);
@@ -7750,27 +7859,27 @@ class Uc6Bot {
               snapshot.token0,
               snapshot.token1
             );
-            const sampleUsdc = Number(formatUnits(ratioSample.usdcRaw || BigInt(0), USDC_DECIMALS));
-            const sampleWeth = Number(formatUnits(ratioSample.wethRaw || BigInt(0), WETH_DECIMALS));
-            if (sampleUsdc > 0 && sampleWeth > 0) {
-              targetUsdcPerWeth = sampleUsdc / sampleWeth;
+            const sampleQuote = Number(formatUnits(ratioSample.quoteRaw || BigInt(0), this.tokenQuoteDecimals));
+            const sampleBase = Number(formatUnits(ratioSample.baseRaw || BigInt(0), this.tokenBaseDecimals));
+            if (sampleQuote > 0 && sampleBase > 0) {
+              targetQuotePerBase = sampleQuote / sampleBase;
             }
           }
         } catch {
           // fall back to spot-price split
         }
 
-        const spotPx = spot > 0 ? spot : Number(snapshot?.priceUsdcPerWeth || 0);
-        const usdcDeployNom = Number(formatUnits(deployableUsdcRaw, USDC_DECIMALS));
-        const wethNom = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS));
-        if (targetUsdcPerWeth > 0 && spotPx > 0 && Number.isFinite(usdcDeployNom) && Number.isFinite(wethNom)) {
-          const imbalanceUsdc = usdcDeployNom - targetUsdcPerWeth * wethNom;
-          if (imbalanceUsdc > 0) {
-            const xUsdc = imbalanceUsdc / (1 + targetUsdcPerWeth / spotPx);
-            if (xUsdc > 0) {
-              const clampedUsdc = Math.min(usdcDeployNom, Math.max(0, xUsdc));
-              if (clampedUsdc > 0) {
-                swapIn = parseUnits(clampedUsdc.toFixed(6), USDC_DECIMALS);
+        const spotPx = spot > 0 ? spot : Number((snapshot?.priceQuotePerBase ?? snapshot?.priceUsdcPerWeth) || 0);
+        const quoteDeployNom = Number(formatUnits(deployableQuoteRaw, this.tokenQuoteDecimals));
+        const baseNom = Number(formatUnits(baseBalanceRaw, this.tokenBaseDecimals));
+        if (targetQuotePerBase > 0 && spotPx > 0 && Number.isFinite(quoteDeployNom) && Number.isFinite(baseNom)) {
+          const imbalanceQuote = quoteDeployNom - targetQuotePerBase * baseNom;
+          if (imbalanceQuote > 0) {
+            const xQuote = imbalanceQuote / (1 + targetQuotePerBase / spotPx);
+            if (xQuote > 0) {
+              const clampedQuote = Math.min(quoteDeployNom, Math.max(0, xQuote));
+              if (clampedQuote > 0) {
+                swapIn = parseUnits(clampedQuote.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals);
               }
             }
           }
@@ -7778,18 +7887,18 @@ class Uc6Bot {
 
         // Fallback when ratio estimate is unavailable.
         if (swapIn <= 0n) {
-          swapIn = (deployableUsdcRaw + 1n) / 2n;
+          swapIn = (deployableQuoteRaw + 1n) / 2n;
         }
       }
       if (
         swapIn > 0n &&
         swapsUsed < maxSwapCount &&
-        Number(formatUnits(swapIn, USDC_DECIMALS)) >= Number(caps.minSwapUsd || 0)
+        Number(formatUnits(swapIn, this.tokenQuoteDecimals)) >= Number(caps.minSwapUsd || 0)
       ) {
         const swapRes = await this.swapExactInputSingle({
           router,
-          tokenIn: this.usdc,
-          tokenOut: this.weth,
+          tokenIn: this.tokenQuote,
+          tokenOut: this.tokenBase,
           amountIn: swapIn,
           slippageBps: this.settings.slippageBps,
           fee: snapshot.fee,
@@ -7804,26 +7913,26 @@ class Uc6Bot {
       }
 
       await syncWalletPairBalances();
-      const usdcAfter = usdcBalanceRaw;
-      const wethAfter = wethBalanceRaw;
-      let usdcSpendable = usdcAfter > keepReserveTopUpRaw ? usdcAfter - keepReserveTopUpRaw : 0n;
-      let usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
-      let wethToUse = wethAfter;
+      const quoteAfter = quoteBalanceRaw;
+      const baseAfter = baseBalanceRaw;
+      let quoteSpendable = quoteAfter > keepReserveTopUpRaw ? quoteAfter - keepReserveTopUpRaw : 0n;
+      let quoteToUse = quoteSpendable < maxDeployRaw ? quoteSpendable : maxDeployRaw;
+      let baseToUse = baseAfter;
 
       // One-shot corrective swap if one side is empty after split.
-      if ((usdcToUse <= 0n || wethToUse <= 0n) && (usdcAfter > 0n || wethAfter > 0n) && swapsUsed < maxSwapCount) {
-        if (wethToUse <= 0n && usdcToUse > 0n) {
-          const topUpUsdcIn = usdcToUse / 4n;
+      if ((quoteToUse <= 0n || baseToUse <= 0n) && (quoteAfter > 0n || baseAfter > 0n) && swapsUsed < maxSwapCount) {
+        if (baseToUse <= 0n && quoteToUse > 0n) {
+          const topUpQuoteIn = quoteToUse / 4n;
           if (
-            topUpUsdcIn > 0n &&
+            topUpQuoteIn > 0n &&
             swapsUsed < maxSwapCount &&
-            Number(formatUnits(topUpUsdcIn, USDC_DECIMALS)) >= Number(caps.minSwapUsd || 0)
+            Number(formatUnits(topUpQuoteIn, this.tokenQuoteDecimals)) >= Number(caps.minSwapUsd || 0)
           ) {
             const swapRes = await this.swapExactInputSingle({
               router,
-              tokenIn: this.usdc,
-              tokenOut: this.weth,
-              amountIn: topUpUsdcIn,
+              tokenIn: this.tokenQuote,
+              tokenOut: this.tokenBase,
+              amountIn: topUpQuoteIn,
               slippageBps: this.settings.slippageBps,
               fee: snapshot.fee,
               tickSpacing: snapshot.tickSpacing,
@@ -7835,18 +7944,18 @@ class Uc6Bot {
               await syncWalletPairBalances();
             }
           }
-        } else if (usdcToUse <= 0n && wethToUse > 0n) {
-          const topUpWethIn = wethToUse / 4n;
+        } else if (quoteToUse <= 0n && baseToUse > 0n) {
+          const topUpBaseIn = baseToUse / 4n;
           if (
-            topUpWethIn > 0n &&
+            topUpBaseIn > 0n &&
             swapsUsed < maxSwapCount &&
-            Number(formatUnits(topUpWethIn, WETH_DECIMALS)) * spot >= Number(caps.minSwapUsd || 0)
+            Number(formatUnits(topUpBaseIn, this.tokenBaseDecimals)) * spot >= Number(caps.minSwapUsd || 0)
           ) {
             const swapRes = await this.swapExactInputSingle({
               router,
-              tokenIn: this.weth,
-              tokenOut: this.usdc,
-              amountIn: topUpWethIn,
+              tokenIn: this.tokenBase,
+              tokenOut: this.tokenQuote,
+              amountIn: topUpBaseIn,
               slippageBps: this.settings.slippageBps,
               fee: snapshot.fee,
               tickSpacing: snapshot.tickSpacing,
@@ -7861,21 +7970,21 @@ class Uc6Bot {
         }
 
         await syncWalletPairBalances();
-        const usdcRetry = usdcBalanceRaw;
-        const wethRetry = wethBalanceRaw;
-        usdcSpendable = usdcRetry > keepReserveTopUpRaw ? usdcRetry - keepReserveTopUpRaw : 0n;
-        usdcToUse = usdcSpendable < maxDeployRaw ? usdcSpendable : maxDeployRaw;
-        wethToUse = wethRetry;
+        const quoteRetry = quoteBalanceRaw;
+        const baseRetry = baseBalanceRaw;
+        quoteSpendable = quoteRetry > keepReserveTopUpRaw ? quoteRetry - keepReserveTopUpRaw : 0n;
+        quoteToUse = quoteSpendable < maxDeployRaw ? quoteSpendable : maxDeployRaw;
+        baseToUse = baseRetry;
       }
 
-      if (usdcToUse <= 0n || wethToUse <= 0n) {
+      if (quoteToUse <= 0n || baseToUse <= 0n) {
         throw new Error(
           `Top-up unable to form dual-asset inventory ${JSON.stringify({
-            reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
-            usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
-            wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
-            usdcToUse: Number(formatUnits(usdcToUse > 0n ? usdcToUse : 0n, USDC_DECIMALS)),
-            wethToUse: Number(formatUnits(wethToUse > 0n ? wethToUse : 0n, WETH_DECIMALS)),
+            reserveQuote: Number(formatUnits(keepReserveRaw, this.tokenQuoteDecimals)),
+            quoteBalance: Number(formatUnits(quoteAfter, this.tokenQuoteDecimals)),
+            baseBalance: Number(formatUnits(baseAfter, this.tokenBaseDecimals)),
+            quoteToUse: Number(formatUnits(quoteToUse > 0n ? quoteToUse : 0n, this.tokenQuoteDecimals)),
+            baseToUse: Number(formatUnits(baseToUse > 0n ? baseToUse : 0n, this.tokenBaseDecimals)),
           })}`
         );
       }
@@ -7883,12 +7992,13 @@ class Uc6Bot {
       const token0 = snapshot.token0;
       const token1 = snapshot.token1;
       // Re-read once before increaseLiquidity sizing, then keep a dust buffer.
-      const { usdcBalanceRaw: usdcBeforeIncrease, wethBalanceRaw: wethBeforeIncrease } = await this.readWalletPairBalances();
-      const usdcSpendableNow = usdcBeforeIncrease > keepReserveTopUpRaw ? usdcBeforeIncrease - keepReserveTopUpRaw : 0n;
-      const usdcCap = usdcSpendableNow < maxDeployRaw ? usdcSpendableNow : maxDeployRaw;
-      const wethCap = wethBeforeIncrease;
-      let amount0Desired = sameAddress(token0, this.usdc) ? (usdcToUse < usdcCap ? usdcToUse : usdcCap) : (wethToUse < wethCap ? wethToUse : wethCap);
-      let amount1Desired = sameAddress(token1, this.usdc) ? (usdcToUse < usdcCap ? usdcToUse : usdcCap) : (wethToUse < wethCap ? wethToUse : wethCap);
+      const { quoteBalanceRaw: quoteBeforeIncrease, baseBalanceRaw: baseBeforeIncrease } = await this.readWalletPairBalances();
+      const quoteSpendableNow = quoteBeforeIncrease > keepReserveTopUpRaw ? quoteBeforeIncrease - keepReserveTopUpRaw : 0n;
+      const quoteCap = quoteSpendableNow < maxDeployRaw ? quoteSpendableNow : maxDeployRaw;
+      const baseCap = baseBeforeIncrease;
+      const { baseIs } = this.identifyPairTokens(token0, token1);
+      let amount0Desired = baseIs === 0 ? (baseToUse < baseCap ? baseToUse : baseCap) : (quoteToUse < quoteCap ? quoteToUse : quoteCap);
+      let amount1Desired = baseIs === 0 ? (quoteToUse < quoteCap ? quoteToUse : quoteCap) : (baseToUse < baseCap ? baseToUse : baseCap);
       // Leave a tiny dust buffer to avoid STF from race/rounding issues on exact wallet amounts.
       if (amount0Desired > 10n) amount0Desired = (amount0Desired * 9990n) / 10000n;
       if (amount1Desired > 10n) amount1Desired = (amount1Desired * 9990n) / 10000n;
@@ -7938,12 +8048,12 @@ class Uc6Bot {
 
         // Re-read once and re-size from actual balances (no new swap) before the deeper
         // haircut ladder. This often turns "error -> next-loop topup" into one cycle.
-        const { usdcBalanceRaw: usdcRetryBalance, wethBalanceRaw: wethRetryBalance } = await this.readWalletPairBalances();
-        const usdcRetrySpendable = usdcRetryBalance > keepReserveTopUpRaw ? usdcRetryBalance - keepReserveTopUpRaw : 0n;
-        const usdcRetryCap = usdcRetrySpendable < maxDeployRaw ? usdcRetrySpendable : maxDeployRaw;
-        const wethRetryCap = wethRetryBalance;
-        roundAmount0Desired = sameAddress(token0, this.usdc) ? usdcRetryCap : wethRetryCap;
-        roundAmount1Desired = sameAddress(token1, this.usdc) ? usdcRetryCap : wethRetryCap;
+        const { quoteBalanceRaw: quoteRetryBalance, baseBalanceRaw: baseRetryBalance } = await this.readWalletPairBalances();
+        const quoteRetrySpendable = quoteRetryBalance > keepReserveTopUpRaw ? quoteRetryBalance - keepReserveTopUpRaw : 0n;
+        const quoteRetryCap = quoteRetrySpendable < maxDeployRaw ? quoteRetrySpendable : maxDeployRaw;
+        const baseRetryCap = baseRetryBalance;
+        roundAmount0Desired = baseIs === 0 ? baseRetryCap : quoteRetryCap;
+        roundAmount1Desired = baseIs === 0 ? quoteRetryCap : baseRetryCap;
         // Stronger base haircut for the second round; the ladder continues from there.
         if (roundAmount0Desired > 10n) roundAmount0Desired = (roundAmount0Desired * 9900n) / 10000n;
         if (roundAmount1Desired > 10n) roundAmount1Desired = (roundAmount1Desired * 9900n) / 10000n;
@@ -7982,19 +8092,14 @@ class Uc6Bot {
           const token1Addr = snapshot.token1;
           const amount0Used = BigInt(increaseResult?.amount0Used || 0n);
           const amount1Used = BigInt(increaseResult?.amount1Used || 0n);
+          const { baseIs: topUpBaseIs } = this.identifyPairTokens(token0Addr, token1Addr);
           const principalAdded = {
-            weth:
-              sameAddress(token0Addr, this.weth)
-                ? Number(formatUnits(amount0Used, WETH_DECIMALS))
-                : sameAddress(token1Addr, this.weth)
-                  ? Number(formatUnits(amount1Used, WETH_DECIMALS))
-                  : 0,
-            usdc:
-              sameAddress(token0Addr, this.usdc)
-                ? Number(formatUnits(amount0Used, USDC_DECIMALS))
-                : sameAddress(token1Addr, this.usdc)
-                  ? Number(formatUnits(amount1Used, USDC_DECIMALS))
-                  : 0,
+            weth: topUpBaseIs === 0
+              ? Number(formatUnits(amount0Used, this.tokenBaseDecimals))
+              : Number(formatUnits(amount1Used, this.tokenBaseDecimals)),
+            usdc: topUpBaseIs === 0
+              ? Number(formatUnits(amount1Used, this.tokenQuoteDecimals))
+              : Number(formatUnits(amount0Used, this.tokenQuoteDecimals)),
           };
           await this.appendLifecycleEvent(
             this.lifecycleCommonFields({
@@ -8069,7 +8174,7 @@ class Uc6Bot {
       ? this.state.latest?.fallback || this.state.latest?.primary || null
       : this.state.latest?.primary || this.state.latest?.fallback || null;
     const pos = activePool ? { token0: activePool.token0, token1: activePool.token1 } : null;
-    const { usdcBalanceRaw: preUsdc, wethBalanceRaw: preWeth } = await this.readWalletPairBalances();
+    const { quoteBalanceRaw: preQuote, baseBalanceRaw: preBase } = await this.readWalletPairBalances();
 
     const hashCollect = await this.walletClient.writeContract({
       address: npmAddress,
@@ -8090,42 +8195,46 @@ class Uc6Bot {
 
     const decodedCollect = this.extractCollectedAmountsFromReceipt(receipt, npmAddress, id);
 
-    const { usdcBalanceRaw: postUsdc, wethBalanceRaw: postWeth } = await this.readWalletPairBalances();
-    const usdcDelta = postUsdc > preUsdc ? postUsdc - preUsdc : 0n;
-    const wethDelta = postWeth > preWeth ? postWeth - preWeth : 0n;
-    let usdcRaw = usdcDelta;
-    let wethRaw = wethDelta;
+    const { quoteBalanceRaw: postQuote, baseBalanceRaw: postBase } = await this.readWalletPairBalances();
+    const quoteDelta = postQuote > preQuote ? postQuote - preQuote : 0n;
+    const baseDelta = postBase > preBase ? postBase - preBase : 0n;
+    let quoteRaw = quoteDelta;
+    let baseRaw = baseDelta;
     if (pos && (decodedCollect.amount0 > 0n || decodedCollect.amount1 > 0n)) {
-      let mappedUsdc = 0n;
-      let mappedWeth = 0n;
-      if (sameAddress(pos.token0, this.usdc)) mappedUsdc = decodedCollect.amount0;
-      if (sameAddress(pos.token1, this.usdc)) mappedUsdc = decodedCollect.amount1;
-      if (sameAddress(pos.token0, this.weth)) mappedWeth = decodedCollect.amount0;
-      if (sameAddress(pos.token1, this.weth)) mappedWeth = decodedCollect.amount1;
+      const { baseIs: collectBaseIs } = this.identifyPairTokens(pos.token0, pos.token1);
+      let mappedQuote = 0n;
+      let mappedBase = 0n;
+      if (collectBaseIs === 0) {
+        mappedBase = decodedCollect.amount0;
+        mappedQuote = decodedCollect.amount1;
+      } else {
+        mappedBase = decodedCollect.amount1;
+        mappedQuote = decodedCollect.amount0;
+      }
       // Prefer exact decoded amounts if mapping succeeded.
-      if (mappedUsdc > 0n || mappedWeth > 0n) {
-        usdcRaw = mappedUsdc;
-        wethRaw = mappedWeth;
+      if (mappedQuote > 0n || mappedBase > 0n) {
+        quoteRaw = mappedQuote;
+        baseRaw = mappedBase;
       }
     }
-    const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
-    const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+    const usdc = Number(formatUnits(quoteRaw, this.tokenQuoteDecimals));
+    const weth = Number(formatUnits(baseRaw, this.tokenBaseDecimals));
     const usd = usdc + weth * this.getSpotUsdcPerWeth();
     this.addFeesToActiveAction(usd);
     this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
     return { usdc, weth, usd };
   }
 
-  async normalizeInventoryToUsdc({ router, fee, tickSpacing, snapshot }) {
-    const wethBal = await this.readTokenBalance(this.weth);
-    if (wethBal <= 0n) return;
+  async normalizeInventoryToQuote({ router, fee, tickSpacing, snapshot }) {
+    const baseBal = await this.readTokenBalance(this.tokenBase);
+    if (baseBal <= 0n) return;
     await this.assertTxAllowed("normalize_inventory");
 
     await this.swapExactInputSingle({
       router,
-      tokenIn: this.weth,
-      tokenOut: this.usdc,
-      amountIn: wethBal,
+      tokenIn: this.tokenBase,
+      tokenOut: this.tokenQuote,
+      amountIn: baseBal,
       slippageBps: this.settings.slippageBps,
       fee,
       tickSpacing,
@@ -8475,14 +8584,14 @@ class Uc6Bot {
       : rec?.entry?.entryTokens
         ? "entry_tokens"
         : "missing";
-    const baselineWeth = Number(
-      rec?._internal?.entryCaptured ? rec?._internal?.baselineWeth : rec?.entry?.entryTokens?.weth || 0
+    const baselineBase = Number(
+      rec?._internal?.entryCaptured ? (rec?._internal?.baselineBase ?? rec?._internal?.baselineWeth) : rec?.entry?.entryTokens?.weth || 0
     );
-    const baselineUsdc = Number(
-      rec?._internal?.entryCaptured ? rec?._internal?.baselineUsdc : rec?.entry?.entryTokens?.usdc || 0
+    const baselineQuote = Number(
+      rec?._internal?.entryCaptured ? (rec?._internal?.baselineQuote ?? rec?._internal?.baselineUsdc) : rec?.entry?.entryTokens?.usdc || 0
     );
-    const hasBaseline = Math.abs(baselineWeth) > 0 || Math.abs(baselineUsdc) > 0;
-    const hodlNowUsd = hasBaseline && spot > 0 ? baselineWeth * spot + baselineUsdc : 0;
+    const hasBaseline = Math.abs(baselineBase) > 0 || Math.abs(baselineQuote) > 0;
+    const hodlNowUsd = hasBaseline && spot > 0 ? baselineBase * spot + baselineQuote : 0;
     const lpNowUsd = this.estimateTrackedLpUsdValueFromLatest();
     const divVsHodlLiveUsd = hasBaseline && spot > 0 ? lpNowUsd - hodlNowUsd : 0;
     const alphaLiveUsd = feesNetLiveUsd + divVsHodlLiveUsd;
@@ -8518,8 +8627,10 @@ class Uc6Bot {
       requiredFeesToBeatHodlLiveUsd,
       hasBaseline,
       baselineSource,
-      baselineWeth,
-      baselineUsdc,
+      baselineBase,
+      baselineQuote,
+      baselineWeth: baselineBase,
+      baselineUsdc: baselineQuote,
       hodlNowUsd,
       lpNowUsd,
       collectableNowUsd,
@@ -8818,10 +8929,10 @@ class Uc6Bot {
     const swaps = [];
 
     while (swapsUsed < maxSwapCount) {
-      const usdcRaw = await this.readTokenBalance(this.usdc);
-      const wethRaw = await this.readTokenBalance(this.weth);
-      const usdc = Number(formatUnits(usdcRaw, USDC_DECIMALS));
-      const weth = Number(formatUnits(wethRaw, WETH_DECIMALS));
+      const quoteRaw = await this.readTokenBalance(this.tokenQuote);
+      const baseRaw = await this.readTokenBalance(this.tokenBase);
+      const usdc = Number(formatUnits(quoteRaw, this.tokenQuoteDecimals));
+      const weth = Number(formatUnits(baseRaw, this.tokenBaseDecimals));
       const spot = Number(snapshot?.priceUsdcPerWeth || this.getSpotUsdcPerWeth() || 0);
       if (!(spot > 0)) break;
       let plannedSwap = null;
@@ -8830,18 +8941,18 @@ class Uc6Bot {
         const swappableUsdc = Math.max(0, usdc - reserveTargetUsdc);
         if (swappableUsdc >= minSwapUsd) {
           plannedSwap = {
-            tokenIn: this.usdc,
-            tokenOut: this.weth,
-            amountIn: parseUnits(swappableUsdc.toFixed(6), USDC_DECIMALS),
+            tokenIn: this.tokenQuote,
+            tokenOut: this.tokenBase,
+            amountIn: parseUnits(swappableUsdc.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals),
           };
         }
       } else if (target === "USDC") {
         const wethUsd = weth * spot;
         if (wethUsd >= minSwapUsd) {
           plannedSwap = {
-            tokenIn: this.weth,
-            tokenOut: this.usdc,
-            amountIn: parseUnits(weth.toFixed(18), WETH_DECIMALS),
+            tokenIn: this.tokenBase,
+            tokenOut: this.tokenQuote,
+            amountIn: parseUnits(weth.toFixed(this.tokenBaseDecimals), this.tokenBaseDecimals),
           };
         }
       } else {
@@ -8854,18 +8965,18 @@ class Uc6Bot {
           const share = deployableUsdc / totalUsd;
           if (share > 0.5 + tolHalf && deltaUsdc >= minSwapUsd) {
             plannedSwap = {
-              tokenIn: this.usdc,
-              tokenOut: this.weth,
-              amountIn: parseUnits(deltaUsdc.toFixed(6), USDC_DECIMALS),
+              tokenIn: this.tokenQuote,
+              tokenOut: this.tokenBase,
+              amountIn: parseUnits(deltaUsdc.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals),
             };
           } else if (share < 0.5 - tolHalf) {
             const deltaUsd = desiredUsdc - deployableUsdc;
             const wethIn = Math.min(weth, deltaUsd / spot);
             if (wethIn * spot >= minSwapUsd && wethIn > 0) {
               plannedSwap = {
-                tokenIn: this.weth,
-                tokenOut: this.usdc,
-                amountIn: parseUnits(wethIn.toFixed(18), WETH_DECIMALS),
+                tokenIn: this.tokenBase,
+                tokenOut: this.tokenQuote,
+                amountIn: parseUnits(wethIn.toFixed(this.tokenBaseDecimals), this.tokenBaseDecimals),
               };
             }
           }
@@ -9321,8 +9432,8 @@ class Uc6Bot {
                   pos.token0,
                   pos.token1
                 );
-                const usdc = Number(formatUnits(amounts.usdcRaw, USDC_DECIMALS));
-                const weth = Number(formatUnits(amounts.wethRaw, WETH_DECIMALS));
+                const usdc = Number(formatUnits(amounts.quoteRaw, this.tokenQuoteDecimals));
+                const weth = Number(formatUnits(amounts.baseRaw, this.tokenBaseDecimals));
                 usdValue = usdc + weth * this.getSpotUsdcPerWeth();
                 inRange = currentTick > pos.tickLower && currentTick < pos.tickUpper;
               } catch {
@@ -9634,30 +9745,31 @@ class Uc6Bot {
     );
     let swapsUsed = 0;
 
-    let usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-    let wethBalanceRaw = await this.readTokenBalance(this.weth);
+    let quoteBalRaw = await this.readTokenBalance(this.tokenQuote);
+    let baseBalRaw = await this.readTokenBalance(this.tokenBase);
     const walletSnapshot = this.state.latest?.wallet;
     const totalValueUsd = Number(walletSnapshot?.valuesUsd?.total || 0);
     const effectiveReserveUsdc = this.getEffectiveReserveTargetUsdc(totalValueUsd);
-    const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(6), USDC_DECIMALS);
-    const keepReserveRebalanceRaw = keepReserveRaw + USDC_RESERVE_GUARD_RAW;
-    const maxInitialMintRaw = parseUnits(this.settings.maxInitialMintUsdc.toFixed(6), USDC_DECIMALS);
+    // Reserves are always in quote-token terms (USDC when quote=USDC)
+    const keepReserveRaw = parseUnits(effectiveReserveUsdc.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals);
+    const keepReserveRebalanceRaw = keepReserveRaw + (this.isStablecoin(this.tokenQuote) ? USDC_RESERVE_GUARD_RAW : 0n);
+    const maxInitialMintRaw = parseUnits(this.settings.maxInitialMintUsdc.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals);
 
-    let freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
-    let deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
+    let freeQuoteRaw = quoteBalRaw > keepReserveRebalanceRaw ? quoteBalRaw - keepReserveRebalanceRaw : 0n;
+    let deployableQuoteRaw = freeQuoteRaw < maxInitialMintRaw ? freeQuoteRaw : maxInitialMintRaw;
     if (
-      deployableUsdcRaw <= 0n &&
-      wethBalanceRaw > 0n &&
+      deployableQuoteRaw <= 0n &&
+      baseBalRaw > 0n &&
       swapsUsed < maxSwapCount &&
-      Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)) * this.getSpotUsdcPerWeth() >= Number(executionCaps.minSwapUsd || 0)
+      Number(formatUnits(baseBalRaw, this.tokenBaseDecimals)) * this.getSpotPrice() >= Number(executionCaps.minSwapUsd || 0)
     ) {
-      // If wallet drifted to WETH while no position exists, restore deployable USDC once.
+      // If wallet drifted to base token while no position exists, restore deployable quote once.
       await runSwapStep(async () =>
         await this.swapExactInputSingle({
           router,
-          tokenIn: this.weth,
-          tokenOut: this.usdc,
-          amountIn: wethBalanceRaw,
+          tokenIn: this.tokenBase,
+          tokenOut: this.tokenQuote,
+          amountIn: baseBalRaw,
           slippageBps: this.settings.slippageBps,
           fee: snapshot.fee,
           tickSpacing: snapshot.tickSpacing,
@@ -9665,56 +9777,55 @@ class Uc6Bot {
         })
       );
       swapsUsed += 1;
-      usdcBalanceRaw = await this.readTokenBalance(this.usdc);
-      wethBalanceRaw = await this.readTokenBalance(this.weth);
-      freeUsdcRaw = usdcBalanceRaw > keepReserveRebalanceRaw ? usdcBalanceRaw - keepReserveRebalanceRaw : 0n;
-      deployableUsdcRaw = freeUsdcRaw < maxInitialMintRaw ? freeUsdcRaw : maxInitialMintRaw;
+      quoteBalRaw = await this.readTokenBalance(this.tokenQuote);
+      baseBalRaw = await this.readTokenBalance(this.tokenBase);
+      freeQuoteRaw = quoteBalRaw > keepReserveRebalanceRaw ? quoteBalRaw - keepReserveRebalanceRaw : 0n;
+      deployableQuoteRaw = freeQuoteRaw < maxInitialMintRaw ? freeQuoteRaw : maxInitialMintRaw;
     }
-    if (deployableUsdcRaw <= 0n) {
+    if (deployableQuoteRaw <= 0n) {
       throw new Error(
-        `No deployable USDC after reserve and maxDeploy limits ${JSON.stringify({
-          reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
-          reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
-          maxInitialMintUsdc: Number(this.settings.maxInitialMintUsdc || 0),
-          usdcBalance: Number(formatUnits(usdcBalanceRaw, USDC_DECIMALS)),
-          wethBalance: Number(formatUnits(wethBalanceRaw, WETH_DECIMALS)),
-          freeUsdc: Number(formatUnits(freeUsdcRaw, USDC_DECIMALS)),
+        `No deployable ${this.tokenQuoteSymbol} after reserve and maxDeploy limits ${JSON.stringify({
+          reserveQuote: Number(formatUnits(keepReserveRaw, this.tokenQuoteDecimals)),
+          maxInitialMint: Number(this.settings.maxInitialMintUsdc || 0),
+          quoteBalance: Number(formatUnits(quoteBalRaw, this.tokenQuoteDecimals)),
+          baseBalance: Number(formatUnits(baseBalRaw, this.tokenBaseDecimals)),
+          freeQuote: Number(formatUnits(freeQuoteRaw, this.tokenQuoteDecimals)),
         })}`
       );
     }
 
     // Single-swap ratio shaping toward 50/50 (within tolerance) to avoid swap churn.
     let plannedSwap = null;
-    const spot = this.getSpotUsdcPerWeth();
-    const deployableUsdc = Number(formatUnits(deployableUsdcRaw, USDC_DECIMALS));
-    const wethBalanceNum = Number(formatUnits(wethBalanceRaw, WETH_DECIMALS));
-    if (spot > 0 && Number.isFinite(deployableUsdc) && Number.isFinite(wethBalanceNum)) {
-      const totalUsd = deployableUsdc + wethBalanceNum * spot;
-      if (totalUsd > 0) {
-        const usdcShare = deployableUsdc / totalUsd;
+    const spot = this.getSpotPrice();
+    const deployableQuote = Number(formatUnits(deployableQuoteRaw, this.tokenQuoteDecimals));
+    const baseBalNum = Number(formatUnits(baseBalRaw, this.tokenBaseDecimals));
+    if (spot > 0 && Number.isFinite(deployableQuote) && Number.isFinite(baseBalNum)) {
+      const totalInQuote = deployableQuote + baseBalNum * spot;
+      if (totalInQuote > 0) {
+        const quoteShare = deployableQuote / totalInQuote;
         const tolHalf = Number(executionCaps.targetRatioTolerancePct || 0) / 2;
         const lowerShare = Math.max(0, 0.5 - tolHalf);
         const upperShare = Math.min(1, 0.5 + tolHalf);
-        if (usdcShare > upperShare) {
-          const deltaUsdc = deployableUsdc - totalUsd / 2;
-          if (deltaUsdc >= Number(executionCaps.minSwapUsd || 0)) {
+        if (quoteShare > upperShare) {
+          const deltaQuote = deployableQuote - totalInQuote / 2;
+          if (deltaQuote >= Number(executionCaps.minSwapUsd || 0)) {
             plannedSwap = {
-              tokenIn: this.usdc,
-              tokenOut: this.weth,
-              amountIn: parseUnits(deltaUsdc.toFixed(6), USDC_DECIMALS),
-              amountUsd: deltaUsdc,
+              tokenIn: this.tokenQuote,
+              tokenOut: this.tokenBase,
+              amountIn: parseUnits(deltaQuote.toFixed(this.tokenQuoteDecimals), this.tokenQuoteDecimals),
+              amountUsd: deltaQuote,
             };
           }
-        } else if (usdcShare < lowerShare) {
-          const deltaUsd = totalUsd / 2 - deployableUsdc;
-          if (deltaUsd >= Number(executionCaps.minSwapUsd || 0)) {
-            const wethIn = Math.min(wethBalanceNum, deltaUsd / spot);
-            if (wethIn > 0) {
+        } else if (quoteShare < lowerShare) {
+          const deltaQuote = totalInQuote / 2 - deployableQuote;
+          if (deltaQuote >= Number(executionCaps.minSwapUsd || 0)) {
+            const baseIn = Math.min(baseBalNum, deltaQuote / spot);
+            if (baseIn > 0) {
               plannedSwap = {
-                tokenIn: this.weth,
-                tokenOut: this.usdc,
-                amountIn: parseUnits(wethIn.toFixed(18), WETH_DECIMALS),
-                amountUsd: wethIn * spot,
+                tokenIn: this.tokenBase,
+                tokenOut: this.tokenQuote,
+                amountIn: parseUnits(baseIn.toFixed(this.tokenBaseDecimals), this.tokenBaseDecimals),
+                amountUsd: baseIn * spot,
               };
             }
           }
@@ -9741,28 +9852,28 @@ class Uc6Bot {
       swapsUsed += 1;
     }
 
-    const usdcAfter = await this.readTokenBalance(this.usdc);
-    const wethAfter = await this.readTokenBalance(this.weth);
+    const quoteAfter = await this.readTokenBalance(this.tokenQuote);
+    const baseAfter = await this.readTokenBalance(this.tokenBase);
 
-    let usdcSpendable = usdcAfter > keepReserveRebalanceRaw ? usdcAfter - keepReserveRebalanceRaw : 0n;
-    let usdcToUse = usdcSpendable < maxInitialMintRaw ? usdcSpendable : maxInitialMintRaw;
-    let wethToUse = wethAfter;
+    let quoteSpendable = quoteAfter > keepReserveRebalanceRaw ? quoteAfter - keepReserveRebalanceRaw : 0n;
+    let quoteToUse = quoteSpendable < maxInitialMintRaw ? quoteSpendable : maxInitialMintRaw;
+    let baseToUse = baseAfter;
 
     // Recovery path: if one side is unexpectedly empty, do a one-shot top-up swap.
-    if ((usdcToUse <= 0n || wethToUse <= 0n) && (usdcAfter > 0n || wethAfter > 0n) && swapsUsed < maxSwapCount) {
-      if (wethToUse <= 0n && usdcToUse > 0n) {
-        const topUpUsdcIn = usdcToUse / 4n;
+    if ((quoteToUse <= 0n || baseToUse <= 0n) && (quoteAfter > 0n || baseAfter > 0n) && swapsUsed < maxSwapCount) {
+      if (baseToUse <= 0n && quoteToUse > 0n) {
+        const topUpQuoteIn = quoteToUse / 4n;
         if (
-          topUpUsdcIn > 0n &&
+          topUpQuoteIn > 0n &&
           swapsUsed < maxSwapCount &&
-          Number(formatUnits(topUpUsdcIn, USDC_DECIMALS)) >= Number(executionCaps.minSwapUsd || 0)
+          Number(formatUnits(topUpQuoteIn, this.tokenQuoteDecimals)) >= Number(executionCaps.minSwapUsd || 0)
         ) {
           await runSwapStep(async () =>
             await this.swapExactInputSingle({
               router,
-              tokenIn: this.usdc,
-              tokenOut: this.weth,
-              amountIn: topUpUsdcIn,
+              tokenIn: this.tokenQuote,
+              tokenOut: this.tokenBase,
+              amountIn: topUpQuoteIn,
               slippageBps: this.settings.slippageBps,
               fee: snapshot.fee,
               tickSpacing: snapshot.tickSpacing,
@@ -9771,19 +9882,19 @@ class Uc6Bot {
           );
           swapsUsed += 1;
         }
-      } else if (usdcToUse <= 0n && wethToUse > 0n) {
-        const topUpWethIn = wethToUse / 4n;
+      } else if (quoteToUse <= 0n && baseToUse > 0n) {
+        const topUpBaseIn = baseToUse / 4n;
         if (
-          topUpWethIn > 0n &&
+          topUpBaseIn > 0n &&
           swapsUsed < maxSwapCount &&
-          Number(formatUnits(topUpWethIn, WETH_DECIMALS)) * this.getSpotUsdcPerWeth() >= Number(executionCaps.minSwapUsd || 0)
+          Number(formatUnits(topUpBaseIn, this.tokenBaseDecimals)) * this.getSpotPrice() >= Number(executionCaps.minSwapUsd || 0)
         ) {
           await runSwapStep(async () =>
             await this.swapExactInputSingle({
               router,
-              tokenIn: this.weth,
-              tokenOut: this.usdc,
-              amountIn: topUpWethIn,
+              tokenIn: this.tokenBase,
+              tokenOut: this.tokenQuote,
+              amountIn: topUpBaseIn,
               slippageBps: this.settings.slippageBps,
               fee: snapshot.fee,
               tickSpacing: snapshot.tickSpacing,
@@ -9794,33 +9905,33 @@ class Uc6Bot {
         }
       }
 
-      const usdcRetry = await this.readTokenBalance(this.usdc);
-      const wethRetry = await this.readTokenBalance(this.weth);
-      usdcSpendable = usdcRetry > keepReserveRebalanceRaw ? usdcRetry - keepReserveRebalanceRaw : 0n;
-      usdcToUse = usdcSpendable < maxInitialMintRaw ? usdcSpendable : maxInitialMintRaw;
-      wethToUse = wethRetry;
+      const quoteRetry = await this.readTokenBalance(this.tokenQuote);
+      const baseRetry = await this.readTokenBalance(this.tokenBase);
+      quoteSpendable = quoteRetry > keepReserveRebalanceRaw ? quoteRetry - keepReserveRebalanceRaw : 0n;
+      quoteToUse = quoteSpendable < maxInitialMintRaw ? quoteSpendable : maxInitialMintRaw;
+      baseToUse = baseRetry;
     }
 
-    if (usdcToUse <= 0n || wethToUse <= 0n) {
+    if (quoteToUse <= 0n || baseToUse <= 0n) {
       const diag = {
-        reserveUsdc: Number(formatUnits(keepReserveRaw, USDC_DECIMALS)),
-        reserveGuardUsdc: Number(formatUnits(USDC_RESERVE_GUARD_RAW, USDC_DECIMALS)),
-        maxInitialMintUsdc: Number(this.settings.maxInitialMintUsdc || 0),
-        usdcBalance: Number(formatUnits(usdcAfter, USDC_DECIMALS)),
-        wethBalance: Number(formatUnits(wethAfter, WETH_DECIMALS)),
-        usdcSpendable: Number(formatUnits(usdcSpendable, USDC_DECIMALS)),
-        usdcToUse: Number(formatUnits(usdcToUse > 0n ? usdcToUse : 0n, USDC_DECIMALS)),
-        wethToUse: Number(formatUnits(wethToUse > 0n ? wethToUse : 0n, WETH_DECIMALS)),
-        spot: this.getSpotUsdcPerWeth(),
+        reserveQuote: Number(formatUnits(keepReserveRaw, this.tokenQuoteDecimals)),
+        maxInitialMint: Number(this.settings.maxInitialMintUsdc || 0),
+        quoteBalance: Number(formatUnits(quoteAfter, this.tokenQuoteDecimals)),
+        baseBalance: Number(formatUnits(baseAfter, this.tokenBaseDecimals)),
+        quoteSpendable: Number(formatUnits(quoteSpendable, this.tokenQuoteDecimals)),
+        quoteToUse: Number(formatUnits(quoteToUse > 0n ? quoteToUse : 0n, this.tokenQuoteDecimals)),
+        baseToUse: Number(formatUnits(baseToUse > 0n ? baseToUse : 0n, this.tokenBaseDecimals)),
+        spot: this.getSpotPrice(),
       };
       throw new Error(`Insufficient dual-asset balances for LP mint ${JSON.stringify(diag)}`);
     }
 
     const token0 = snapshot.token0;
     const token1 = snapshot.token1;
+    const { baseIs } = this.identifyPairTokens(token0, token1);
     // Apply 0.5% haircut to avoid STF revert from balance drift between simulation and broadcast
-    const amount0Desired = (sameAddress(token0, this.usdc) ? usdcToUse : wethToUse) * 995n / 1000n;
-    const amount1Desired = (sameAddress(token1, this.usdc) ? usdcToUse : wethToUse) * 995n / 1000n;
+    const amount0Desired = (baseIs === 0 ? baseToUse : quoteToUse) * 995n / 1000n;
+    const amount1Desired = (baseIs === 0 ? quoteToUse : baseToUse) * 995n / 1000n;
 
     await this.approveIfNeeded(token0, npm, amount0Desired);
     await this.approveIfNeeded(token1, npm, amount1Desired);
@@ -10104,17 +10215,7 @@ class Uc6Bot {
       return;
     }
 
-    if (this.settings.venue === "uniswapv3") {
-      if (forceRebalance) this.state.forceRebalanceRequestedAt = null;
-      if (recoveryRetry) this.state.forceRebalanceRecoveryPending = false;
-      this.setDecision({
-        action: "skipped",
-        reason: effectiveTrigger.reason,
-        mode: strategyMode,
-        note: "uniswapv3 execution path is intentionally read-only in this version",
-      });
-      return;
-    }
+    // Uniswap V3 execution path is now unlocked (was read-only in earlier versions)
 
     const hodlGate = this.evaluateHodlGateForClose();
     if (!forceRebalance && !hodlGate.allowed) {
@@ -10311,8 +10412,8 @@ class Uc6Bot {
 
     const pos = this.state.position || {};
     const hasActivePosition = Boolean(pos.tokenId);
-    const token0 = activePool?.token0 || this.weth;
-    const token1 = activePool?.token1 || this.usdc;
+    const token0 = activePool?.token0 || this.tokenBase;
+    const token1 = activePool?.token1 || this.tokenQuote;
     const tickLower = hasActivePosition ? Number(pos.tickLower) : NaN;
     const tickUpper = hasActivePosition ? Number(pos.tickUpper) : NaN;
     const hasRange = Number.isFinite(tickLower) && Number.isFinite(tickUpper) && tickUpper > tickLower;
@@ -10320,10 +10421,10 @@ class Uc6Bot {
     const lpAmountsRaw =
       hasRange && liquidityRaw > 0n && activePool?.sqrtPriceX96
         ? this.lpAmountsFromLiquidity(liquidityRaw, tickLower, tickUpper, BigInt(activePool.sqrtPriceX96), token0, token1)
-        : { usdcRaw: 0n, wethRaw: 0n };
+        : { quoteRaw: 0n, baseRaw: 0n };
 
-    const lpUsdc = Number(formatUnits(lpAmountsRaw.usdcRaw, USDC_DECIMALS));
-    const lpWeth = Number(formatUnits(lpAmountsRaw.wethRaw, WETH_DECIMALS));
+    const lpUsdc = Number(formatUnits(lpAmountsRaw.quoteRaw, this.tokenQuoteDecimals));
+    const lpWeth = Number(formatUnits(lpAmountsRaw.baseRaw, this.tokenBaseDecimals));
     const lpUsdValue = lpUsdc + lpWeth * spotUsdcPerWeth;
     const sideUsd = {
       usdc: lpUsdc,
@@ -10383,11 +10484,15 @@ class Uc6Bot {
       market: {
         chain: { name: "Base", chainId: base.id },
         venueActive,
-        pair: { base: "WETH", quote: "USDC" },
+        pair: {
+          base: { symbol: this.tokenBaseSymbol, address: this.tokenBase, decimals: this.tokenBaseDecimals },
+          quote: { symbol: this.tokenQuoteSymbol, address: this.tokenQuote, decimals: this.tokenQuoteDecimals },
+        },
         selector: { type: selectorType, value: selectorValue },
         poolAddress: activePool?.pool || null,
         spotPrice: {
-          usdcPerWeth: spotUsdcPerWeth,
+          quotePerBase: spotUsdcPerWeth,
+          usdcPerWeth: spotUsdcPerWeth, // backward compat
           updatedAtIso: activePool?.updatedAt || null,
         },
         tick: {
@@ -10639,8 +10744,10 @@ class Uc6Bot {
         requiredFeesToBeatHodlLiveUsd: Number(hodlGateSnapshot.requiredFeesToBeatHodlLiveUsd || 0),
         hasBaseline: Boolean(hodlGateSnapshot.hasBaseline),
         baselineSource: String(hodlGateSnapshot.baselineSource || "missing"),
-        baselineWeth: Number(hodlGateSnapshot.baselineWeth || 0),
-        baselineUsdc: Number(hodlGateSnapshot.baselineUsdc || 0),
+        baselineBase: Number(hodlGateSnapshot.baselineBase || hodlGateSnapshot.baselineWeth || 0),
+        baselineQuote: Number(hodlGateSnapshot.baselineQuote || hodlGateSnapshot.baselineUsdc || 0),
+        baselineWeth: Number(hodlGateSnapshot.baselineBase || hodlGateSnapshot.baselineWeth || 0),
+        baselineUsdc: Number(hodlGateSnapshot.baselineQuote || hodlGateSnapshot.baselineUsdc || 0),
         hodlNowUsd: Number(hodlGateSnapshot.hodlNowUsd || 0),
         lpNowUsd: Number(hodlGateSnapshot.lpNowUsd || 0),
         collectableNowUsd: Number(hodlGateSnapshot.collectableNowUsd || 0),
