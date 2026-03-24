@@ -2305,9 +2305,22 @@ class Uc6Bot {
       // Treat as success and clear the stale flag.
       // IMPORTANT: only match the exact gauge revert reason, not random substrings like "InvalidParams"
       if (errMsg.includes('"NA"') || errMsg.includes('reason:\nNA')) {
-        console.log(`[UC6] [emissions] unstake got NA (not staked on-chain) — clearing stale flag`);
+        console.log(`[UC6] [emissions] unstake got NA (not staked on-chain) — clearing stale flag for ${em.stakedTokenId}`);
+        // Emit a lifecycle event so the record captures the stale-flag clearing
+        // (AERO may have been claimed in a prior withdraw that wasn't recorded)
+        await this.appendLifecycleEvent(
+          this.lifecycleCommonFields({
+            type: "EMISSIONS_UNSTAKE",
+            positionRunId: this.state.activePositionRunId || undefined,
+            tokenId: em.stakedTokenId,
+            txHashes: [],
+            accounting: { gasUsd: 0, rewardsUsd: 0, isEstimated: true },
+            details: { reason, gaugeAddress, aeroClaimed: 0, aeroPrice: 0, staleFlag: true },
+          }),
+        ).catch((err) => this.setLastError(err));
         em.staked = false;
         em.stakedTokenId = null;
+        em.claimable = { aero: 0, updatedAtIso: nowIso() };
         return;
       }
       throw unstakeErr;
