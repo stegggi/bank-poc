@@ -7235,12 +7235,9 @@ class Uc6Bot {
           });
           pos = this.parsePositionResult(posRaw);
         } catch (posErr) {
-          const msg = posErr instanceof Error ? posErr.message : String(posErr || "");
-          // Accept successful mint tx + ERC721 transfer even if an immediate positions() read
-          // briefly returns ID on the RPC backend. Reconcile loop will fill details next tick.
-          if (!(msg.includes('function "positions" reverted') && /\bID\b/.test(msg))) {
-            throw posErr;
-          }
+          // Never throw here — the mint succeeded on-chain, we must still write the lifecycle event.
+          // The reconcile loop will fill in position details on the next tick.
+          console.warn(`[UC6] positions() read failed after successful mint tokenId=${tokenId}: ${posErr?.message?.slice(0, 100) || posErr}`);
         }
 
         const phaseCtx = this.lifecyclePhaseContext;
