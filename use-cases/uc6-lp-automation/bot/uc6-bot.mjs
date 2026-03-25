@@ -3123,9 +3123,19 @@ class Uc6Bot {
       chainId: base.id,
     };
     this.positionLifecycleEvents.push(next);
-    await appendJsonLineAtomic(POSITION_EVENTS_PATH, next);
+    try {
+      await appendJsonLineAtomic(POSITION_EVENTS_PATH, next);
+    } catch (writeErr) {
+      console.error(`[UC6] CRITICAL: lifecycle event write failed for ${next.type} token=${next.tokenId}: ${writeErr?.message || writeErr}`);
+      this.setLastError(writeErr);
+    }
     this.applyLifecycleEventToRecords(next);
-    await this.persistPositionRecords();
+    try {
+      await this.persistPositionRecords();
+    } catch (persistErr) {
+      console.error(`[UC6] CRITICAL: position records persist failed: ${persistErr?.message || persistErr}`);
+      this.setLastError(persistErr);
+    }
     return next;
   }
 
@@ -7275,7 +7285,10 @@ class Uc6Bot {
                 rawMintValueUsd,
               },
             })
-          ).catch((err) => this.setLastError(err));
+          ).catch((err) => {
+            console.error(`[UC6] CRITICAL: MINT lifecycle event lost for tokenId=${tokenId}: ${err?.message || err}`);
+            this.setLastError(err);
+          });
           if (phaseCtx.phase === "open_mint") {
             this.scheduleEntrySnapshot({
               positionRunId: String(phaseCtx.positionRunId),
