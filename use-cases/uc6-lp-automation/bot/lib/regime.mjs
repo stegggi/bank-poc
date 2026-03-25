@@ -311,7 +311,9 @@ export function getRegimeAdvice({ est, baseSettings, edgeProgress = 0, outOfRang
     // Prefer waiting when expected near-term fees do not cover the action cost.
     edgeAdj = Math.max(edgeAdj, maxEdgeAdj * 0.5);
     cooldownAdj = Math.max(cooldownAdj, Math.round(maxCooldownAdjSec * 0.5));
-    if (!severeOutOfRange) bandAdjBps = Math.max(bandAdjBps, 0);
+    // Cost gate only prevents widening (positive bandAdjBps). Narrowing is free
+    // and increases fee capture — it should always be allowed.
+    if (!severeOutOfRange && bandAdjBps > 0) bandAdjBps = 0;
     reasons.push("cost_gate_wait");
   }
 
