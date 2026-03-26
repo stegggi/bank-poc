@@ -449,16 +449,22 @@ export async function unstakeNft(
   const tid = BigInt(tokenId);
   const accountAddress = typeof account === "string" ? account : account.address;
 
-  // Record AERO balance before
-  let aeroBefore = 0n;
-  try {
-    aeroBefore = await publicClient.readContract({
-      address: AERO_ADDRESS,
-      abi: erc20Abi,
-      functionName: "balanceOf",
-      args: [accountAddress],
-    });
-  } catch {}
+  // Record AERO balance before (with retry)
+  let aeroBefore = null;
+  for (let i = 0; i < 2; i++) {
+    try {
+      if (i > 0) await new Promise(r => setTimeout(r, 1500));
+      aeroBefore = await publicClient.readContract({
+        address: AERO_ADDRESS,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [accountAddress],
+      });
+      break;
+    } catch (err) {
+      _log(`AERO balanceOf (before) attempt ${i + 1} failed: ${String(err?.message || err).slice(0, 60)}`);
+    }
+  }
 
   _log("Withdrawing NFT from gauge…");
   const withdrawTx = await walletClient.writeContract({
@@ -475,19 +481,31 @@ export async function unstakeNft(
   });
   _log(`Withdraw tx: ${withdrawTx}`);
 
-  // Record AERO balance after
-  let aeroAfter = 0n;
-  try {
-    aeroAfter = await publicClient.readContract({
-      address: AERO_ADDRESS,
-      abi: erc20Abi,
-      functionName: "balanceOf",
-      args: [accountAddress],
-    });
-  } catch {}
+  // Record AERO balance after (with retry + delay for chain propagation)
+  let aeroAfter = null;
+  for (let i = 0; i < 3; i++) {
+    try {
+      if (i > 0) await new Promise(r => setTimeout(r, 2000));
+      aeroAfter = await publicClient.readContract({
+        address: AERO_ADDRESS,
+        abi: erc20Abi,
+        functionName: "balanceOf",
+        args: [accountAddress],
+      });
+      break;
+    } catch (err) {
+      _log(`AERO balanceOf (after) attempt ${i + 1} failed: ${String(err?.message || err).slice(0, 60)}`);
+    }
+  }
 
-  const aeroDelta = aeroAfter - aeroBefore;
+  const hasBothBalances = aeroBefore != null && aeroAfter != null;
+  const aeroDelta = hasBothBalances ? aeroAfter - aeroBefore : 0n;
   const aeroClaimed = Number(formatUnits(aeroDelta > 0n ? aeroDelta : 0n, 18));
+  if (!hasBothBalances) {
+    _log(`⚠ AERO balance read incomplete (before=${aeroBefore != null} after=${aeroAfter != null}) — aeroClaimed may be 0`);
+  } else if (aeroClaimed > 0) {
+    _log(`AERO claimed: ${aeroClaimed.toFixed(6)}`);
+  }
 
   const gasUsed = receipt.gasUsed ?? 0n;
   const effectiveGasPrice = receipt.effectiveGasPrice ?? 0n;
