@@ -373,7 +373,7 @@ export default function Uc5Page() {
     let cancelled = false;
     const init = async () => {
       try {
-        await Promise.all([refreshConfig(), refreshFast(), refreshChart(), refreshTrades(0)]);
+        await Promise.all([refreshConfig(), refreshFast(), refreshChart(), refreshTrades(tradesPage)]);
       } catch {
         if (!cancelled) addNotice("error", "Failed to load UC5 data from VM.", false);
       }
