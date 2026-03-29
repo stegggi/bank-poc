@@ -3123,19 +3123,28 @@ class Uc6Bot {
       chainId: base.id,
     };
     this.positionLifecycleEvents.push(next);
-    try {
-      await appendJsonLineAtomic(POSITION_EVENTS_PATH, next);
-    } catch (writeErr) {
-      console.error(`[UC6] CRITICAL: lifecycle event write failed for ${next.type} token=${next.tokenId}: ${writeErr?.message || writeErr}`);
-      this.setLastError(writeErr);
+    // Retry file write up to 3 times — this is the single source of truth, must not be lost
+    let writeOk = false;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * attempt));
+        await appendJsonLineAtomic(POSITION_EVENTS_PATH, next);
+        writeOk = true;
+        break;
+      } catch (writeErr) {
+        console.error(`[UC6] CRITICAL: lifecycle event write attempt ${attempt + 1}/3 failed for ${next.type} token=${next.tokenId}: ${writeErr?.message || writeErr}`);
+        this.setLastError(writeErr);
+      }
+    }
+    if (!writeOk) {
+      console.error(`[UC6] CRITICAL: lifecycle event PERMANENTLY LOST after 3 attempts: ${next.type} token=${next.tokenId} id=${next.id}`);
+      // Dump the event to stdout as JSON so it can be manually recovered from systemd journal
+      console.error(`[UC6] LOST_EVENT_JSON: ${JSON.stringify(next)}`);
     }
     this.applyLifecycleEventToRecords(next);
-    try {
-      await this.persistPositionRecords();
-    } catch (persistErr) {
-      console.error(`[UC6] CRITICAL: position records persist failed: ${persistErr?.message || persistErr}`);
-      this.setLastError(persistErr);
-    }
+    await this.persistPositionRecords().catch((persistErr) =>
+      console.error(`[UC6] position records persist failed: ${persistErr?.message || persistErr}`)
+    );
     return next;
   }
 
@@ -10316,6 +10325,15 @@ class Uc6Bot {
   async loopOnce() {
     this.ensureDailyCounter();
     await this.loadSettings(false);
+    // Periodic events file health check (every 5 minutes)
+    if (!this._lastEventsFileCheckMs || Date.now() - this._lastEventsFileCheckMs > 300_000) {
+      try {
+        await fsp.access(POSITION_EVENTS_PATH, 2 /* W_OK */);
+      } catch (err) {
+        console.error(`[UC6] CRITICAL: events.jsonl is NOT writable: ${err?.message || err}`);
+      }
+      this._lastEventsFileCheckMs = Date.now();
+    }
     const headSeen = this.settings.wsEnabled ? this.wsHeadWatcher.consumeHeadSeen() : false;
     const snapshots = await this.refreshSnapshots({ headSeen });
     await this.maybeRefreshPositionFromChain();
