@@ -2306,16 +2306,33 @@ class Uc6Bot {
       // IMPORTANT: only match the exact gauge revert reason, not random substrings like "InvalidParams"
       if (errMsg.includes('"NA"') || errMsg.includes('reason:\nNA')) {
         console.log(`[UC6] [emissions] unstake got NA (not staked on-chain) — clearing stale flag for ${em.stakedTokenId}`);
-        // Emit a lifecycle event so the record captures the stale-flag clearing
-        // (AERO may have been claimed in a prior withdraw that wasn't recorded)
+        // Try to claim any pending AERO rewards before clearing — the gauge may have
+        // auto-ejected the NFT but rewards might still be claimable via getReward()
+        let aeroClaimed = 0;
+        let claimTxHash = null;
+        try {
+          const claimResult = await claimAeroRewards(
+            this.walletClient, this.publicClient, gaugeAddress,
+            em.stakedTokenId, this.account,
+            (msg) => console.log(`[UC6] [emissions] ${msg}`),
+          );
+          if (claimResult.success && claimResult.aeroClaimed > 0) {
+            aeroClaimed = claimResult.aeroClaimed;
+            claimTxHash = claimResult.txHash;
+            console.log(`[UC6] [emissions] recovered ${aeroClaimed.toFixed(6)} AERO from NA-ejected position`);
+          }
+        } catch (claimErr) {
+          console.log(`[UC6] [emissions] getReward also failed for NA position: ${String(claimErr?.message || claimErr).slice(0, 80)}`);
+        }
+        const rewardsUsd = aeroClaimed * aeroPrice;
         await this.appendLifecycleEvent(
           this.lifecycleCommonFields({
             type: "EMISSIONS_UNSTAKE",
             positionRunId: this.state.activePositionRunId || undefined,
             tokenId: em.stakedTokenId,
-            txHashes: [],
-            accounting: { gasUsd: 0, rewardsUsd: 0, isEstimated: true },
-            details: { reason, gaugeAddress, aeroClaimed: 0, aeroPrice: 0, staleFlag: true },
+            txHashes: claimTxHash ? [claimTxHash] : [],
+            accounting: { gasUsd: 0, rewardsUsd, isEstimated: aeroClaimed === 0 },
+            details: { reason, gaugeAddress, aeroClaimed, aeroPrice, staleFlag: true },
           }),
         ).catch((err) => this.setLastError(err));
         em.staked = false;
