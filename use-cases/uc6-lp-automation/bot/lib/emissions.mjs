@@ -466,15 +466,34 @@ export async function unstakeNft(
     }
   }
 
+  // Retry withdraw up to 3 times — RPC simulation can hit stale nodes that return "NA"
+  // even when the NFT is genuinely staked
   _log("Withdrawing NFT from gauge…");
-  const withdrawTx = await walletClient.writeContract({
-    address: gaugeAddress,
-    abi: CLGAUGE_ABI,
-    functionName: "withdraw",
-    args: [tid],
-    account,
-    chain: walletClient.chain,
-  });
+  let withdrawTx;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      if (attempt > 0) {
+        _log(`Withdraw retry ${attempt + 1}/3 after ${attempt * 2}s delay…`);
+        await new Promise(r => setTimeout(r, 2000 * attempt));
+      }
+      withdrawTx = await walletClient.writeContract({
+        address: gaugeAddress,
+        abi: CLGAUGE_ABI,
+        functionName: "withdraw",
+        args: [tid],
+        account,
+        chain: walletClient.chain,
+      });
+      break; // success
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+      if (attempt < 2 && (msg.includes('"NA"') || msg.includes('reason:\nNA'))) {
+        _log(`Withdraw attempt ${attempt + 1} got NA — retrying (RPC may be stale)`);
+        continue;
+      }
+      throw err; // give up after 3 attempts or non-NA error
+    }
+  }
   const receipt = await publicClient.waitForTransactionReceipt({
     hash: withdrawTx,
     timeout: 60_000,
