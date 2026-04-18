@@ -1,33 +1,183 @@
 const CONTEXT_PASSPORT_ABI = [
-  "error ModuleAlreadyExists()",
-  "error ModuleInactive()",
-  "error ModuleNotFound()",
-  "error NotOperator()",
-  "error NotOwner()",
+  { type: "error", name: "ModuleAlreadyExists", inputs: [] },
+  { type: "error", name: "ModuleInactive",      inputs: [] },
+  { type: "error", name: "ModuleNotFound",      inputs: [] },
+  { type: "error", name: "NotOperator",         inputs: [] },
+  { type: "error", name: "NotOwner",            inputs: [] },
 
-  "event ModuleRegistered(bytes32 indexed moduleId,address indexed owner,bytes32 contentHash,bytes32 policyHash,string label,string uri)",
-  "event ModuleUpdated(bytes32 indexed moduleId,bytes32 contentHash,bytes32 policyHash,string uri)",
-  "event ModuleDeactivated(bytes32 indexed moduleId)",
-  "event AccessRequested(bytes32 indexed moduleId,address indexed requester,bytes32 purposeHash)",
-  "event AccessGranted(bytes32 indexed moduleId,address indexed grantee,uint64 expiry,bytes32 encryptedKeyCommit)",
-  "event AccessRevoked(bytes32 indexed moduleId,address indexed grantee)",
-  "event OperatorChanged(address indexed oldOperator,address indexed newOperator)",
+  {
+    type: "event", name: "ModuleRegistered", anonymous: false,
+    inputs: [
+      { indexed: true,  name: "moduleId",    type: "bytes32" },
+      { indexed: true,  name: "owner",       type: "address" },
+      { indexed: false, name: "contentHash", type: "bytes32" },
+      { indexed: false, name: "policyHash",  type: "bytes32" },
+      { indexed: false, name: "label",       type: "string"  },
+      { indexed: false, name: "uri",         type: "string"  },
+    ],
+  },
+  {
+    type: "event", name: "ModuleUpdated", anonymous: false,
+    inputs: [
+      { indexed: true,  name: "moduleId",    type: "bytes32" },
+      { indexed: false, name: "contentHash", type: "bytes32" },
+      { indexed: false, name: "policyHash",  type: "bytes32" },
+      { indexed: false, name: "uri",         type: "string"  },
+    ],
+  },
+  {
+    type: "event", name: "ModuleDeactivated", anonymous: false,
+    inputs: [{ indexed: true, name: "moduleId", type: "bytes32" }],
+  },
+  {
+    type: "event", name: "AccessRequested", anonymous: false,
+    inputs: [
+      { indexed: true,  name: "moduleId",    type: "bytes32" },
+      { indexed: true,  name: "requester",   type: "address" },
+      { indexed: false, name: "purposeHash", type: "bytes32" },
+    ],
+  },
+  {
+    type: "event", name: "AccessGranted", anonymous: false,
+    inputs: [
+      { indexed: true,  name: "moduleId",           type: "bytes32" },
+      { indexed: true,  name: "grantee",            type: "address" },
+      { indexed: false, name: "expiry",             type: "uint64"  },
+      { indexed: false, name: "encryptedKeyCommit", type: "bytes32" },
+    ],
+  },
+  {
+    type: "event", name: "AccessRevoked", anonymous: false,
+    inputs: [
+      { indexed: true, name: "moduleId", type: "bytes32" },
+      { indexed: true, name: "grantee",  type: "address" },
+    ],
+  },
+  {
+    type: "event", name: "OperatorChanged", anonymous: false,
+    inputs: [
+      { indexed: true, name: "oldOperator", type: "address" },
+      { indexed: true, name: "newOperator", type: "address" },
+    ],
+  },
 
-  "function claimOperatorRole()",
-  "function registerModule(bytes32 moduleId,bytes32 contentHash,bytes32 policyHash,string label,string uri)",
-  "function updateModule(bytes32 moduleId,bytes32 newContentHash,bytes32 newPolicyHash,string newUri)",
-  "function deactivateModule(bytes32 moduleId)",
-  "function requestAccess(bytes32 moduleId,bytes32 purposeHash)",
-  "function operatorRequestAccess(bytes32 moduleId,bytes32 purposeHash,address onBehalfOf)",
-  "function grantAccess(bytes32 moduleId,address grantee,uint64 expiry,bytes32 encryptedKeyCommit)",
-  "function revokeAccess(bytes32 moduleId,address grantee)",
+  { type: "function", name: "claimOperatorRole", stateMutability: "nonpayable", inputs: [], outputs: [] },
+  {
+    type: "function", name: "registerModule", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId",    type: "bytes32" },
+      { name: "contentHash", type: "bytes32" },
+      { name: "policyHash",  type: "bytes32" },
+      { name: "label",       type: "string"  },
+      { name: "uri",         type: "string"  },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function", name: "updateModule", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId",       type: "bytes32" },
+      { name: "newContentHash", type: "bytes32" },
+      { name: "newPolicyHash",  type: "bytes32" },
+      { name: "newUri",         type: "string"  },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function", name: "deactivateModule", stateMutability: "nonpayable",
+    inputs: [{ name: "moduleId", type: "bytes32" }],
+    outputs: [],
+  },
+  {
+    type: "function", name: "requestAccess", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId",    type: "bytes32" },
+      { name: "purposeHash", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function", name: "operatorRequestAccess", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId",    type: "bytes32" },
+      { name: "purposeHash", type: "bytes32" },
+      { name: "onBehalfOf",  type: "address" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function", name: "grantAccess", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId",           type: "bytes32" },
+      { name: "grantee",            type: "address" },
+      { name: "expiry",             type: "uint64"  },
+      { name: "encryptedKeyCommit", type: "bytes32" },
+    ],
+    outputs: [],
+  },
+  {
+    type: "function", name: "revokeAccess", stateMutability: "nonpayable",
+    inputs: [
+      { name: "moduleId", type: "bytes32" },
+      { name: "grantee",  type: "address" },
+    ],
+    outputs: [],
+  },
 
-  "function operator() view returns (address)",
-  "function getModule(bytes32 moduleId) view returns (tuple(address owner,bytes32 contentHash,bytes32 policyHash,uint64 createdAt,uint64 updatedAt,bool active,string label,string uri))",
-  "function getOwnerModules(address owner) view returns (bytes32[] moduleIds)",
-  "function getGrant(bytes32 moduleId,address grantee) view returns (tuple(bool allowed,uint64 expiry,bytes32 encryptedKeyCommit))",
-  "function hasAccess(bytes32 moduleId,address grantee) view returns (bool)",
-  "function wasRequested(bytes32 moduleId,address requester) view returns (bool)",
+  { type: "function", name: "operator", stateMutability: "view", inputs: [], outputs: [{ name: "", type: "address" }] },
+  {
+    type: "function", name: "getModule", stateMutability: "view",
+    inputs: [{ name: "moduleId", type: "bytes32" }],
+    outputs: [{
+      type: "tuple",
+      components: [
+        { name: "owner",       type: "address" },
+        { name: "contentHash", type: "bytes32" },
+        { name: "policyHash",  type: "bytes32" },
+        { name: "createdAt",   type: "uint64"  },
+        { name: "updatedAt",   type: "uint64"  },
+        { name: "active",      type: "bool"    },
+        { name: "label",       type: "string"  },
+        { name: "uri",         type: "string"  },
+      ],
+    }],
+  },
+  {
+    type: "function", name: "getOwnerModules", stateMutability: "view",
+    inputs: [{ name: "owner", type: "address" }],
+    outputs: [{ name: "moduleIds", type: "bytes32[]" }],
+  },
+  {
+    type: "function", name: "getGrant", stateMutability: "view",
+    inputs: [
+      { name: "moduleId", type: "bytes32" },
+      { name: "grantee",  type: "address" },
+    ],
+    outputs: [{
+      type: "tuple",
+      components: [
+        { name: "allowed",            type: "bool"    },
+        { name: "expiry",             type: "uint64"  },
+        { name: "encryptedKeyCommit", type: "bytes32" },
+      ],
+    }],
+  },
+  {
+    type: "function", name: "hasAccess", stateMutability: "view",
+    inputs: [
+      { name: "moduleId", type: "bytes32" },
+      { name: "grantee",  type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
+  {
+    type: "function", name: "wasRequested", stateMutability: "view",
+    inputs: [
+      { name: "moduleId",  type: "bytes32" },
+      { name: "requester", type: "address" },
+    ],
+    outputs: [{ name: "", type: "bool" }],
+  },
 ] as const;
 
 export default CONTEXT_PASSPORT_ABI;

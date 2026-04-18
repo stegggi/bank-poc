@@ -309,8 +309,6 @@ export default function ContextVaultPage() {
   // UI-safe strings
   const uiContract = mounted ? (CONTRACT || "⚠️ set NEXT_PUBLIC_CONTEXT_PASSPORT_ADDRESS") : "…";
   const uiCustomerWallet = mounted ? (walletAddress || "—") : "…";
-  const uiBankAAddr = mounted ? (BANK_A_ADDR || "⚠️ set NEXT_PUBLIC_BANK_A_ADDRESS") : "…";
-  const uiBankBAddr = mounted ? (BANK_B_ADDR || "⚠️ set NEXT_PUBLIC_BANK_B_ADDRESS") : "…";
 
   const canUseCustomer = mounted && ready && authenticated && !!wallet && ethers.isAddress(CONTRACT);
   const canUseBank = mounted && ready && authenticated && !!wallet && ethers.isAddress(CONTRACT);
@@ -1490,11 +1488,9 @@ export default function ContextVaultPage() {
                       </div>
                       <div style={{ display: "grid", gap: 10, gridTemplateColumns: isMobile ? "1fr" : "1fr 1fr" }}>
                         {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
-                          const uiAddr = bank === "bank-a" ? uiBankAAddr : uiBankBAddr;
                           return (
                             <div key={bank} style={miniCard}>
-                              <div style={miniTitle}>{bankLabel(bank)}</div>
-                              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.30)", marginBottom: 10, wordBreak: "break-all" }}>{uiAddr}</div>
+                              <div style={{ ...miniTitle, marginBottom: 10 }}>{bankLabel(bank)}</div>
                               <div style={{ display: "flex", gap: 6, marginBottom: 10 }}>
                                 <button style={btn} disabled={!canUseCustomer || !localPkgForSelected} onClick={() => grantToBank(bank)}>Grant</button>
                                 <button style={btnSecondary} disabled={!canUseCustomer} onClick={() => revokeFromBank(bank)}>Revoke</button>
@@ -1570,9 +1566,7 @@ export default function ContextVaultPage() {
                           );
                         })}
                       </div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Bank address (on-chain grantee)</div>
-                      <div style={{ ...mono, fontSize: 12, marginBottom: 10 }}>{selectedBank === "bank-a" ? uiBankAAddr : uiBankBAddr}</div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Operator wallet (Privy embedded)</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Your wallet (Privy embedded)</div>
                       <div style={{ ...mono, fontSize: 12, marginBottom: 6 }}>{uiCustomerWallet}</div>
                       {(() => {
                         if (!walletAddress) return null;
@@ -1582,8 +1576,8 @@ export default function ContextVaultPage() {
                         const text = matches
                           ? "operator role claimed ✓"
                           : claimed
-                          ? `operator currently ${fmtShort(contractOperator)} — will reclaim on first action`
-                          : "not claimed yet — will be claimed on first action";
+                          ? "operator held by another wallet — will reclaim on first action"
+                          : "operator not claimed yet — will be claimed on first action";
                         return <div style={{ fontSize: 11, color: col }}>{text}</div>;
                       })()}
                     </div>
@@ -1684,7 +1678,7 @@ export default function ContextVaultPage() {
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
                               <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{bankLabel(bank)}</div>
                               {isActive && (
-                                <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700 }}>active wallet ✓</span>
+                                <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700 }}>selected ✓</span>
                               )}
                             </div>
                             <button
