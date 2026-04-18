@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { ethers } from "ethers";
 import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import NavBar from "../shared/components/NavBar";
 import { useBreakpoint } from "../shared/hooks/useBreakpoint";
+import { publicClient } from "../shared/lib/aa";
 import CONTEXT_PASSPORT_ABI from "../use-cases/uc4-context-passport/lib/ContextPassportABI";
 import {
   UserModulePackageV1,
@@ -258,14 +259,9 @@ export default function ContextVaultPage() {
   const { wallets } = useWallets();
   const { sendTransaction } = useSendTransaction();
 
-  // Bank (MetaMask / injected)
-  const [bankErr, setBankErr] = useState<string>("");
-  const [bankAddress, setBankAddress] = useState<string>("");
-  const [bankChainId, setBankChainId] = useState<number | null>(null);
-  const [bankBusy, setBankBusy] = useState<boolean>(false);
-
-  const bankProviderRef = useRef<ethers.BrowserProvider | null>(null);
-  const bankSignerRef = useRef<ethers.JsonRpcSigner | null>(null);
+  // Bank (Privy embedded wallet acting as operator)
+  const [selectedBank, setSelectedBank] = useState<BankId>("bank-a");
+  const [contractOperator, setContractOperator] = useState<string>("");
 
   // Shared status UI
   const [status, setStatus] = useState<string>("");
@@ -312,20 +308,12 @@ export default function ContextVaultPage() {
   const bankOwner = walletAddress;
   // UI-safe strings
   const uiContract = mounted ? (CONTRACT || "⚠️ set NEXT_PUBLIC_CONTEXT_PASSPORT_ADDRESS") : "…";
-  const uiChainId = mounted ? String(CHAIN_ID) : "…";
   const uiCustomerWallet = mounted ? (walletAddress || "—") : "…";
   const uiBankAAddr = mounted ? (BANK_A_ADDR || "⚠️ set NEXT_PUBLIC_BANK_A_ADDRESS") : "…";
   const uiBankBAddr = mounted ? (BANK_B_ADDR || "⚠️ set NEXT_PUBLIC_BANK_B_ADDRESS") : "…";
 
   const canUseCustomer = mounted && ready && authenticated && !!wallet && ethers.isAddress(CONTRACT);
-  const bankConnected = !!bankAddress;
-  const bankOnRightChain = bankChainId === null ? false : bankChainId === CHAIN_ID;
-  const canUseBank = mounted && bankConnected && !!bankSignerRef.current && ethers.isAddress(CONTRACT);
-  const isBankAddressSelected = (bank: BankId) => {
-    const expected = bank === "bank-a" ? BANK_A_ADDR : BANK_B_ADDR;
-    if (!ethers.isAddress(expected)) return false;
-    return bankAddress.toLowerCase() === expected.toLowerCase();
-  };
+  const canUseBank = mounted && ready && authenticated && !!wallet && ethers.isAddress(CONTRACT);
   const moduleAccessStatus = (m: any, bank: BankId) => {
     const entry = m?.access?.[bank];
     if (entry?.granted) return "granted";
@@ -451,6 +439,24 @@ export default function ContextVaultPage() {
     void ensureCustomerChain().then(loadModules);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseCustomer, walletAddress]);
+
+  useEffect(() => {
+    if (!mounted) return;
+    if (!ethers.isAddress(CONTRACT)) return;
+    (async () => {
+      try {
+        const op = (await publicClient.readContract({
+          address: CONTRACT as `0x${string}`,
+          abi: CONTEXT_PASSPORT_ABI as any,
+          functionName: "operator",
+          args: [],
+        })) as string;
+        setContractOperator(op);
+      } catch {
+        // ignore
+      }
+    })();
+  }, [mounted]);
 
   async function txSendCustomer(data: string) {
     const { hash } = await sendTransaction({ to: CONTRACT, data, value: 0 }, { sponsor: true, address: walletAddress });
@@ -737,104 +743,111 @@ export default function ContextVaultPage() {
     }
   }
 
-  async function connectBankWallet() {
-    setBankErr("");
-    setBankBusy(true);
-    try {
-      const eth = (window as any).ethereum;
-      if (!eth) throw new Error("MetaMask not found. Install MetaMask.");
-      const provider = new ethers.BrowserProvider(eth);
-      await provider.send("eth_requestAccounts", []);
-      const signer = await provider.getSigner();
-      const addr = await signer.getAddress();
-      const net = await provider.getNetwork();
-
-      bankProviderRef.current = provider;
-      bankSignerRef.current = signer;
-      setBankAddress(addr);
-      setBankChainId(Number(net.chainId));
-    } catch (e: any) {
-      setBankErr(e?.message ?? String(e));
-    } finally {
-      setBankBusy(false);
-    }
+  async function getEmbeddedProvider() {
+    const list = (wallets as any[]) || [];
+    const embedded =
+      list.find(
+        (w: any) =>
+          typeof w?.getEthereumProvider === "function" &&
+          (w?.chainId === `eip155:${CHAIN_ID}` || w?.meta?.chainId === `eip155:${CHAIN_ID}`)
+      ) || list.find((w: any) => typeof w?.getEthereumProvider === "function");
+    if (!embedded) throw new Error("No embedded Privy wallet found");
+    return embedded.getEthereumProvider();
   }
-  function disconnectBankWallet() {
-    bankProviderRef.current = null;
-    bankSignerRef.current = null;
-    setBankAddress("");
-    setBankChainId(null);
-  }
-  async function switchBankChain() {
-    setBankErr("");
-    try {
-      const eth = (window as any).ethereum;
-      if (!eth) throw new Error("MetaMask not found.");
-      await eth.request({ method: "wallet_switchEthereumChain", params: [{ chainId: chainIdToHex(CHAIN_ID) }] });
 
-      const provider = new ethers.BrowserProvider(eth);
-      const signer = await provider.getSigner();
-      const net = await provider.getNetwork();
-      bankProviderRef.current = provider;
-      bankSignerRef.current = signer;
-      setBankChainId(Number(net.chainId));
-      setBankAddress(await signer.getAddress());
+  async function ensureBankChain(prov: any) {
+    try {
+      await prov.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chainIdToHex(CHAIN_ID) }],
+      });
     } catch (e: any) {
-      setBankErr(e?.message ?? String(e));
+      if (e?.code === 4902) {
+        await prov.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: chainIdToHex(CHAIN_ID),
+            chainName: "Arbitrum Sepolia",
+            nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+            rpcUrls: [process.env.NEXT_PUBLIC_RPC_URL as string],
+            blockExplorerUrls: ["https://sepolia.arbiscan.io"],
+          }],
+        });
+      }
     }
   }
 
-  async function requestAccessAsMetaMask(bank: BankId) {
+  async function grantIfLow(addr: `0x${string}`) {
+    const bal = await publicClient.getBalance({ address: addr });
+    if (bal >= BigInt("200000000000000")) return;
+    setStatus("Bank sponsoring gas…");
+    try {
+      const r = await fetch("/api/grant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ to: addr }),
+      });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j?.error || "grant failed");
+    } catch {
+      // ignore — demo-only sponsorship
+    }
+  }
+
+  async function ensureBankReady() {
+    if (!ready) throw new Error("Privy not ready yet");
+    if (!authenticated) { await login(); throw new Error("Please retry after login."); }
+    if (!ethers.isAddress(CONTRACT)) throw new Error("Missing NEXT_PUBLIC_CONTEXT_PASSPORT_ADDRESS");
+    const eip1193 = await getEmbeddedProvider();
+    await ensureBankChain(eip1193);
+    const signer = await new ethers.BrowserProvider(eip1193).getSigner();
+    const addr = (await signer.getAddress()) as `0x${string}`;
+    await grantIfLow(addr);
+    return { signer, addr };
+  }
+
+  async function claimOperatorIfNeeded(signer: any, addr: `0x${string}`) {
+    const op = (await publicClient.readContract({
+      address: CONTRACT as `0x${string}`,
+      abi: CONTEXT_PASSPORT_ABI as any,
+      functionName: "operator",
+      args: [],
+    })) as string;
+    setContractOperator(op);
+    if (op?.toLowerCase() === addr.toLowerCase()) return;
+    setStatus("Claiming operator role (demo)…");
+    const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
+    const data = iface.encodeFunctionData("claimOperatorRole", []);
+    const tx = await signer.sendTransaction({ to: CONTRACT, data });
+    setStatus("Operator claim pending…");
+    await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
+    setStatus("Operator claimed ✅");
+    setContractOperator(addr);
+  }
+
+  async function requestAccessAsOperator(bank: BankId) {
     setErr("");
     setLastTx("");
     setStatus("Submitting access request…");
     try {
-      if (!canUseBank) throw new Error("Connect MetaMask first.");
-      if (!bankOnRightChain) throw new Error("MetaMask is on the wrong network. Click 'Switch chain'.");
-      if (!isBytes32(bankModuleId)) throw new Error("Invalid moduleId (bytes32).");
       if (!purpose) throw new Error("Purpose required.");
-      if (!isBankAddressSelected(bank)) {
-        const expected = bank === "bank-a" ? BANK_A_ADDR : BANK_B_ADDR;
-        throw new Error(`MetaMask is connected to the wrong bank address. Expected ${expected}.`);
-      }
+      if (!isBytes32(bankModuleId)) throw new Error("Invalid moduleId (bytes32).");
 
-      const signer = bankSignerRef.current!;
-      const contract = new ethers.Contract(CONTRACT, CONTEXT_PASSPORT_ABI as any, signer);
+      const bankAddr = bank === "bank-a" ? BANK_A_ADDR : BANK_B_ADDR;
+      if (!ethers.isAddress(bankAddr)) throw new Error(`Bank address not configured for ${bankLabel(bank)}.`);
+
+      const { signer, addr } = await ensureBankReady();
+      await claimOperatorIfNeeded(signer, addr);
 
       const pHash = ethers.keccak256(utf8ToBytes(purpose));
-      // MetaMask occasionally underprices maxFeePerGas on low-fee chains; bump fees to clear base fee.
-      let overrides: any = {};
-      try {
-        const feeData = await signer.provider!.getFeeData();
-        if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
-          let maxFee = feeData.maxFeePerGas;
-          let lastBase: bigint | null = null;
-          try {
-            // Use latest block's base fee (if available) instead of a FeeData field that may not exist.
-            const block = await signer.provider!.getBlock("latest");
-            lastBase = block && (block as any).baseFeePerGas ? (block as any).baseFeePerGas : null;
-          } catch {
-            // ignore
-          }
-          if (lastBase) {
-            const minMax = lastBase * BigInt(2) + feeData.maxPriorityFeePerGas;
-            if (maxFee < minMax) maxFee = minMax;
-          } else {
-            maxFee = maxFee * BigInt(2);
-          }
-          overrides = { maxFeePerGas: maxFee, maxPriorityFeePerGas: feeData.maxPriorityFeePerGas };
-        } else if (feeData.gasPrice) {
-          overrides = { gasPrice: feeData.gasPrice * BigInt(2) };
-        }
-      } catch {
-        // Some RPCs don't support eth_maxPriorityFeePerGas; fall back to wallet defaults.
-      }
+      const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
+      const data = iface.encodeFunctionData("operatorRequestAccess", [bankModuleId, pHash, bankAddr]);
 
-      const tx = await contract.requestAccess(bankModuleId, pHash, overrides);
+      const tx = await signer.sendTransaction({ to: CONTRACT, data });
       setLastTx(tx.hash);
-      await tx.wait();
-
-      setStatus(`${bankLabel(bank)} requested access ✅`);
+      setStatus(`Access request pending… ${tx.hash.slice(0, 14)}…`);
+      await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
+      setStatus(`Access requested as ${bankLabel(bank)} ✅`);
       if (canUseCustomer) await loadModules();
     } catch (e: any) {
       setStatus("");
@@ -1295,10 +1308,9 @@ export default function ContextVaultPage() {
     borderRadius: 999,
   } as React.CSSProperties);
 
-  const connectedBankId: BankId | null = isBankAddressSelected("bank-a") ? "bank-a" : isBankAddressSelected("bank-b") ? "bank-b" : null;
   const custStep1Done = authenticated;
   const custStep2Done = customerModuleExistsOnchain && !!localPkgForSelected;
-  const bankStep1Done = bankConnected && bankOnRightChain;
+  const bankStep1Done = canUseBank;
 
   /* ── step circle helper ── */
   const stepCircle = (n: number, done: boolean, locked: boolean) => (
@@ -1516,10 +1528,10 @@ export default function ContextVaultPage() {
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
                 <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>Bank Journey</div>
                 <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>MetaMask wallet</div>
+                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Privy embedded wallet</div>
               </div>
 
-              {/* ─ B-Step 1: Connect MetaMask ─ */}
+              {/* ─ B-Step 1: Select bank ─ */}
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {stepCircle(1, bankStep1Done, false)}
@@ -1527,43 +1539,43 @@ export default function ContextVaultPage() {
                 </div>
                 <div style={{ flex: 1, paddingBottom: 20 }}>
                   <div style={{ fontSize: 15, fontWeight: 700, color: bankStep1Done ? "#34d399" : "#fff", marginBottom: 12 }}>
-                    Connect as bank
+                    Select bank
                   </div>
-                  {bankStep1Done ? (
-                    <div style={miniCard}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10, flexWrap: "wrap" }}>
-                        <div>
-                          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>MetaMask address</div>
-                          <div style={{ ...mono, fontSize: 12 }}>{bankAddress}</div>
-                        </div>
-                        <button style={btnSecondary} onClick={disconnectBankWallet}>Disconnect</button>
-                      </div>
-                      {connectedBankId ? (
-                        <div style={{ display: "inline-flex", alignItems: "center", gap: 6, fontSize: 12, fontWeight: 700, color: "#34d399", background: "rgba(52,211,153,0.08)", border: "1px solid rgba(52,211,153,0.20)", borderRadius: 999, padding: "3px 10px" }}>
-                          Signed in as {bankLabel(connectedBankId)}
-                        </div>
-                      ) : (
-                        <div style={{ fontSize: 12, color: "#fbbf24", lineHeight: 1.5 }}>
-                          Not a recognized bank address. Switch MetaMask to Bank A ({uiBankAAddr.slice(0, 10)}…) or Bank B ({uiBankBAddr.slice(0, 10)}…).
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                  {!bankStep1Done ? (
                     <div style={card}>
                       <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 14, lineHeight: 1.5 }}>
-                        Connect MetaMask with the Bank A or Bank B address to request and decrypt customer context.
+                        Sign in with Privy — the embedded wallet acts as operator and sends bank-side transactions.
                       </div>
-                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                        <button style={btn} disabled={!mounted || bankBusy} onClick={connectBankWallet}>
-                          {bankBusy ? "Connecting…" : "Connect MetaMask"}
-                        </button>
-                        {bankConnected && !bankOnRightChain && (
-                          <button style={btnSecondary} onClick={switchBankChain}>Switch to chain {uiChainId}</button>
-                        )}
+                      <button style={btn} disabled={!ready || !mounted} onClick={login}>Login with Privy</button>
+                    </div>
+                  ) : (
+                    <div style={miniCard}>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 8 }}>Act as</div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+                        {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
+                          const active = selectedBank === bank;
+                          return (
+                            <button
+                              key={bank}
+                              onClick={() => setSelectedBank(bank)}
+                              style={{
+                                ...btnSecondary,
+                                borderColor: active ? "rgba(245,158,11,0.50)" : "rgba(255,255,255,0.10)",
+                                background: active ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.06)",
+                                color: active ? "#fbbf24" : "rgba(255,255,255,0.78)",
+                              }}
+                            >
+                              {bankLabel(bank)}
+                            </button>
+                          );
+                        })}
                       </div>
-                      {bankErr && (
-                        <div style={{ ...note, marginTop: 10, color: "#f87171", borderColor: "rgba(239,68,68,0.25)" }}>{bankErr}</div>
-                      )}
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Bank address (on-chain grantee)</div>
+                      <div style={{ ...mono, fontSize: 12, marginBottom: 10 }}>{selectedBank === "bank-a" ? uiBankAAddr : uiBankBAddr}</div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Operator (Privy wallet)</div>
+                      <div style={{ ...mono, fontSize: 12 }}>
+                        {contractOperator && contractOperator !== ethers.ZeroAddress ? contractOperator : "not claimed yet — will be claimed on first action"}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1596,19 +1608,13 @@ export default function ContextVaultPage() {
                         <div style={labelStyle}>Purpose</div>
                         <input style={input} value={purpose} onChange={(e) => setPurpose(e.target.value)} />
                       </div>
-                      {connectedBankId ? (
-                        <button
-                          style={btn}
-                          disabled={!canUseBank || !isBankAddressSelected(connectedBankId)}
-                          onClick={() => requestAccessAsMetaMask(connectedBankId)}
-                        >
-                          Request access as {bankLabel(connectedBankId)}
-                        </button>
-                      ) : (
-                        <div style={{ ...note, fontSize: 12 }}>
-                          Switch MetaMask to a recognized bank address to request access.
-                        </div>
-                      )}
+                      <button
+                        style={btn}
+                        disabled={!canUseBank}
+                        onClick={() => requestAccessAsOperator(selectedBank)}
+                      >
+                        Request access as {bankLabel(selectedBank)}
+                      </button>
                       <div style={{ marginTop: 16 }}>
                         <div style={labelStyle}>Access status</div>
                         {(["bank-a", "bank-b"] as BankId[]).map((bank) => (
@@ -1662,7 +1668,7 @@ export default function ContextVaultPage() {
                         const plain = bank === "bank-a" ? bankAPlain : bankBPlain;
                         const setPlain = bank === "bank-a" ? setBankAPlain : setBankBPlain;
                         const bankErrMsg = bank === "bank-a" ? bankAErr : bankBErr;
-                        const isActive = connectedBankId === bank;
+                        const isActive = selectedBank === bank;
                         return (
                           <div key={bank} style={{ ...miniCard, marginBottom: 10, borderColor: isActive ? "rgba(245,158,11,0.28)" : "rgba(255,255,255,0.07)" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
