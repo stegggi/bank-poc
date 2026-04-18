@@ -1572,10 +1572,20 @@ export default function ContextVaultPage() {
                       </div>
                       <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Bank address (on-chain grantee)</div>
                       <div style={{ ...mono, fontSize: 12, marginBottom: 10 }}>{selectedBank === "bank-a" ? uiBankAAddr : uiBankBAddr}</div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Operator (Privy wallet)</div>
-                      <div style={{ ...mono, fontSize: 12 }}>
-                        {contractOperator && contractOperator !== ethers.ZeroAddress ? contractOperator : "not claimed yet — will be claimed on first action"}
-                      </div>
+                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Operator wallet (Privy embedded)</div>
+                      <div style={{ ...mono, fontSize: 12, marginBottom: 6 }}>{uiCustomerWallet}</div>
+                      {(() => {
+                        if (!walletAddress) return null;
+                        const claimed = !!contractOperator && contractOperator !== ethers.ZeroAddress;
+                        const matches = claimed && contractOperator.toLowerCase() === walletAddress.toLowerCase();
+                        const col = matches ? "#34d399" : claimed ? "#fbbf24" : "rgba(255,255,255,0.45)";
+                        const text = matches
+                          ? "operator role claimed ✓"
+                          : claimed
+                          ? `operator currently ${fmtShort(contractOperator)} — will reclaim on first action`
+                          : "not claimed yet — will be claimed on first action";
+                        return <div style={{ fontSize: 11, color: col }}>{text}</div>;
+                      })()}
                     </div>
                   )}
                 </div>
