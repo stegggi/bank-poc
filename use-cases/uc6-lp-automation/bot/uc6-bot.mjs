@@ -40,8 +40,10 @@ import {
 } from "./lib/emissions.mjs";
 import {
   loadPoolComparisonCache as loadPoolComparisonCacheFile,
+  parseOhlcvDaily,
   runPoolComparisonJob,
 } from "./lib/pool_compare/job.mjs";
+import { createGeckoTerminalClient } from "./lib/pool_compare/geckoterminal_client.mjs";
 
 const VERSION = "uc6-lp-bot/0.1";
 const USDC_DECIMALS = 6;
@@ -729,7 +731,24 @@ const DEFAULT_SETTINGS = {
       refreshSec: 900,
     },
   },
+  corridor: {
+    enabled: false,
+    holdDays: 7,
+    refreshHourUtc: 6,
+    volatilityLookbackDays: 180,
+    rangeLookbackDays: 30,
+    confidenceK: 1.5,
+    minCorridorWidthPct: 3,
+    maxCorridorWidthPct: 15,
+    corridorShiftThresholdPct: 30,
+    maxOutOfCorridorHours: 72,
+    useMA200: true,
+    useMA50Center: true,
+  },
 };
+
+const PRICE_HISTORY_PATH = path.join(ENV.dataDir, "price_history.jsonl");
+const PRICE_HISTORY_MAX_DAYS = 200;
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -745,6 +764,24 @@ function utcDayKey(ms = Date.now()) {
 
 function clamp(v, min, max) {
   return Math.min(max, Math.max(min, v));
+}
+
+function mean(arr) {
+  const list = Array.isArray(arr) ? arr.filter((v) => Number.isFinite(v)) : [];
+  if (list.length === 0) return 0;
+  return list.reduce((s, v) => s + v, 0) / list.length;
+}
+
+function percentile(arr, p) {
+  const sorted = Array.isArray(arr) ? arr.filter((v) => Number.isFinite(v)).slice().sort((a, b) => a - b) : [];
+  if (sorted.length === 0) return 0;
+  if (sorted.length === 1) return sorted[0];
+  const idx = (Math.max(0, Math.min(100, Number(p))) / 100) * (sorted.length - 1);
+  const lower = Math.floor(idx);
+  const upper = Math.ceil(idx);
+  if (lower === upper) return sorted[lower];
+  const frac = idx - lower;
+  return sorted[lower] * (1 - frac) + sorted[upper] * frac;
 }
 
 function chunkArray(items, size) {
@@ -812,6 +849,11 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       ? baseSettings.poolComparison
       : DEFAULT_SETTINGS.poolComparison;
   const srcPoolComparison = src.poolComparison && typeof src.poolComparison === "object" ? src.poolComparison : {};
+  const baseCorridor =
+    baseSettings.corridor && typeof baseSettings.corridor === "object"
+      ? baseSettings.corridor
+      : DEFAULT_SETTINGS.corridor;
+  const srcCorridor = src.corridor && typeof src.corridor === "object" ? src.corridor : {};
   const baseEmissions =
     baseSettings.emissions && typeof baseSettings.emissions === "object"
       ? baseSettings.emissions
@@ -1169,6 +1211,56 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
         1
       ),
     },
+    corridor: {
+      enabled: toBool(srcCorridor.enabled, baseCorridor.enabled),
+      holdDays: clamp(
+        Math.round(toNumber(srcCorridor.holdDays, baseCorridor.holdDays)),
+        1,
+        30
+      ),
+      refreshHourUtc: clamp(
+        Math.round(toNumber(srcCorridor.refreshHourUtc, baseCorridor.refreshHourUtc)),
+        0,
+        23
+      ),
+      volatilityLookbackDays: clamp(
+        Math.round(toNumber(srcCorridor.volatilityLookbackDays, baseCorridor.volatilityLookbackDays)),
+        14,
+        365
+      ),
+      rangeLookbackDays: clamp(
+        Math.round(toNumber(srcCorridor.rangeLookbackDays, baseCorridor.rangeLookbackDays)),
+        7,
+        90
+      ),
+      confidenceK: clamp(
+        toNumber(srcCorridor.confidenceK, baseCorridor.confidenceK),
+        1.0,
+        3.0
+      ),
+      minCorridorWidthPct: clamp(
+        toNumber(srcCorridor.minCorridorWidthPct, baseCorridor.minCorridorWidthPct),
+        1,
+        10
+      ),
+      maxCorridorWidthPct: clamp(
+        toNumber(srcCorridor.maxCorridorWidthPct, baseCorridor.maxCorridorWidthPct),
+        5,
+        30
+      ),
+      corridorShiftThresholdPct: clamp(
+        toNumber(srcCorridor.corridorShiftThresholdPct, baseCorridor.corridorShiftThresholdPct),
+        10,
+        80
+      ),
+      maxOutOfCorridorHours: clamp(
+        toNumber(srcCorridor.maxOutOfCorridorHours, baseCorridor.maxOutOfCorridorHours),
+        6,
+        168
+      ),
+      useMA200: toBool(srcCorridor.useMA200, baseCorridor.useMA200),
+      useMA50Center: toBool(srcCorridor.useMA50Center, baseCorridor.useMA50Center),
+    },
     emissions: {
       enabled: toBool(srcEmissions.enabled, baseEmissions.enabled),
       autoStakeOnMint: toBool(srcEmissions.autoStakeOnMint, baseEmissions.autoStakeOnMint),
@@ -1283,6 +1375,14 @@ function defaultState(accountAddress) {
       rewardToken: null,
       claimable: null,
       walletAero: null,
+    },
+    corridor: {
+      active: null,
+      mintedAtIso: null,
+      holdUntilIso: null,
+      lastRefreshAtIso: null,
+      outOfCorridorSinceIso: null,
+      consecutiveOutOfCorridorHours: 0,
     },
     events: [],
     ledgerEvents: [],
@@ -1974,6 +2074,17 @@ class Uc6Bot {
     this.poolComparisonLastError = null;
     this.poolComparisonLastCheckAtMs = 0;
     this.poolComparisonJobPromise = null;
+    this.priceHistory = [];
+    this.priceHistoryLoaded = false;
+    this.dailyCandle = {
+      date: utcDayKey(),
+      open: null,
+      high: -Infinity,
+      low: Infinity,
+      close: null,
+      samples: 0,
+    };
+    this.priceHistoryBootstrapPromise = null;
   }
 
   async init() {
@@ -2017,6 +2128,13 @@ class Uc6Bot {
     } catch (err) {
       this.poolComparisonCache = null;
       this.setPoolComparisonError(err);
+    }
+
+    try {
+      await this.loadPriceHistory();
+    } catch (err) {
+      this.priceHistory = [];
+      this.setLastError(err);
     }
 
     // Restore persisted nonces so replay protection survives restarts.
@@ -5803,6 +5921,594 @@ class Uc6Bot {
     };
   }
 
+  getCorridorSettings() {
+    const cfg =
+      this.settings?.corridor && typeof this.settings.corridor === "object"
+        ? this.settings.corridor
+        : DEFAULT_SETTINGS.corridor;
+    return {
+      enabled: Boolean(cfg.enabled),
+      holdDays: clamp(Math.round(Number(cfg.holdDays ?? DEFAULT_SETTINGS.corridor.holdDays)), 1, 30),
+      refreshHourUtc: clamp(
+        Math.round(Number(cfg.refreshHourUtc ?? DEFAULT_SETTINGS.corridor.refreshHourUtc)),
+        0,
+        23
+      ),
+      volatilityLookbackDays: clamp(
+        Math.round(Number(cfg.volatilityLookbackDays ?? DEFAULT_SETTINGS.corridor.volatilityLookbackDays)),
+        14,
+        365
+      ),
+      rangeLookbackDays: clamp(
+        Math.round(Number(cfg.rangeLookbackDays ?? DEFAULT_SETTINGS.corridor.rangeLookbackDays)),
+        7,
+        90
+      ),
+      confidenceK: clamp(Number(cfg.confidenceK ?? DEFAULT_SETTINGS.corridor.confidenceK), 1.0, 3.0),
+      minCorridorWidthPct: clamp(
+        Number(cfg.minCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.minCorridorWidthPct),
+        1,
+        10
+      ),
+      maxCorridorWidthPct: clamp(
+        Number(cfg.maxCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.maxCorridorWidthPct),
+        5,
+        30
+      ),
+      corridorShiftThresholdPct: clamp(
+        Number(cfg.corridorShiftThresholdPct ?? DEFAULT_SETTINGS.corridor.corridorShiftThresholdPct),
+        10,
+        80
+      ),
+      maxOutOfCorridorHours: clamp(
+        Number(cfg.maxOutOfCorridorHours ?? DEFAULT_SETTINGS.corridor.maxOutOfCorridorHours),
+        6,
+        168
+      ),
+      useMA200: Boolean(cfg.useMA200 ?? DEFAULT_SETTINGS.corridor.useMA200),
+      useMA50Center: Boolean(cfg.useMA50Center ?? DEFAULT_SETTINGS.corridor.useMA50Center),
+    };
+  }
+
+  ensureCorridorState() {
+    if (!this.state.corridor || typeof this.state.corridor !== "object") {
+      this.state.corridor = {
+        active: null,
+        mintedAtIso: null,
+        holdUntilIso: null,
+        lastRefreshAtIso: null,
+        outOfCorridorSinceIso: null,
+        consecutiveOutOfCorridorHours: 0,
+      };
+    }
+    return this.state.corridor;
+  }
+
+  async loadPriceHistory() {
+    try {
+      const raw = await fsp.readFile(PRICE_HISTORY_PATH, "utf8").catch(() => "");
+      const lines = String(raw || "").split("\n").filter(Boolean);
+      const seen = new Set();
+      const out = [];
+      for (const line of lines) {
+        try {
+          const c = JSON.parse(line);
+          if (
+            c &&
+            typeof c.date === "string" &&
+            !seen.has(c.date) &&
+            Number.isFinite(Number(c.close)) &&
+            Number(c.close) > 0
+          ) {
+            seen.add(c.date);
+            out.push({
+              date: c.date,
+              open: Number(c.open),
+              high: Number(c.high),
+              low: Number(c.low),
+              close: Number(c.close),
+              source: c.source || "live",
+            });
+          }
+        } catch {
+          // skip malformed line
+        }
+      }
+      out.sort((a, b) => a.date.localeCompare(b.date));
+      while (out.length > PRICE_HISTORY_MAX_DAYS) out.shift();
+      this.priceHistory = out;
+      this.priceHistoryLoaded = true;
+    } catch (err) {
+      this.priceHistory = [];
+      this.priceHistoryLoaded = true;
+      this.setLastError(err);
+    }
+  }
+
+  async appendPriceHistoryLine(candle) {
+    try {
+      await fsp.appendFile(PRICE_HISTORY_PATH, JSON.stringify(candle) + "\n");
+    } catch (err) {
+      this.setLastError(err);
+    }
+  }
+
+  recordPriceSample(priceUsd) {
+    const price = Number(priceUsd);
+    if (!Number.isFinite(price) || price <= 0) return;
+    const today = utcDayKey();
+    if (!this.dailyCandle || typeof this.dailyCandle !== "object") {
+      this.dailyCandle = {
+        date: today,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        samples: 1,
+      };
+      return;
+    }
+
+    if (today !== this.dailyCandle.date) {
+      if (this.dailyCandle.samples > 0 && Number.isFinite(this.dailyCandle.close)) {
+        const candle = {
+          date: this.dailyCandle.date,
+          open: Number(this.dailyCandle.open),
+          high: Number(this.dailyCandle.high),
+          low: Number(this.dailyCandle.low),
+          close: Number(this.dailyCandle.close),
+          source: "live",
+        };
+        const existingIdx = this.priceHistory.findIndex((c) => c.date === candle.date);
+        if (existingIdx >= 0) {
+          this.priceHistory[existingIdx] = candle;
+        } else {
+          this.priceHistory.push(candle);
+          this.appendPriceHistoryLine(candle);
+        }
+        while (this.priceHistory.length > PRICE_HISTORY_MAX_DAYS) {
+          this.priceHistory.shift();
+        }
+      }
+      this.dailyCandle = {
+        date: today,
+        open: price,
+        high: price,
+        low: price,
+        close: price,
+        samples: 1,
+      };
+      return;
+    }
+
+    if (this.dailyCandle.open == null) this.dailyCandle.open = price;
+    if (!Number.isFinite(this.dailyCandle.high) || price > this.dailyCandle.high) this.dailyCandle.high = price;
+    if (!Number.isFinite(this.dailyCandle.low) || price < this.dailyCandle.low) this.dailyCandle.low = price;
+    this.dailyCandle.close = price;
+    this.dailyCandle.samples = (this.dailyCandle.samples || 0) + 1;
+  }
+
+  getActiveCorridorPoolAddress() {
+    const venue = this.settings?.venue === "uniswapv3" ? "uniswapv3" : "slipstream";
+    return venue === "uniswapv3" ? this.uniswapPool : this.slipstreamPool;
+  }
+
+  async bootstrapPriceHistory() {
+    if (this.priceHistoryBootstrapPromise) return this.priceHistoryBootstrapPromise;
+    if (Array.isArray(this.priceHistory) && this.priceHistory.length >= 30) return;
+    const runBootstrap = async () => {
+      try {
+        const client = createGeckoTerminalClient({ network: "base" });
+        const poolAddress = this.getActiveCorridorPoolAddress();
+        if (!poolAddress) return;
+        const ohlcvJson = await client.getOhlcvDay(poolAddress, {
+          limit: 180,
+          aggregate: 1,
+          currency: "usd",
+        });
+        const rows = parseOhlcvDaily(ohlcvJson);
+        if (!Array.isArray(rows) || rows.length === 0) return;
+        const existingDates = new Set((this.priceHistory || []).map((c) => c.date));
+        const additions = [];
+        for (const row of rows) {
+          if (!Number.isFinite(row?.tsSec) || !Number.isFinite(row?.close) || row.close <= 0) continue;
+          const date = utcDayKey(row.tsSec * 1000);
+          if (existingDates.has(date)) continue;
+          const candle = {
+            date,
+            open: Number(row.open),
+            high: Number(row.high),
+            low: Number(row.low),
+            close: Number(row.close),
+            source: "gecko_bootstrap",
+          };
+          this.priceHistory.push(candle);
+          existingDates.add(date);
+          additions.push(candle);
+        }
+        if (additions.length > 0) {
+          this.priceHistory.sort((a, b) => a.date.localeCompare(b.date));
+          while (this.priceHistory.length > PRICE_HISTORY_MAX_DAYS) {
+            this.priceHistory.shift();
+          }
+          for (const c of additions) {
+            await this.appendPriceHistoryLine(c);
+          }
+        }
+      } catch (err) {
+        this.setLastError(err);
+      }
+    };
+    this.priceHistoryBootstrapPromise = runBootstrap().finally(() => {
+      this.priceHistoryBootstrapPromise = null;
+    });
+    return this.priceHistoryBootstrapPromise;
+  }
+
+  computeCorridor() {
+    const cfg = this.getCorridorSettings();
+    const history = Array.isArray(this.priceHistory) ? this.priceHistory : [];
+    if (history.length < 14) {
+      return { ok: false, reason: "insufficient_history", candleCount: history.length };
+    }
+    const closes = history.map((c) => Number(c.close)).filter((v) => Number.isFinite(v) && v > 0);
+    if (closes.length < 14) {
+      return { ok: false, reason: "insufficient_history", candleCount: closes.length };
+    }
+    const spot = this.getSpotPrice();
+    const currentPrice = Number.isFinite(spot) && spot > 0 ? spot : closes[closes.length - 1];
+
+    const volDays = Math.min(cfg.volatilityLookbackDays, closes.length - 1);
+    const recentCloses = closes.slice(-volDays - 1);
+    const logReturns = [];
+    for (let i = 1; i < recentCloses.length; i += 1) {
+      if (recentCloses[i] > 0 && recentCloses[i - 1] > 0) {
+        logReturns.push(Math.log(recentCloses[i] / recentCloses[i - 1]));
+      }
+    }
+    const dailySigma =
+      logReturns.length > 1
+        ? Math.sqrt(logReturns.reduce((s, r) => s + r * r, 0) / logReturns.length)
+        : 0.04;
+
+    const holdDays = Math.max(1, cfg.holdDays);
+    const volWidth = cfg.confidenceK * dailySigma * Math.sqrt(holdDays);
+
+    const recent14 = closes.slice(-14);
+    const median14 = percentile(recent14, 50);
+    let center = median14;
+    if (cfg.useMA50Center && closes.length >= 50) {
+      const ma50 = mean(closes.slice(-50));
+      center = median14 * 0.7 + ma50 * 0.3;
+    }
+
+    let rawLower = center * (1 - volWidth);
+    let rawUpper = center * (1 + volWidth);
+
+    const rangeDays = Math.min(cfg.rangeLookbackDays, closes.length);
+    const rangeCloses = closes.slice(-rangeDays);
+    const p5 = percentile(rangeCloses, 5);
+    const p95 = percentile(rangeCloses, 95);
+    rawLower = Math.max(rawLower, p5 * 0.98);
+    rawUpper = Math.min(rawUpper, p95 * 1.02);
+
+    let ma200 = null;
+    if (cfg.useMA200 && closes.length >= 200) {
+      ma200 = mean(closes.slice(-200));
+      if (currentPrice > ma200 && rawLower < ma200) {
+        rawLower = Math.max(rawLower, ma200 * 0.99);
+      }
+      if (currentPrice < ma200 && rawUpper > ma200) {
+        rawUpper = Math.min(rawUpper, ma200 * 1.01);
+      }
+    }
+
+    if (rawUpper <= rawLower) {
+      const mid = center;
+      const half = Math.max(mid * (cfg.minCorridorWidthPct / 100), 1e-9);
+      rawLower = mid - half;
+      rawUpper = mid + half;
+    }
+
+    const halfWidthPct = ((rawUpper - rawLower) / 2) / center;
+    const minHalf = cfg.minCorridorWidthPct / 100;
+    const maxHalf = cfg.maxCorridorWidthPct / 100;
+    if (halfWidthPct < minHalf) {
+      const mid = (rawLower + rawUpper) / 2;
+      rawLower = mid * (1 - minHalf);
+      rawUpper = mid * (1 + minHalf);
+    } else if (halfWidthPct > maxHalf) {
+      const mid = (rawLower + rawUpper) / 2;
+      rawLower = mid * (1 - maxHalf);
+      rawUpper = mid * (1 + maxHalf);
+    }
+
+    const lowerPct = currentPrice > 0 ? ((currentPrice - rawLower) / currentPrice) * 100 : 0;
+    const upperPct = currentPrice > 0 ? ((rawUpper - currentPrice) / currentPrice) * 100 : 0;
+    const ma50 = closes.length >= 50 ? mean(closes.slice(-50)) : null;
+
+    const round2 = (v) => Math.round(Number(v) * 100) / 100;
+    return {
+      ok: true,
+      lower: round2(rawLower),
+      upper: round2(rawUpper),
+      center: round2(center),
+      currentPrice: round2(currentPrice),
+      lowerPct: Math.round(lowerPct * 10) / 10,
+      upperPct: Math.round(upperPct * 10) / 10,
+      dailySigma: Math.round(dailySigma * 10000) / 10000,
+      volWidthPct: Math.round(volWidth * 1000) / 10,
+      holdDays,
+      confidenceK: cfg.confidenceK,
+      ma200: ma200 != null ? round2(ma200) : null,
+      ma50: ma50 != null ? round2(ma50) : null,
+      p5: round2(p5),
+      p95: round2(p95),
+      candleCount: history.length,
+      computedAtIso: nowIso(),
+    };
+  }
+
+  corridorShiftPct(oldCorridor, newCorridor) {
+    if (!oldCorridor || !newCorridor) return 100;
+    const oldWidth = Number(oldCorridor.upper) - Number(oldCorridor.lower);
+    if (!Number.isFinite(oldWidth) || oldWidth <= 0) return 100;
+    const centerShift = Math.abs(Number(newCorridor.center) - Number(oldCorridor.center));
+    return (centerShift / oldWidth) * 100;
+  }
+
+  async refreshCorridor() {
+    this.ensureCorridorState();
+    await this.bootstrapPriceHistory().catch(() => {});
+    const corridor = this.computeCorridor();
+    if (!corridor?.ok) return false;
+    this.state.corridor.active = corridor;
+    this.state.corridor.lastRefreshAtIso = nowIso();
+    return true;
+  }
+
+  priceToTick(priceUsd, snapshot) {
+    const price = Number(priceUsd);
+    if (!Number.isFinite(price) || price <= 0) return 0;
+    const token0 = snapshot?.token0;
+    const token1 = snapshot?.token1;
+    const { baseIs } = this.identifyPairTokens(token0, token1);
+    const dec0 = this.tokenDecimals(token0);
+    const dec1 = this.tokenDecimals(token1);
+    let rawPrice;
+    if (baseIs === 0) {
+      rawPrice = price / 10 ** (dec0 - dec1);
+    } else {
+      rawPrice = 1 / price / 10 ** (dec1 - dec0);
+    }
+    if (!Number.isFinite(rawPrice) || rawPrice <= 0) return 0;
+    return Math.round(Math.log(rawPrice) / Math.log(1.0001));
+  }
+
+  corridorTicksFromSnapshot(corridor, snapshot) {
+    if (!corridor || !snapshot) return null;
+    const lowerTickRaw = this.priceToTick(corridor.lower, snapshot);
+    const upperTickRaw = this.priceToTick(corridor.upper, snapshot);
+    let tLow = Math.min(lowerTickRaw, upperTickRaw);
+    let tHigh = Math.max(lowerTickRaw, upperTickRaw);
+    const spacing = Math.max(1, Number(snapshot.tickSpacing || 100));
+    let alignedLower = Math.floor(tLow / spacing) * spacing;
+    let alignedUpper = Math.ceil(tHigh / spacing) * spacing;
+    if (alignedUpper <= alignedLower) alignedUpper = alignedLower + spacing;
+    const currentTick = Number(snapshot.tick);
+    if (Number.isFinite(currentTick)) {
+      if (alignedLower >= currentTick) alignedLower = Math.floor((currentTick - 1) / spacing) * spacing;
+      if (alignedUpper <= currentTick) alignedUpper = Math.ceil((currentTick + 1) / spacing) * spacing;
+    }
+    const centerTick = Math.round((alignedLower + alignedUpper) / 2);
+    return { tickLower: alignedLower, tickUpper: alignedUpper, centerTick };
+  }
+
+  async mintAtCorridorBounds(primary) {
+    this.ensureCorridorState();
+    const corridor = this.state.corridor?.active;
+    if (!corridor) return;
+    const cfg = this.getCorridorSettings();
+    const snapshot = primary || this.state.latest?.primary;
+    if (!snapshot) return;
+
+    const ticks = this.corridorTicksFromSnapshot(corridor, snapshot);
+    if (!ticks) return;
+    const bandHalfBps = this.estimateBandHalfBpsFromTicks(ticks.tickLower, ticks.tickUpper) || 100;
+
+    this.beginAction("corridor_mint", "corridor_open");
+    try {
+      await this.rebalanceSlipstream(snapshot, {
+        bandHalfBps,
+        overrideTicks: ticks,
+      });
+      this.state.corridor.mintedAtIso = nowIso();
+      this.state.corridor.holdUntilIso = new Date(
+        Date.now() + cfg.holdDays * 24 * 3600 * 1000
+      ).toISOString();
+      this.state.corridor.outOfCorridorSinceIso = null;
+      this.state.corridor.consecutiveOutOfCorridorHours = 0;
+      this.finalizeActiveAction("corridor_mint", "corridor_open");
+    } catch (err) {
+      this.setLastError(err);
+      this.finalizeActiveAction("error", "corridor_mint_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+    }
+  }
+
+  async corridorRecenter(primary, reason) {
+    this.ensureCorridorState();
+    const snapshot = primary || this.state.latest?.primary;
+    if (!snapshot) {
+      this.setDecision({ action: "monitor", reason: "corridor_recenter_no_snapshot", mode: "corridor" });
+      return;
+    }
+    const newCorridor = this.computeCorridor();
+    if (!newCorridor?.ok) {
+      this.setDecision({
+        action: "monitor",
+        reason: "corridor_recompute_failed",
+        mode: "corridor",
+        corridorReason: newCorridor?.reason || "unknown",
+      });
+      return;
+    }
+    this.state.corridor.active = newCorridor;
+    this.state.corridor.lastRefreshAtIso = nowIso();
+
+    const ticks = this.corridorTicksFromSnapshot(newCorridor, snapshot);
+    if (!ticks) return;
+    const bandHalfBps = this.estimateBandHalfBpsFromTicks(ticks.tickLower, ticks.tickUpper) || 100;
+
+    this.beginAction("corridor_recenter", reason);
+    try {
+      await this.rebalanceSlipstream(snapshot, {
+        bandHalfBps,
+        overrideTicks: ticks,
+      });
+      const cfg = this.getCorridorSettings();
+      this.state.corridor.mintedAtIso = nowIso();
+      this.state.corridor.holdUntilIso = new Date(
+        Date.now() + cfg.holdDays * 24 * 3600 * 1000
+      ).toISOString();
+      this.state.corridor.outOfCorridorSinceIso = null;
+      this.state.corridor.consecutiveOutOfCorridorHours = 0;
+      this.finalizeActiveAction("corridor_recenter", reason);
+    } catch (err) {
+      this.setLastError(err);
+      this.finalizeActiveAction("error", "corridor_recenter_failed", {
+        message: err instanceof Error ? err.message : String(err || "unknown"),
+      });
+    }
+  }
+
+  async evaluateCorridorMode(primary) {
+    const cfg = this.getCorridorSettings();
+    const state = this.ensureCorridorState();
+    const now = Date.now();
+    const spot =
+      Number(primary?.priceQuotePerBase) ||
+      Number(primary?.priceUsdcPerWeth) ||
+      this.getSpotPrice();
+
+    this.recordPriceSample(spot);
+
+    const currentHourUtc = new Date().getUTCHours();
+    const lastRefreshMs = Date.parse(state.lastRefreshAtIso || "");
+    const refreshDue =
+      !Number.isFinite(lastRefreshMs) ||
+      (now - lastRefreshMs > 20 * 3600 * 1000 && currentHourUtc >= cfg.refreshHourUtc);
+
+    if (refreshDue) {
+      await this.refreshCorridor();
+    }
+
+    let corridor = state.active;
+    if (!corridor) {
+      await this.refreshCorridor();
+      corridor = state.active;
+      if (!corridor) {
+        this.setDecision({
+          action: "monitor",
+          reason: "corridor_not_ready",
+          mode: "corridor",
+          candleCount: Array.isArray(this.priceHistory) ? this.priceHistory.length : 0,
+        });
+        return;
+      }
+    }
+
+    const hasPosition = Boolean(this.state.position?.tokenId);
+    const holdUntilMs = Date.parse(state.holdUntilIso || "");
+    const holdActive = Number.isFinite(holdUntilMs) && now < holdUntilMs;
+    const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
+
+    if (!hasPosition) {
+      if (!tradingAllowed) {
+        this.setDecision({
+          action: "monitor",
+          reason: this.settings.killSwitch ? "kill_switch_active" : "trading_disabled",
+          mode: "corridor",
+        });
+        return;
+      }
+      await this.mintAtCorridorBounds(primary);
+      this.setDecision({
+        action: "corridor_mint",
+        reason: "corridor_open",
+        mode: "corridor",
+        corridorLower: corridor.lower,
+        corridorUpper: corridor.upper,
+      });
+      return;
+    }
+
+    const inCorridor =
+      Number.isFinite(spot) && spot >= Number(corridor.lower) && spot <= Number(corridor.upper);
+    if (!inCorridor) {
+      if (!state.outOfCorridorSinceIso) {
+        state.outOfCorridorSinceIso = nowIso();
+      }
+      const outSinceMs = Date.parse(state.outOfCorridorSinceIso || "");
+      state.consecutiveOutOfCorridorHours = Number.isFinite(outSinceMs)
+        ? Math.max(0, (now - outSinceMs) / 3_600_000)
+        : 0;
+    } else {
+      state.outOfCorridorSinceIso = null;
+      state.consecutiveOutOfCorridorHours = 0;
+    }
+
+    await this.maybeHarvestOnly().catch((err) => this.setLastError(err));
+
+    const outHours = Number(state.consecutiveOutOfCorridorHours || 0);
+    if (outHours >= cfg.maxOutOfCorridorHours && tradingAllowed) {
+      await this.corridorRecenter(primary, "corridor_break_timeout");
+      this.setDecision({
+        action: "corridor_recenter",
+        reason: "corridor_break_timeout",
+        mode: "corridor",
+        outOfCorridorHours: Math.round(outHours * 10) / 10,
+      });
+      return;
+    }
+
+    if (holdActive) {
+      this.setDecision({
+        action: "monitor",
+        reason: "corridor_hold",
+        mode: "corridor",
+        corridorInRange: inCorridor,
+        outOfCorridorHours: Math.round(outHours * 10) / 10,
+        holdRemainingHours: Math.round(((holdUntilMs - now) / 3_600_000) * 10) / 10,
+      });
+      return;
+    }
+
+    const newCorridor = this.computeCorridor();
+    if (newCorridor?.ok) {
+      const shift = this.corridorShiftPct(corridor, newCorridor);
+      if (shift >= cfg.corridorShiftThresholdPct && tradingAllowed) {
+        await this.corridorRecenter(primary, "corridor_shifted");
+        this.setDecision({
+          action: "corridor_recenter",
+          reason: "corridor_shifted",
+          mode: "corridor",
+          shiftPct: Math.round(shift * 10) / 10,
+        });
+        return;
+      }
+    }
+
+    this.setDecision({
+      action: "monitor",
+      reason: "corridor_stable_extended_hold",
+      mode: "corridor",
+      corridorInRange: inCorridor,
+      outOfCorridorHours: Math.round(outHours * 10) / 10,
+    });
+  }
+
   getStrategyMode() {
     const mode = String(this.state?.strategyMode || "LP_ACTIVE");
     if (mode === "HOLD_WETH" || mode === "HOLD_USDC" || mode === "HOLD_50_50") return mode;
@@ -6003,6 +6709,20 @@ class Uc6Bot {
   }
 
   ingestRegimeSampleFromSnapshot(snapshot) {
+    // Piggyback: feed the price history buffer every time we get a market sample,
+    // regardless of regime/corridor mode state. This keeps the daily candle fresh
+    // so corridor mode has data available whenever it is enabled.
+    const priceQuotePerBase = Number(snapshot?.priceQuotePerBase);
+    const priceUsdcPerWeth = Number(snapshot?.priceUsdcPerWeth);
+    const samplePrice = Number.isFinite(priceQuotePerBase) && priceQuotePerBase > 0
+      ? priceQuotePerBase
+      : Number.isFinite(priceUsdcPerWeth) && priceUsdcPerWeth > 0
+        ? priceUsdcPerWeth
+        : null;
+    if (samplePrice != null) {
+      try { this.recordPriceSample(samplePrice); } catch { /* non-fatal */ }
+    }
+
     const cfg = this.syncRegimeStateWithSettings();
     if (!cfg.enabled) return false;
     const tick = Number(snapshot?.tick);
@@ -9668,6 +10388,17 @@ class Uc6Bot {
       ? Number(options.bandHalfBpsDown) : (this.settings.bandHalfBpsDown ?? null);
     const bandOpts = (effectiveBandUp != null || effectiveBandDown != null)
       ? { bandHalfBpsUp: effectiveBandUp, bandHalfBpsDown: effectiveBandDown } : {};
+    const overrideTicks = options.overrideTicks && typeof options.overrideTicks === "object"
+      ? {
+          tickLower: Number(options.overrideTicks.tickLower),
+          tickUpper: Number(options.overrideTicks.tickUpper),
+          centerTick: Number(
+            options.overrideTicks.centerTick != null
+              ? options.overrideTicks.centerTick
+              : Math.round((Number(options.overrideTicks.tickLower) + Number(options.overrideTicks.tickUpper)) / 2)
+          ),
+        }
+      : null;
 
     const currentTokenId = this.state.position?.tokenId;
     const existingBand = currentTokenId
@@ -9681,7 +10412,9 @@ class Uc6Bot {
       bandHalfBps: effectiveBandHalfBps,
       ...(effectiveBandUp != null ? { bandHalfBpsUp: effectiveBandUp } : {}),
       ...(effectiveBandDown != null ? { bandHalfBpsDown: effectiveBandDown } : {}),
-      ...(this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, effectiveBandHalfBps, bandOpts) || {}),
+      ...(overrideTicks
+        ? { tickLower: overrideTicks.tickLower, tickUpper: overrideTicks.tickUpper, centerTick: overrideTicks.centerTick }
+        : this.computeTargetRange(snapshot.tick, snapshot.tickSpacing, effectiveBandHalfBps, bandOpts) || {}),
     };
     const runId = this.ensureActivePositionRun({
       reason: currentTokenId ? "auto_rebalance" : "auto",
@@ -9983,7 +10716,9 @@ class Uc6Bot {
 
     const maxPreflightMintAttempts = 3;
     let mintBasis = snapshot;
-    let targetRange = this.computeTargetRange(mintBasis.tick, mintBasis.tickSpacing, effectiveBandHalfBps, bandOpts);
+    let targetRange = overrideTicks
+      ? { tickLower: overrideTicks.tickLower, tickUpper: overrideTicks.tickUpper, centerTick: overrideTicks.centerTick }
+      : this.computeTargetRange(mintBasis.tick, mintBasis.tickSpacing, effectiveBandHalfBps, bandOpts);
     let minted;
     let lastMintErr = null;
     const preflightErrors = [];
@@ -9995,21 +10730,25 @@ class Uc6Bot {
         } catch {
           // Keep prior snapshot if refresh fails.
         }
-        targetRange = this.computeTargetRange(
-          mintBasis.tick,
-          mintBasis.tickSpacing,
-          effectiveBandHalfBps,
-          bandOpts
-        );
-      } else {
-        try {
-          mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+        if (!overrideTicks) {
           targetRange = this.computeTargetRange(
             mintBasis.tick,
             mintBasis.tickSpacing,
             effectiveBandHalfBps,
             bandOpts
           );
+        }
+      } else {
+        try {
+          mintBasis = await this.getPoolSnapshot(this.slipstreamPool, "slipstream");
+          if (!overrideTicks) {
+            targetRange = this.computeTargetRange(
+              mintBasis.tick,
+              mintBasis.tickSpacing,
+              effectiveBandHalfBps,
+              bandOpts
+            );
+          }
         } catch {
           // Keep provided snapshot on first attempt if refresh fails.
         }
@@ -10102,6 +10841,11 @@ class Uc6Bot {
       this.enforceSinglePositionInvariant();
     }
     this.ensureActiveLifecycleRecordFromTrackedPosition();
+
+    if (this.getCorridorSettings().enabled) {
+      await this.evaluateCorridorMode(primary);
+      return;
+    }
 
     const forceRequestedAt = this.state.forceRebalanceRequestedAt || null;
     const forceRebalance = Boolean(forceRequestedAt);
@@ -10559,6 +11303,7 @@ class Uc6Bot {
         hodlGate: this.settings.hodlGate,
         trendEscape: this.settings.trendEscape,
         reEntry: this.settings.reEntry,
+        corridor: this.settings.corridor,
         executionCaps: this.settings.executionCaps,
         gasTopUp: this.settings.gasTopUp,
         poolComparison: this.settings.poolComparison,
@@ -10850,9 +11595,64 @@ class Uc6Bot {
         canRebalanceNow: gate.allowed,
         reason: gate.reason,
       },
+      corridor: this.getCorridorStatusPayload(),
       emissions: this.getEmissionsStatusPayload(),
       lastDecision: this.state.lastDecision,
       lastError: this.state.lastError,
+    };
+  }
+
+  getCorridorStatusPayload() {
+    const cfg = this.getCorridorSettings();
+    const state = this.state.corridor || null;
+    const active = state?.active || null;
+    const history = Array.isArray(this.priceHistory) ? this.priceHistory : [];
+    const oldestDate = history.length > 0 ? history[0].date : null;
+    const newestDate = history.length > 0 ? history[history.length - 1].date : null;
+    const spot = this.getSpotPrice();
+    const priceInCorridor = active
+      ? Number.isFinite(spot) && spot > 0
+        ? spot >= Number(active.lower) && spot <= Number(active.upper)
+        : null
+      : null;
+    const holdUntilMs = Date.parse(state?.holdUntilIso || "");
+    const holdRemainingHours =
+      Number.isFinite(holdUntilMs) && holdUntilMs > Date.now()
+        ? Math.round(((holdUntilMs - Date.now()) / 3_600_000) * 10) / 10
+        : 0;
+    return {
+      enabled: cfg.enabled,
+      active: active
+        ? {
+            lower: Number(active.lower),
+            upper: Number(active.upper),
+            center: Number(active.center),
+            currentPrice: Number(active.currentPrice),
+            lowerPct: Number(active.lowerPct),
+            upperPct: Number(active.upperPct),
+            dailySigma: Number(active.dailySigma),
+            volWidthPct: Number(active.volWidthPct),
+            holdDays: Number(active.holdDays),
+            confidenceK: Number(active.confidenceK),
+            ma200: active.ma200 != null ? Number(active.ma200) : null,
+            ma50: active.ma50 != null ? Number(active.ma50) : null,
+            p5: active.p5 != null ? Number(active.p5) : null,
+            p95: active.p95 != null ? Number(active.p95) : null,
+            candleCount: Number(active.candleCount || 0),
+            computedAtIso: active.computedAtIso || null,
+          }
+        : null,
+      mintedAtIso: state?.mintedAtIso || null,
+      holdUntilIso: state?.holdUntilIso || null,
+      holdRemainingHours,
+      lastRefreshAtIso: state?.lastRefreshAtIso || null,
+      outOfCorridorHours: Math.round(Number(state?.consecutiveOutOfCorridorHours || 0) * 10) / 10,
+      priceInCorridor,
+      priceHistory: {
+        candleCount: history.length,
+        oldestDate,
+        newestDate,
+      },
     };
   }
 

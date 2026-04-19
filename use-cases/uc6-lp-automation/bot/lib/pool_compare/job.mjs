@@ -273,7 +273,7 @@ function isAllowedPair(candidate) {
   return Boolean(base.stable || quote.stable);
 }
 
-function parseOhlcvDaily(ohlcvJson) {
+export function parseOhlcvDaily(ohlcvJson) {
   const rows =
     ohlcvJson?.data?.attributes?.ohlcv_list ||
     ohlcvJson?.data?.attributes?.ohlcv ||

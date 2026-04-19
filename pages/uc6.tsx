@@ -85,6 +85,18 @@ type Uc6DraftSettings = {
   reEntryMaxDistanceFromMuPct: number;
   reEntryMinHoldSec: number;
   reEntryCooldownAfterReEntrySec: number;
+  corridorEnabled: boolean;
+  corridorHoldDays: number;
+  corridorRefreshHourUtc: number;
+  corridorVolatilityLookbackDays: number;
+  corridorRangeLookbackDays: number;
+  corridorConfidenceK: number;
+  corridorMinWidthPct: number;
+  corridorMaxWidthPct: number;
+  corridorShiftThresholdPct: number;
+  corridorMaxOutOfCorridorHours: number;
+  corridorUseMA200: boolean;
+  corridorUseMA50Center: boolean;
 };
 
 type OwnerPayload = {
@@ -164,6 +176,20 @@ type OwnerPayload = {
     maxDistanceFromMuPct: number;
     minHoldSec: number;
     cooldownAfterReEntrySec: number;
+  };
+  corridor: {
+    enabled: boolean;
+    holdDays: number;
+    refreshHourUtc: number;
+    volatilityLookbackDays: number;
+    rangeLookbackDays: number;
+    confidenceK: number;
+    minCorridorWidthPct: number;
+    maxCorridorWidthPct: number;
+    corridorShiftThresholdPct: number;
+    maxOutOfCorridorHours: number;
+    useMA200: boolean;
+    useMA50Center: boolean;
   };
 };
 
@@ -415,6 +441,20 @@ type Uc6Status = {
       maxDistanceFromMuPct?: number;
       minHoldSec?: number;
       cooldownAfterReEntrySec?: number;
+    };
+    corridor?: {
+      enabled?: boolean;
+      holdDays?: number;
+      refreshHourUtc?: number;
+      volatilityLookbackDays?: number;
+      rangeLookbackDays?: number;
+      confidenceK?: number;
+      minCorridorWidthPct?: number;
+      maxCorridorWidthPct?: number;
+      corridorShiftThresholdPct?: number;
+      maxOutOfCorridorHours?: number;
+      useMA200?: boolean;
+      useMA50Center?: boolean;
     };
     hodlGate?: {
       enabled?: boolean;
@@ -792,6 +832,38 @@ type Uc6Status = {
       approvalMode?: string;
     };
   };
+  corridor?: {
+    enabled?: boolean;
+    active?: {
+      lower?: number;
+      upper?: number;
+      center?: number;
+      currentPrice?: number;
+      lowerPct?: number;
+      upperPct?: number;
+      dailySigma?: number;
+      volWidthPct?: number;
+      holdDays?: number;
+      confidenceK?: number;
+      ma200?: number | null;
+      ma50?: number | null;
+      p5?: number | null;
+      p95?: number | null;
+      candleCount?: number;
+      computedAtIso?: string | null;
+    } | null;
+    mintedAtIso?: string | null;
+    holdUntilIso?: string | null;
+    holdRemainingHours?: number;
+    lastRefreshAtIso?: string | null;
+    outOfCorridorHours?: number;
+    priceInCorridor?: boolean | null;
+    priceHistory?: {
+      candleCount?: number;
+      oldestDate?: string | null;
+      newestDate?: string | null;
+    };
+  };
   lastDecision?: unknown;
   lastError?: string | null;
 };
@@ -864,6 +936,18 @@ function defaultDraft(): Uc6DraftSettings {
     reEntryMaxDistanceFromMuPct: 0.006,
     reEntryMinHoldSec: 900,
     reEntryCooldownAfterReEntrySec: 1800,
+    corridorEnabled: false,
+    corridorHoldDays: 7,
+    corridorRefreshHourUtc: 6,
+    corridorVolatilityLookbackDays: 180,
+    corridorRangeLookbackDays: 30,
+    corridorConfidenceK: 1.5,
+    corridorMinWidthPct: 3,
+    corridorMaxWidthPct: 15,
+    corridorShiftThresholdPct: 30,
+    corridorMaxOutOfCorridorHours: 72,
+    corridorUseMA200: true,
+    corridorUseMA50Center: true,
   };
 }
 
@@ -885,6 +969,7 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
   const regime = settings.regime || {};
   const trendEscape = settings.trendEscape || {};
   const reEntry = settings.reEntry || {};
+  const corridor = settings.corridor || {};
 
   return {
     tradingEnabled: Boolean(settings.tradingEnabled ?? d.tradingEnabled),
@@ -974,6 +1059,18 @@ function coerceDraft(settings: Uc6Status["settings"] | undefined): Uc6DraftSetti
     reEntryMaxDistanceFromMuPct: n(reEntry.maxDistanceFromMuPct, d.reEntryMaxDistanceFromMuPct),
     reEntryMinHoldSec: n(reEntry.minHoldSec, d.reEntryMinHoldSec),
     reEntryCooldownAfterReEntrySec: n(reEntry.cooldownAfterReEntrySec, d.reEntryCooldownAfterReEntrySec),
+    corridorEnabled: Boolean(corridor.enabled ?? d.corridorEnabled),
+    corridorHoldDays: n(corridor.holdDays, d.corridorHoldDays),
+    corridorRefreshHourUtc: n(corridor.refreshHourUtc, d.corridorRefreshHourUtc),
+    corridorVolatilityLookbackDays: n(corridor.volatilityLookbackDays, d.corridorVolatilityLookbackDays),
+    corridorRangeLookbackDays: n(corridor.rangeLookbackDays, d.corridorRangeLookbackDays),
+    corridorConfidenceK: n(corridor.confidenceK, d.corridorConfidenceK),
+    corridorMinWidthPct: n(corridor.minCorridorWidthPct, d.corridorMinWidthPct),
+    corridorMaxWidthPct: n(corridor.maxCorridorWidthPct, d.corridorMaxWidthPct),
+    corridorShiftThresholdPct: n(corridor.corridorShiftThresholdPct, d.corridorShiftThresholdPct),
+    corridorMaxOutOfCorridorHours: n(corridor.maxOutOfCorridorHours, d.corridorMaxOutOfCorridorHours),
+    corridorUseMA200: Boolean(corridor.useMA200 ?? d.corridorUseMA200),
+    corridorUseMA50Center: Boolean(corridor.useMA50Center ?? d.corridorUseMA50Center),
   };
 }
 
@@ -1055,6 +1152,20 @@ function buildPayload(draft: Uc6DraftSettings): OwnerPayload {
       maxDistanceFromMuPct: draft.reEntryMaxDistanceFromMuPct,
       minHoldSec: draft.reEntryMinHoldSec,
       cooldownAfterReEntrySec: draft.reEntryCooldownAfterReEntrySec,
+    },
+    corridor: {
+      enabled: draft.corridorEnabled,
+      holdDays: draft.corridorHoldDays,
+      refreshHourUtc: draft.corridorRefreshHourUtc,
+      volatilityLookbackDays: draft.corridorVolatilityLookbackDays,
+      rangeLookbackDays: draft.corridorRangeLookbackDays,
+      confidenceK: draft.corridorConfidenceK,
+      minCorridorWidthPct: draft.corridorMinWidthPct,
+      maxCorridorWidthPct: draft.corridorMaxWidthPct,
+      corridorShiftThresholdPct: draft.corridorShiftThresholdPct,
+      maxOutOfCorridorHours: draft.corridorMaxOutOfCorridorHours,
+      useMA200: draft.corridorUseMA200,
+      useMA50Center: draft.corridorUseMA50Center,
     },
   };
 }
@@ -2286,6 +2397,12 @@ export default function Uc6Page() {
 
           {/* ZONE 4: Signals */}
           <div style={{ display:"grid", gap:12 }}>
+            {status?.corridor?.enabled ? (
+              <Uc6Card title="Price Corridor" accent>
+                <CorridorCard corridor={status.corridor} />
+              </Uc6Card>
+            ) : null}
+
             <Uc6Card title="Regime">
               <RegimeGauge
                 label={regimeStatus?.label ?? null}
@@ -2546,6 +2663,25 @@ export default function Uc6Page() {
                   <NumberField label="reEntry.maxDistanceFromMuPct" value={draft.reEntryMaxDistanceFromMuPct} step="0.0001" onChange={(v) => updateNumber("reEntryMaxDistanceFromMuPct", v)} />
                   <NumberField label="reEntry.minHoldSec" value={draft.reEntryMinHoldSec} onChange={(v) => updateNumber("reEntryMinHoldSec", v)} />
                   <NumberField label="reEntry.cooldownAfterReEntrySec" value={draft.reEntryCooldownAfterReEntrySec} onChange={(v) => updateNumber("reEntryCooldownAfterReEntrySec", v)} />
+                </div>
+              </details>
+
+              {/* Section 5b: Corridor Mode */}
+              <details>
+                <summary style={cmdSectionStyle}>CORRIDOR MODE</summary>
+                <div style={{ padding:"16px 0", display:"grid", gridTemplateColumns: isMobile ? "1fr 1fr" : "repeat(auto-fill, minmax(200px, 1fr))", gap:10 }}>
+                  <SelectField label="corridor.enabled" value={draft.corridorEnabled ? "true" : "false"} onChange={(v) => updateBool("corridorEnabled", v === "true")} options={["false", "true"]} />
+                  <NumberField label="corridor.holdDays" value={draft.corridorHoldDays} onChange={(v) => updateNumber("corridorHoldDays", v)} />
+                  <NumberField label="corridor.refreshHourUtc" value={draft.corridorRefreshHourUtc} onChange={(v) => updateNumber("corridorRefreshHourUtc", v)} />
+                  <NumberField label="corridor.volatilityLookbackDays" value={draft.corridorVolatilityLookbackDays} onChange={(v) => updateNumber("corridorVolatilityLookbackDays", v)} />
+                  <NumberField label="corridor.rangeLookbackDays" value={draft.corridorRangeLookbackDays} onChange={(v) => updateNumber("corridorRangeLookbackDays", v)} />
+                  <NumberField label="corridor.confidenceK" value={draft.corridorConfidenceK} step="0.1" onChange={(v) => updateNumber("corridorConfidenceK", v)} />
+                  <NumberField label="corridor.minCorridorWidthPct" value={draft.corridorMinWidthPct} step="0.5" onChange={(v) => updateNumber("corridorMinWidthPct", v)} />
+                  <NumberField label="corridor.maxCorridorWidthPct" value={draft.corridorMaxWidthPct} step="1" onChange={(v) => updateNumber("corridorMaxWidthPct", v)} />
+                  <NumberField label="corridor.corridorShiftThresholdPct" value={draft.corridorShiftThresholdPct} step="5" onChange={(v) => updateNumber("corridorShiftThresholdPct", v)} />
+                  <NumberField label="corridor.maxOutOfCorridorHours" value={draft.corridorMaxOutOfCorridorHours} step="6" onChange={(v) => updateNumber("corridorMaxOutOfCorridorHours", v)} />
+                  <SelectField label="corridor.useMA200" value={draft.corridorUseMA200 ? "true" : "false"} onChange={(v) => updateBool("corridorUseMA200", v === "true")} options={["true", "false"]} />
+                  <SelectField label="corridor.useMA50Center" value={draft.corridorUseMA50Center ? "true" : "false"} onChange={(v) => updateBool("corridorUseMA50Center", v === "true")} options={["true", "false"]} />
                 </div>
               </details>
 
@@ -3278,6 +3414,92 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
               : adviceReason.replace(/_/g, " ").replace(/,/g, " · ")}
           </div>
         )}
+      </div>
+    </div>
+  );
+}
+
+function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"]> }) {
+  const active = corridor.active || null;
+  const inRange = corridor.priceInCorridor;
+  const holdRemainingHours = Number(corridor.holdRemainingHours || 0);
+  const outHours = Number(corridor.outOfCorridorHours || 0);
+  const candleCount = Number(corridor.priceHistory?.candleCount || 0);
+  if (!active) {
+    return (
+      <div style={{ color: "rgba(232,232,240,0.4)", fontSize: 13, padding: "12px 0" }}>
+        Computing corridor... ({candleCount} candles available)
+      </div>
+    );
+  }
+  const inRangeLabel = inRange == null
+    ? "UNKNOWN"
+    : inRange
+      ? "IN CORRIDOR"
+      : `OUT OF CORRIDOR (${outHours.toFixed(1)}h)`;
+  const inRangeGood = inRange === true;
+  const inRangeBad = inRange === false;
+  const pillBg = inRangeGood
+    ? "rgba(34,197,94,0.15)"
+    : inRangeBad
+      ? "rgba(239,68,68,0.15)"
+      : "rgba(148,163,184,0.15)";
+  const pillColor = inRangeGood ? "#22c55e" : inRangeBad ? "#ef4444" : "#94a3b8";
+  const pillBorder = inRangeGood
+    ? "rgba(34,197,94,0.3)"
+    : inRangeBad
+      ? "rgba(239,68,68,0.3)"
+      : "rgba(148,163,184,0.3)";
+  const fmtUsd = (v: number | null | undefined) =>
+    v == null || !Number.isFinite(Number(v)) ? "n/a" : `$${Number(v).toLocaleString()}`;
+  return (
+    <div style={{ display: "grid", gap: 10 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+        <Uc6Metric
+          label="Lower bound"
+          value={`${fmtUsd(active.lower)} (-${Number(active.lowerPct || 0).toFixed(1)}%)`}
+        />
+        <Uc6Metric label="Center" value={fmtUsd(active.center)} />
+        <Uc6Metric
+          label="Upper bound"
+          value={`${fmtUsd(active.upper)} (+${Number(active.upperPct || 0).toFixed(1)}%)`}
+        />
+      </div>
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <span
+          style={{
+            padding: "3px 10px",
+            borderRadius: 20,
+            fontSize: 12,
+            fontWeight: 700,
+            background: pillBg,
+            color: pillColor,
+            border: `1px solid ${pillBorder}`,
+          }}
+        >
+          {inRangeLabel}
+        </span>
+        {holdRemainingHours > 0 && (
+          <span style={{ fontSize: 12, color: "rgba(232,232,240,0.5)" }}>
+            Hold: {holdRemainingHours.toFixed(1)}h remaining
+          </span>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
+        <Uc6Metric label="200-day MA" value={fmtUsd(active.ma200)} />
+        <Uc6Metric label="50-day MA" value={fmtUsd(active.ma50)} />
+        <Uc6Metric
+          label="Daily vol (σ)"
+          value={`${(Number(active.dailySigma || 0) * 100).toFixed(2)}%`}
+        />
+        <Uc6Metric label="History" value={`${Number(active.candleCount || 0)} days`} />
+      </div>
+
+      <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)" }}>
+        Last refresh: {fmtIsoLocal(corridor.lastRefreshAtIso || null)}
+        {" · "}Minted: {fmtIsoLocal(corridor.mintedAtIso || null)}
       </div>
     </div>
   );

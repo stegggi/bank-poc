@@ -84,6 +84,20 @@ type PoolComparisonSettingsPayload = {
   allowLowTvlInTable?: boolean;
   rebalanceSwapNotionalPct?: number;
 };
+type CorridorSettingsPayload = {
+  enabled?: boolean;
+  holdDays?: number;
+  refreshHourUtc?: number;
+  volatilityLookbackDays?: number;
+  rangeLookbackDays?: number;
+  confidenceK?: number;
+  minCorridorWidthPct?: number;
+  maxCorridorWidthPct?: number;
+  corridorShiftThresholdPct?: number;
+  maxOutOfCorridorHours?: number;
+  useMA200?: boolean;
+  useMA50Center?: boolean;
+};
 type OwnerSettingsValue =
   | Primitive
   | RegimeSettingsPayload
@@ -92,7 +106,8 @@ type OwnerSettingsValue =
   | HodlGateSettingsPayload
   | ExecutionCapsSettingsPayload
   | GasTopUpSettingsPayload
-  | PoolComparisonSettingsPayload;
+  | PoolComparisonSettingsPayload
+  | CorridorSettingsPayload;
 type SettingRule = {
   type: "boolean" | "number" | "string";
   min?: number;
@@ -495,6 +510,21 @@ const POOL_COMPARISON_SETTING_RULES: Record<keyof Required<PoolComparisonSetting
   rebalanceSwapNotionalPct: { type: "number", min: 0, max: 1 },
 };
 
+const CORRIDOR_SETTING_RULES: Record<keyof Required<CorridorSettingsPayload>, SettingRule> = {
+  enabled: { type: "boolean" },
+  holdDays: { type: "number", min: 1, max: 30 },
+  refreshHourUtc: { type: "number", min: 0, max: 23 },
+  volatilityLookbackDays: { type: "number", min: 14, max: 365 },
+  rangeLookbackDays: { type: "number", min: 7, max: 90 },
+  confidenceK: { type: "number", min: 1.0, max: 3.0 },
+  minCorridorWidthPct: { type: "number", min: 1, max: 10 },
+  maxCorridorWidthPct: { type: "number", min: 5, max: 30 },
+  corridorShiftThresholdPct: { type: "number", min: 10, max: 80 },
+  maxOutOfCorridorHours: { type: "number", min: 6, max: 168 },
+  useMA200: { type: "boolean" },
+  useMA50Center: { type: "boolean" },
+};
+
 function normalizeRegimeSettings(input: unknown): RegimeSettingsPayload {
   return normalizeSettingsObjectByRules<RegimeSettingsPayload>("regime", input, REGIME_SETTING_RULES);
 }
@@ -581,6 +611,12 @@ export function normalizeOwnerSettings(input: unknown): Record<string, OwnerSett
         "poolComparison",
         value,
         POOL_COMPARISON_SETTING_RULES
+      );
+    } else if (key === "corridor") {
+      out[key] = normalizeSettingsObjectByRules<CorridorSettingsPayload>(
+        "corridor",
+        value,
+        CORRIDOR_SETTING_RULES
       );
     } else if (key === "manualStartValueUsd") {
       // Pass through to bot — handled as state, not a setting
