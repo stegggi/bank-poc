@@ -6450,9 +6450,19 @@ class Uc6Bot {
 
     const currentHourUtc = new Date().getUTCHours();
     const lastRefreshMs = Date.parse(state.lastRefreshAtIso || "");
+    const hasLastRefresh = Number.isFinite(lastRefreshMs);
+    const lastRefreshDay = hasLastRefresh ? utcDayKey(lastRefreshMs) : null;
+    const todayUtcKey = utcDayKey(now);
+    // Force a refresh when the cached corridor lacks new-schema fields
+    // (e.g. after upgrading to the independent-bounds estimator).
+    const cachedActive = state.active;
+    const cachedSchemaStale = Boolean(
+      cachedActive && (!cachedActive.lowerDrivers || !cachedActive.upperDrivers)
+    );
     const refreshDue =
-      !Number.isFinite(lastRefreshMs) ||
-      (now - lastRefreshMs > 20 * 3600 * 1000 && currentHourUtc >= cfg.refreshHourUtc);
+      !hasLastRefresh ||
+      cachedSchemaStale ||
+      (lastRefreshDay !== todayUtcKey && currentHourUtc >= cfg.refreshHourUtc);
 
     if (refreshDue) {
       await this.refreshCorridor();
