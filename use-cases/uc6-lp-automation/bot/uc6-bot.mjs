@@ -10516,15 +10516,6 @@ class Uc6Bot {
     const router = this.slipstreamRouter;
     const npm = this.slipstreamNpm;
     const executionCaps = this.getExecutionCapsConfig();
-    const effectiveBandHalfBps = Number.isFinite(Number(options.bandHalfBps))
-      ? Number(options.bandHalfBps)
-      : Number(this.settings.bandHalfBps || 0);
-    const effectiveBandUp = options.bandHalfBpsUp != null
-      ? Number(options.bandHalfBpsUp) : (this.settings.bandHalfBpsUp ?? null);
-    const effectiveBandDown = options.bandHalfBpsDown != null
-      ? Number(options.bandHalfBpsDown) : (this.settings.bandHalfBpsDown ?? null);
-    const bandOpts = (effectiveBandUp != null || effectiveBandDown != null)
-      ? { bandHalfBpsUp: effectiveBandUp, bandHalfBpsDown: effectiveBandDown } : {};
     const overrideTicks = options.overrideTicks && typeof options.overrideTicks === "object"
       ? {
           tickLower: Number(options.overrideTicks.tickLower),
@@ -10536,6 +10527,28 @@ class Uc6Bot {
           ),
         }
       : null;
+    const effectiveBandHalfBps = Number.isFinite(Number(options.bandHalfBps))
+      ? Number(options.bandHalfBps)
+      : Number(this.settings.bandHalfBps || 0);
+    // When overrideTicks is supplied (corridor mode), derive bandHalfBpsUp/Down
+    // from the actual ticks so the stored asymmetry matches what was minted.
+    // Otherwise fall back to explicit options or reactive-mode settings.
+    let effectiveBandUp;
+    let effectiveBandDown;
+    if (overrideTicks) {
+      const centerTick = overrideTicks.centerTick;
+      const upTicks = Math.max(0, overrideTicks.tickUpper - centerTick);
+      const downTicks = Math.max(0, centerTick - overrideTicks.tickLower);
+      effectiveBandUp = Math.round((Math.pow(1.0001, upTicks) - 1) * 10_000);
+      effectiveBandDown = Math.round((1 - Math.pow(1.0001, -downTicks)) * 10_000);
+    } else {
+      effectiveBandUp = options.bandHalfBpsUp != null
+        ? Number(options.bandHalfBpsUp) : (this.settings.bandHalfBpsUp ?? null);
+      effectiveBandDown = options.bandHalfBpsDown != null
+        ? Number(options.bandHalfBpsDown) : (this.settings.bandHalfBpsDown ?? null);
+    }
+    const bandOpts = (effectiveBandUp != null || effectiveBandDown != null)
+      ? { bandHalfBpsUp: effectiveBandUp, bandHalfBpsDown: effectiveBandDown } : {};
 
     const currentTokenId = this.state.position?.tokenId;
     const existingBand = currentTokenId
