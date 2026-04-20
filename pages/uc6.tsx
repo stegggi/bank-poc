@@ -843,14 +843,29 @@ type Uc6Status = {
       upperPct?: number;
       dailySigma?: number;
       volWidthPct?: number;
+      volProjectionPct?: number;
       holdDays?: number;
       confidenceK?: number;
       ma200?: number | null;
       ma50?: number | null;
       p5?: number | null;
       p95?: number | null;
+      recentLow?: number | null;
+      recentHigh?: number | null;
       candleCount?: number;
       computedAtIso?: string | null;
+      lowerDrivers?: {
+        volProjection?: number | null;
+        recentLow98?: number | null;
+        p5_98?: number | null;
+        ma200Floor?: number | null;
+      } | null;
+      upperDrivers?: {
+        volProjection?: number | null;
+        recentHigh101?: number | null;
+        p95_102?: number | null;
+        ma200Ceiling?: number | null;
+      } | null;
     } | null;
     mintedAtIso?: string | null;
     holdUntilIso?: string | null;
@@ -3436,7 +3451,7 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
     ? "UNKNOWN"
     : inRange
       ? "IN CORRIDOR"
-      : `OUT OF CORRIDOR (${outHours.toFixed(1)}h)`;
+      : `OUT (${outHours.toFixed(1)}h)`;
   const inRangeGood = inRange === true;
   const inRangeBad = inRange === false;
   const pillBg = inRangeGood
@@ -3452,21 +3467,45 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
       : "rgba(148,163,184,0.3)";
   const fmtUsd = (v: number | null | undefined) =>
     v == null || !Number.isFinite(Number(v)) ? "n/a" : `$${Number(v).toLocaleString()}`;
+  const lowerDrivers = active.lowerDrivers || null;
+  const upperDrivers = active.upperDrivers || null;
+  const volProjPct = Number(active.volProjectionPct ?? active.volWidthPct ?? 0);
+
   return (
     <div style={{ display: "grid", gap: 10 }}>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
-        <Uc6Metric
-          label="Lower bound"
-          value={`${fmtUsd(active.lower)} (-${Number(active.lowerPct || 0).toFixed(1)}%)`}
-        />
-        <Uc6Metric label="Center" value={fmtUsd(active.center)} />
-        <Uc6Metric
-          label="Upper bound"
-          value={`${fmtUsd(active.upper)} (+${Number(active.upperPct || 0).toFixed(1)}%)`}
-        />
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <div>
+          <Uc6Metric
+            label="Lower bound"
+            value={`${fmtUsd(active.lower)} (-${Number(active.lowerPct || 0).toFixed(1)}%)`}
+          />
+          {lowerDrivers && (
+            <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", marginTop: 4, lineHeight: 1.5 }}>
+              Vol: {fmtUsd(lowerDrivers.volProjection)}
+              {lowerDrivers.ma200Floor != null ? ` · MA200: ${fmtUsd(lowerDrivers.ma200Floor)}` : ""}
+              {` · 30d low: ${fmtUsd(lowerDrivers.recentLow98)}`}
+              {` · P5: ${fmtUsd(lowerDrivers.p5_98)}`}
+            </div>
+          )}
+        </div>
+        <div>
+          <Uc6Metric
+            label="Upper bound"
+            value={`${fmtUsd(active.upper)} (+${Number(active.upperPct || 0).toFixed(1)}%)`}
+          />
+          {upperDrivers && (
+            <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", marginTop: 4, lineHeight: 1.5 }}>
+              Vol: {fmtUsd(upperDrivers.volProjection)}
+              {upperDrivers.ma200Ceiling != null ? ` · MA200: ${fmtUsd(upperDrivers.ma200Ceiling)}` : ""}
+              {` · 30d high: ${fmtUsd(upperDrivers.recentHigh101)}`}
+              {` · P95: ${fmtUsd(upperDrivers.p95_102)}`}
+            </div>
+          )}
+        </div>
       </div>
 
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 8 }}>
+        <Uc6Metric label="Current price" value={fmtUsd(active.currentPrice)} />
         <span
           style={{
             padding: "3px 10px",
@@ -3487,18 +3526,18 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
         )}
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6 }}>
-        <Uc6Metric label="200-day MA" value={fmtUsd(active.ma200)} />
-        <Uc6Metric label="50-day MA" value={fmtUsd(active.ma50)} />
-        <Uc6Metric
-          label="Daily vol (σ)"
-          value={`${(Number(active.dailySigma || 0) * 100).toFixed(2)}%`}
-        />
-        <Uc6Metric label="History" value={`${Number(active.candleCount || 0)} days`} />
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 6 }}>
+        <Uc6Metric label="200d MA" value={fmtUsd(active.ma200)} />
+        <Uc6Metric label="50d MA" value={fmtUsd(active.ma50)} />
+        <Uc6Metric label="Daily σ" value={`${(Number(active.dailySigma || 0) * 100).toFixed(2)}%`} />
+        <Uc6Metric label="30d low" value={fmtUsd(active.recentLow)} />
+        <Uc6Metric label="30d high" value={fmtUsd(active.recentHigh)} />
+        <Uc6Metric label="Vol proj" value={`±${volProjPct.toFixed(1)}%`} />
       </div>
 
       <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)" }}>
-        Last refresh: {fmtIsoLocal(corridor.lastRefreshAtIso || null)}
+        History: {Number(active.candleCount || 0)} days
+        {" · "}Last refresh: {fmtIsoLocal(corridor.lastRefreshAtIso || null)}
         {" · "}Minted: {fmtIsoLocal(corridor.mintedAtIso || null)}
       </div>
     </div>

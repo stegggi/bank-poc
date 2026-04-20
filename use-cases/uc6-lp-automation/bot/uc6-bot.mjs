@@ -738,8 +738,8 @@ const DEFAULT_SETTINGS = {
     volatilityLookbackDays: 180,
     rangeLookbackDays: 30,
     confidenceK: 1.5,
-    minCorridorWidthPct: 3,
-    maxCorridorWidthPct: 15,
+    minCorridorWidthPct: 6,
+    maxCorridorWidthPct: 16,
     corridorShiftThresholdPct: 30,
     maxOutOfCorridorHours: 72,
     useMA200: true,
@@ -1240,13 +1240,13 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       ),
       minCorridorWidthPct: clamp(
         toNumber(srcCorridor.minCorridorWidthPct, baseCorridor.minCorridorWidthPct),
-        1,
-        10
+        2,
+        20
       ),
       maxCorridorWidthPct: clamp(
         toNumber(srcCorridor.maxCorridorWidthPct, baseCorridor.maxCorridorWidthPct),
-        5,
-        30
+        6,
+        40
       ),
       corridorShiftThresholdPct: clamp(
         toNumber(srcCorridor.corridorShiftThresholdPct, baseCorridor.corridorShiftThresholdPct),
@@ -5947,13 +5947,13 @@ class Uc6Bot {
       confidenceK: clamp(Number(cfg.confidenceK ?? DEFAULT_SETTINGS.corridor.confidenceK), 1.0, 3.0),
       minCorridorWidthPct: clamp(
         Number(cfg.minCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.minCorridorWidthPct),
-        1,
-        10
+        2,
+        20
       ),
       maxCorridorWidthPct: clamp(
         Number(cfg.maxCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.maxCorridorWidthPct),
-        5,
-        30
+        6,
+        40
       ),
       corridorShiftThresholdPct: clamp(
         Number(cfg.corridorShiftThresholdPct ?? DEFAULT_SETTINGS.corridor.corridorShiftThresholdPct),
@@ -6155,15 +6155,18 @@ class Uc6Bot {
     if (closes.length < 14) {
       return { ok: false, reason: "insufficient_history", candleCount: closes.length };
     }
+    const highs = history.map((c) => Number(c.high)).filter((v) => Number.isFinite(v) && v > 0);
+    const lows = history.map((c) => Number(c.low)).filter((v) => Number.isFinite(v) && v > 0);
     const spot = this.getSpotPrice();
     const currentPrice = Number.isFinite(spot) && spot > 0 ? spot : closes[closes.length - 1];
 
+    // 1. Realized volatility from long history (for width projection)
     const volDays = Math.min(cfg.volatilityLookbackDays, closes.length - 1);
-    const recentCloses = closes.slice(-volDays - 1);
+    const volCloses = closes.slice(-volDays - 1);
     const logReturns = [];
-    for (let i = 1; i < recentCloses.length; i += 1) {
-      if (recentCloses[i] > 0 && recentCloses[i - 1] > 0) {
-        logReturns.push(Math.log(recentCloses[i] / recentCloses[i - 1]));
+    for (let i = 1; i < volCloses.length; i += 1) {
+      if (volCloses[i] > 0 && volCloses[i - 1] > 0) {
+        logReturns.push(Math.log(volCloses[i] / volCloses[i - 1]));
       }
     }
     const dailySigma =
@@ -6172,80 +6175,131 @@ class Uc6Bot {
         : 0.04;
 
     const holdDays = Math.max(1, cfg.holdDays);
-    const volWidth = cfg.confidenceK * dailySigma * Math.sqrt(holdDays);
-
-    const recent14 = closes.slice(-14);
-    const median14 = percentile(recent14, 50);
-    let center = median14;
-    if (cfg.useMA50Center && closes.length >= 50) {
-      const ma50 = mean(closes.slice(-50));
-      center = median14 * 0.7 + ma50 * 0.3;
-    }
-
-    let rawLower = center * (1 - volWidth);
-    let rawUpper = center * (1 + volWidth);
+    const volProjection = cfg.confidenceK * dailySigma * Math.sqrt(holdDays);
 
     const rangeDays = Math.min(cfg.rangeLookbackDays, closes.length);
     const rangeCloses = closes.slice(-rangeDays);
     const p5 = percentile(rangeCloses, 5);
     const p95 = percentile(rangeCloses, 95);
-    rawLower = Math.max(rawLower, p5 * 0.98);
-    rawUpper = Math.min(rawUpper, p95 * 1.02);
+    const recentLows = lows.length >= 1 ? lows.slice(-Math.min(cfg.rangeLookbackDays, lows.length)) : rangeCloses;
+    const recentHighs = highs.length >= 1 ? highs.slice(-Math.min(cfg.rangeLookbackDays, highs.length)) : rangeCloses;
+    const recentLow = recentLows.length ? Math.min(...recentLows) : rangeCloses[0];
+    const recentHigh = recentHighs.length ? Math.max(...recentHighs) : rangeCloses[rangeCloses.length - 1];
 
+    // 2. LOWER BOUND — tightest-wins among structural floors
+    const volProjectionDown = currentPrice * (1 - volProjection);
+    const recentLow98 = recentLow * 0.98;
+    const p5_98 = p5 * 0.98;
+    let rawLower = volProjectionDown;
+    rawLower = Math.max(rawLower, recentLow98);
+    rawLower = Math.max(rawLower, p5_98);
     let ma200 = null;
+    let ma200Floor = null;
     if (cfg.useMA200 && closes.length >= 200) {
       ma200 = mean(closes.slice(-200));
-      if (currentPrice > ma200 && rawLower < ma200) {
-        rawLower = Math.max(rawLower, ma200 * 0.99);
-      }
-      if (currentPrice < ma200 && rawUpper > ma200) {
-        rawUpper = Math.min(rawUpper, ma200 * 1.01);
+      if (currentPrice > ma200) {
+        ma200Floor = ma200 * 0.99;
+        rawLower = Math.max(rawLower, ma200Floor);
       }
     }
 
-    if (rawUpper <= rawLower) {
-      const mid = center;
-      const half = Math.max(mid * (cfg.minCorridorWidthPct / 100), 1e-9);
-      rawLower = mid - half;
-      rawUpper = mid + half;
+    // 3. UPPER BOUND — widest-wins among upside projections
+    const volProjectionUp = currentPrice * (1 + volProjection);
+    const recentHigh101 = recentHigh * 1.01;
+    const p95_102 = p95 * 1.02;
+    let rawUpper = volProjectionUp;
+    rawUpper = Math.max(rawUpper, recentHigh101);
+    rawUpper = Math.max(rawUpper, p95_102);
+    let ma200Ceiling = null;
+    if (cfg.useMA200 && ma200 != null && currentPrice < ma200) {
+      ma200Ceiling = ma200 * 1.01;
+      rawUpper = Math.min(rawUpper, ma200Ceiling);
     }
 
-    const halfWidthPct = ((rawUpper - rawLower) / 2) / center;
-    const minHalf = cfg.minCorridorWidthPct / 100;
-    const maxHalf = cfg.maxCorridorWidthPct / 100;
-    if (halfWidthPct < minHalf) {
-      const mid = (rawLower + rawUpper) / 2;
-      rawLower = mid * (1 - minHalf);
-      rawUpper = mid * (1 + minHalf);
-    } else if (halfWidthPct > maxHalf) {
-      const mid = (rawLower + rawUpper) / 2;
-      rawLower = mid * (1 - maxHalf);
-      rawUpper = mid * (1 + maxHalf);
+    // Guard against degenerate bounds
+    if (!(rawUpper > rawLower)) {
+      const fallbackHalf = Math.max(currentPrice * 0.01, 1e-9);
+      rawLower = currentPrice - fallbackHalf;
+      rawUpper = currentPrice + fallbackHalf;
+    }
+    if (rawLower <= 0) rawLower = currentPrice * 0.01;
+
+    // 4. Enforce min/max TOTAL spread relative to current price
+    let lowerPctRaw = (currentPrice - rawLower) / currentPrice;
+    let upperPctRaw = (rawUpper - currentPrice) / currentPrice;
+    let totalWidthPct = lowerPctRaw + upperPctRaw;
+    const minTotal = cfg.minCorridorWidthPct / 100;
+    const maxTotal = cfg.maxCorridorWidthPct / 100;
+
+    if (totalWidthPct < minTotal) {
+      const scaleFactor = minTotal / Math.max(totalWidthPct, 0.001);
+      rawLower = currentPrice - (currentPrice - rawLower) * scaleFactor;
+      rawUpper = currentPrice + (rawUpper - currentPrice) * scaleFactor;
+    } else if (totalWidthPct > maxTotal) {
+      const scaleFactor = maxTotal / totalWidthPct;
+      rawLower = currentPrice - (currentPrice - rawLower) * scaleFactor;
+      rawUpper = currentPrice + (rawUpper - currentPrice) * scaleFactor;
     }
 
-    const lowerPct = currentPrice > 0 ? ((currentPrice - rawLower) / currentPrice) * 100 : 0;
-    const upperPct = currentPrice > 0 ? ((rawUpper - currentPrice) / currentPrice) * 100 : 0;
-    const ma50 = closes.length >= 50 ? mean(closes.slice(-50)) : null;
+    // 5. 50-day MA trend bias (gentle directional skew)
+    let ma50 = null;
+    if (cfg.useMA50Center && closes.length >= 50) {
+      ma50 = mean(closes.slice(-50));
+      if (ma50 > 0) {
+        const trendBias = (currentPrice - ma50) / currentPrice;
+        const skewPct = Math.min(Math.abs(trendBias), 0.03) * Math.sign(trendBias);
+        const currentWidth = rawUpper - rawLower;
+        const skewAmount = currentWidth * skewPct * 0.3;
+        rawLower += skewAmount;
+        rawUpper += skewAmount;
+      }
+    }
 
-    const round2 = (v) => Math.round(Number(v) * 100) / 100;
+    if (rawLower <= 0) rawLower = currentPrice * 0.01;
+    if (!(rawUpper > rawLower)) {
+      const fallbackHalf = Math.max(currentPrice * 0.01, 1e-9);
+      rawLower = currentPrice - fallbackHalf;
+      rawUpper = currentPrice + fallbackHalf;
+    }
+
+    // 6. Final results
+    const finalLowerPct = currentPrice > 0 ? ((currentPrice - rawLower) / currentPrice) * 100 : 0;
+    const finalUpperPct = currentPrice > 0 ? ((rawUpper - currentPrice) / currentPrice) * 100 : 0;
+    const round2 = (v) => (v == null || !Number.isFinite(Number(v)) ? null : Math.round(Number(v) * 100) / 100);
+
     return {
       ok: true,
       lower: round2(rawLower),
       upper: round2(rawUpper),
-      center: round2(center),
+      center: round2(currentPrice),
       currentPrice: round2(currentPrice),
-      lowerPct: Math.round(lowerPct * 10) / 10,
-      upperPct: Math.round(upperPct * 10) / 10,
+      lowerPct: Math.round(finalLowerPct * 10) / 10,
+      upperPct: Math.round(finalUpperPct * 10) / 10,
       dailySigma: Math.round(dailySigma * 10000) / 10000,
-      volWidthPct: Math.round(volWidth * 1000) / 10,
+      volProjectionPct: Math.round(volProjection * 1000) / 10,
+      volWidthPct: Math.round(volProjection * 1000) / 10,
       holdDays,
       confidenceK: cfg.confidenceK,
-      ma200: ma200 != null ? round2(ma200) : null,
-      ma50: ma50 != null ? round2(ma50) : null,
+      ma200: round2(ma200),
+      ma50: round2(ma50),
       p5: round2(p5),
       p95: round2(p95),
+      recentLow: round2(recentLow),
+      recentHigh: round2(recentHigh),
       candleCount: history.length,
       computedAtIso: nowIso(),
+      lowerDrivers: {
+        volProjection: round2(volProjectionDown),
+        recentLow98: round2(recentLow98),
+        p5_98: round2(p5_98),
+        ma200Floor: round2(ma200Floor),
+      },
+      upperDrivers: {
+        volProjection: round2(volProjectionUp),
+        recentHigh101: round2(recentHigh101),
+        p95_102: round2(p95_102),
+        ma200Ceiling: round2(ma200Ceiling),
+      },
     };
   }
 
@@ -11632,14 +11686,33 @@ class Uc6Bot {
             upperPct: Number(active.upperPct),
             dailySigma: Number(active.dailySigma),
             volWidthPct: Number(active.volWidthPct),
+            volProjectionPct: Number(active.volProjectionPct ?? active.volWidthPct),
             holdDays: Number(active.holdDays),
             confidenceK: Number(active.confidenceK),
             ma200: active.ma200 != null ? Number(active.ma200) : null,
             ma50: active.ma50 != null ? Number(active.ma50) : null,
             p5: active.p5 != null ? Number(active.p5) : null,
             p95: active.p95 != null ? Number(active.p95) : null,
+            recentLow: active.recentLow != null ? Number(active.recentLow) : null,
+            recentHigh: active.recentHigh != null ? Number(active.recentHigh) : null,
             candleCount: Number(active.candleCount || 0),
             computedAtIso: active.computedAtIso || null,
+            lowerDrivers: active.lowerDrivers
+              ? {
+                  volProjection: active.lowerDrivers.volProjection != null ? Number(active.lowerDrivers.volProjection) : null,
+                  recentLow98: active.lowerDrivers.recentLow98 != null ? Number(active.lowerDrivers.recentLow98) : null,
+                  p5_98: active.lowerDrivers.p5_98 != null ? Number(active.lowerDrivers.p5_98) : null,
+                  ma200Floor: active.lowerDrivers.ma200Floor != null ? Number(active.lowerDrivers.ma200Floor) : null,
+                }
+              : null,
+            upperDrivers: active.upperDrivers
+              ? {
+                  volProjection: active.upperDrivers.volProjection != null ? Number(active.upperDrivers.volProjection) : null,
+                  recentHigh101: active.upperDrivers.recentHigh101 != null ? Number(active.upperDrivers.recentHigh101) : null,
+                  p95_102: active.upperDrivers.p95_102 != null ? Number(active.upperDrivers.p95_102) : null,
+                  ma200Ceiling: active.upperDrivers.ma200Ceiling != null ? Number(active.upperDrivers.ma200Ceiling) : null,
+                }
+              : null,
           }
         : null,
       mintedAtIso: state?.mintedAtIso || null,
