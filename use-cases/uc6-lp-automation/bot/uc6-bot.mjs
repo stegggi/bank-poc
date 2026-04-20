@@ -6558,40 +6558,43 @@ class Uc6Bot {
 
     await this.maybeHarvestOnly().catch((err) => this.setLastError(err));
 
-    // Deploy idle balances into the existing position (increases liquidity).
-    // Only runs when price is in corridor to avoid topping up a position that's
-    // about to be recentered on a corridor break.
+    // Idle-capital handling. INVARIANT: top-up MUST run before stake on every
+    // cycle. If we stake first while idle balances exist, the bot burns gas
+    // unstaking the NFT on the next cycle just to deploy. Only run when price
+    // is in corridor to avoid deploying into a position about to be recentered.
     if (inCorridor && tradingAllowed) {
+      // 1. Top-up first: deploy idle balances into the active position.
+      //    maybeTopUpLiquidity auto-unstakes if the NFT is already in the gauge.
+      let toppedUp = false;
       try {
-        const toppedUp = await this.maybeTopUpLiquidity(primary);
-        if (toppedUp) {
-          this.setDecision({
-            action: "top_up",
-            reason: "corridor_idle_top_up",
-            mode: "corridor",
-          });
-          return;
-        }
+        toppedUp = await this.maybeTopUpLiquidity(primary);
       } catch (err) {
         this.setLastError(err);
       }
-    }
+      if (toppedUp) {
+        this.setDecision({
+          action: "top_up",
+          reason: "corridor_idle_top_up",
+          mode: "corridor",
+        });
+        return;
+      }
 
-    // Restake the NFT into the gauge if autoStakeOnMint is enabled but the
-    // token is currently unstaked (e.g. right after a corridor recenter).
-    if (inCorridor && tradingAllowed) {
+      // 2. Stake only AFTER top-up check is clean. maybeAutoStakeIdle is a
+      //    no-op when already staked or when a top-up retry is pending.
+      let staked = false;
       try {
-        const staked = await this.maybeAutoStakeIdle();
-        if (staked) {
-          this.setDecision({
-            action: "stake",
-            reason: "corridor_auto_stake",
-            mode: "corridor",
-          });
-          return;
-        }
+        staked = await this.maybeAutoStakeIdle();
       } catch (err) {
         this.setLastError(err);
+      }
+      if (staked) {
+        this.setDecision({
+          action: "stake",
+          reason: "corridor_auto_stake",
+          mode: "corridor",
+        });
+        return;
       }
     }
 
