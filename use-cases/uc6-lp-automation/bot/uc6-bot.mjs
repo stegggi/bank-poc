@@ -6448,6 +6448,39 @@ class Uc6Bot {
 
     this.recordPriceSample(spot);
 
+    // Honor manual force-rebalance button: always recompute corridor and
+    // mint/recenter now, ignoring hold period.
+    const forceRequestedAt = this.state.forceRebalanceRequestedAt || null;
+    if (forceRequestedAt) {
+      const tradingAllowed = !this.settings.killSwitch && Boolean(this.settings.tradingEnabled);
+      if (!tradingAllowed) {
+        this.state.forceRebalanceRequestedAt = null;
+        this.setDecision({
+          action: "monitor",
+          reason: this.settings.killSwitch ? "kill_switch_active" : "trading_disabled",
+          mode: "corridor",
+          forceRebalanceRequestedAt: forceRequestedAt,
+        });
+        return;
+      }
+      const hasPosition = Boolean(this.state.position?.tokenId);
+      if (hasPosition) {
+        await this.corridorRecenter(primary, "manual_force");
+      } else {
+        await this.refreshCorridor();
+        if (state.active) {
+          await this.mintAtCorridorBounds(primary);
+        }
+      }
+      this.state.forceRebalanceRequestedAt = null;
+      this.setDecision({
+        action: hasPosition ? "corridor_recenter" : "corridor_mint",
+        reason: "manual_force",
+        mode: "corridor",
+      });
+      return;
+    }
+
     const currentHourUtc = new Date().getUTCHours();
     const lastRefreshMs = Date.parse(state.lastRefreshAtIso || "");
     const hasLastRefresh = Number.isFinite(lastRefreshMs);
