@@ -6558,6 +6558,43 @@ class Uc6Bot {
 
     await this.maybeHarvestOnly().catch((err) => this.setLastError(err));
 
+    // Deploy idle balances into the existing position (increases liquidity).
+    // Only runs when price is in corridor to avoid topping up a position that's
+    // about to be recentered on a corridor break.
+    if (inCorridor && tradingAllowed) {
+      try {
+        const toppedUp = await this.maybeTopUpLiquidity(primary);
+        if (toppedUp) {
+          this.setDecision({
+            action: "top_up",
+            reason: "corridor_idle_top_up",
+            mode: "corridor",
+          });
+          return;
+        }
+      } catch (err) {
+        this.setLastError(err);
+      }
+    }
+
+    // Restake the NFT into the gauge if autoStakeOnMint is enabled but the
+    // token is currently unstaked (e.g. right after a corridor recenter).
+    if (inCorridor && tradingAllowed) {
+      try {
+        const staked = await this.maybeAutoStakeIdle();
+        if (staked) {
+          this.setDecision({
+            action: "stake",
+            reason: "corridor_auto_stake",
+            mode: "corridor",
+          });
+          return;
+        }
+      } catch (err) {
+        this.setLastError(err);
+      }
+    }
+
     const outHours = Number(state.consecutiveOutOfCorridorHours || 0);
     if (outHours >= cfg.maxOutOfCorridorHours && tradingAllowed) {
       await this.corridorRecenter(primary, "corridor_break_timeout");
