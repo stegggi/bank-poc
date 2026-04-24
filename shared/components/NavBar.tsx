@@ -14,7 +14,8 @@ type NavActive =
   | "uc4"
   | "uc5"
   | "uc6"
-  | "uc7";
+  | "uc7"
+  | "uc8";
 
 type NavBarProps = { active?: NavActive };
 
@@ -26,6 +27,7 @@ const ACCENT = {
   uc4: "#f59e0b",
   uc5: "#ef4444",
   uc6: "#06b6d4",
+  uc8: "#ec4899",
 } as const;
 
 export default function NavBar({ active }: NavBarProps) {
@@ -37,6 +39,7 @@ export default function NavBar({ active }: NavBarProps) {
   const isUc4      = active === "uc4" || active === "context-vault";
   const isUc5      = active === "uc5";
   const isUc6      = active === "uc6";
+  const isUc8      = active === "uc8";
   const isUc2      = isBankA || isBankB;
 
   return (
@@ -176,6 +179,15 @@ export default function NavBar({ active }: NavBarProps) {
             href="/uc6"
             accent={ACCENT.uc6}
             active={isUc6}
+          />
+
+          {/* UC8 */}
+          <NavPill
+            n="08"
+            label="Source of Funds"
+            href="/uc8"
+            accent={ACCENT.uc8}
+            active={isUc8}
           />
         </NavStrip>
       </div>

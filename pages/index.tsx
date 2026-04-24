@@ -103,6 +103,19 @@ const USE_CASES: UcDef[] = [
     ],
     links: [{ href: "/uc6", label: "Open LP Bot" }],
   },
+  {
+    n: "08",
+    tag: "UC8 · Source of Funds",
+    title: "Crypto Onboarding SoF",
+    desc: "A compliance tool for onboarding clients with crypto assets. Verifies wallet ownership, traces funds back to regulated exchanges, classifies risk, and produces a FINMA-ready audit report.",
+    accent: "#ec4899",
+    highlights: [
+      "Multi-chain ownership proof + OFAC screening",
+      "GREEN / AMBER / RED tier classification",
+      "Third-party forensic escalation for high-risk wallets",
+    ],
+    links: [{ href: "/uc8", label: "Open Source of Funds" }],
+  },
 ];
 
 /* ── Page ── */

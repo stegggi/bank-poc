@@ -1,0 +1,51 @@
+{
+  "updatedAt": "2026-04-20",
+  "note": "Seed set of well-known OFAC SDN crypto addresses. In production, refresh weekly from https://www.treasury.gov/ofac/downloads/sdn.xml",
+  "addresses": {
+    "0x8589427373d6d84e98730d7795d8f6f8731fda16": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash router",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0x722122df12d4e14e13ac3b6895a86e84145b6967": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash router",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0xdd4c48c0b24039969fc16d1cdf626eab821d3384": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash 0.1 ETH pool",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0xd90e2f925da726b50c4ed8d0fb90ad053324f31b": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash 1 ETH pool",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0x910cbd523d972eb0a6f4cae4618ad62622b39dbf": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash 10 ETH pool",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0xa160cdab225685da1d56aa342ad8841c3b53f291": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash 100 ETH pool",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0x03893a7c7463ae47d46bc7f091665f1893656003": {
+      "listName": "OFAC SDN",
+      "reason": "Tornado Cash contract",
+      "entityNote": "Tornado Cash (sanctioned 2022)"
+    },
+    "0x67d40ee1a85bf4a4bb7ffae16de985e8427b6b45": {
+      "listName": "OFAC SDN",
+      "reason": "Hydra darknet market",
+      "entityNote": "Hydra (sanctioned 2022)"
+    },
+    "0x6bf694a291df3fec1f7e69701e3ab6c592435ae7": {
+      "listName": "OFAC SDN",
+      "reason": "Blender.io mixer",
+      "entityNote": "Blender.io (sanctioned 2022)"
+    }
+  }
+}
