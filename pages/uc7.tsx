@@ -56,11 +56,21 @@ export default function Uc7Page() {
     loadCases();
   }, [loadCases]);
 
-  const refreshCase = useCallback(async (ref: string) => {
-    const res = await fetch(`/api/uc7/case/${ref}`);
-    if (!res.ok) return;
-    const json = await res.json();
-    setActiveCase(json.case);
+  const refreshCase = useCallback(async (ref: string): Promise<boolean> => {
+    try {
+      const res = await fetch(`/api/uc7/case/${ref}`);
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setError(body.error || `Case ${ref} could not be loaded (HTTP ${res.status}).`);
+        return false;
+      }
+      const json = await res.json();
+      setActiveCase(json.case);
+      return true;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : `Failed to load ${ref}`);
+      return false;
+    }
   }, []);
 
   return (
@@ -109,8 +119,9 @@ export default function Uc7Page() {
                   }
                 }}
                 onOpen={async (ref) => {
-                  await refreshCase(ref);
-                  setStep("setup");
+                  setError("");
+                  const ok = await refreshCase(ref);
+                  if (ok) setStep("setup");
                 }}
                 loading={loading}
                 error={error}

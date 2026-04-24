@@ -8,7 +8,8 @@ function casePath(ref: string): string {
 }
 
 function isValidRef(ref: string): boolean {
-  return /^SOW-\d{4}-\d{5}$/.test(ref);
+  // Accept SOW- (current) and legacy SOF- prefixes for cases created pre-rename.
+  return /^(SOW|SOF)-\d{4}-\d{5}$/.test(ref);
 }
 
 export function generateCaseReference(): string {
