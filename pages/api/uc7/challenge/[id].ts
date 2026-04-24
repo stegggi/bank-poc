@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readChallenge } from "../../../../use-cases/uc8-sof-verification/lib/challengeStore";
+import { readChallenge } from "../../../../use-cases/uc7-sow-verification/lib/challengeStore";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET") {

@@ -1,8 +1,8 @@
-# UC8 — Crypto Source of Funds Verification
+# UC7 — Crypto Source of Wealth Verification
 
 A compliance tool for onboarding clients who hold crypto assets. Verifies wallet ownership,
-traces incoming funds to regulated exchanges, classifies risk into GREEN / AMBER / RED tiers,
-and produces a FINMA-ready compliance report per client.
+traces incoming wealth to regulated exchanges, classifies risk into GREEN / AMBER / RED tiers,
+and produces a FINMA-ready compliance report per client. All values are displayed in CHF.
 
 ## Flow
 
@@ -12,7 +12,7 @@ and produces a FINMA-ready compliance report per client.
 
 2. **Ownership verification** — a PII-free challenge message is generated per wallet. A QR code
    encodes a link to a signing page; the client signs the challenge from their wallet app
-   (`/uc8-sign/[challengeId]`). EVM and Solana signatures are verified cryptographically; Bitcoin
+   (`/uc7-sign/[challengeId]`). EVM and Solana signatures are verified cryptographically; Bitcoin
    is out-of-band for this prototype.
 
 3. **Source trace** — backward trace through incoming transactions, identifying counterparties
@@ -66,21 +66,21 @@ Without `BLOB_READ_WRITE_TOKEN` set, the stores transparently fall back to local
 ## API routes
 
 ```
-POST /api/uc8/case              create case
-GET  /api/uc8/case              list cases
-GET  /api/uc8/case/[id]         get case
-PUT  /api/uc8/case/[id]         update case
+POST /api/uc7/case              create case
+GET  /api/uc7/case              list cases
+GET  /api/uc7/case/[id]         get case
+PUT  /api/uc7/case/[id]         update case
 
-POST /api/uc8/scan              scan wallet address
-POST /api/uc8/challenge         generate ownership challenge
-GET  /api/uc8/challenge/[id]    get challenge
-POST /api/uc8/verify-signature  verify signed challenge
-POST /api/uc8/trace             backward trace wallet
-POST /api/uc8/classify          classify wallets in case
-POST /api/uc8/escalate          send wallet to TTP
-GET  /api/uc8/report/[caseId]   view HTML compliance report
-POST /api/uc8/report/[caseId]   finalize + view HTML report
-GET  /api/uc8/qr?data=...       QR code SVG
+POST /api/uc7/scan              scan wallet address
+POST /api/uc7/challenge         generate ownership challenge
+GET  /api/uc7/challenge/[id]    get challenge
+POST /api/uc7/verify-signature  verify signed challenge
+POST /api/uc7/trace             backward trace wallet
+POST /api/uc7/classify          classify wallets in case
+POST /api/uc7/escalate          send wallet to TTP
+GET  /api/uc7/report/[caseId]   view HTML compliance report
+POST /api/uc7/report/[caseId]   finalize + view HTML report
+GET  /api/uc7/qr?data=...       QR code SVG
 ```
 
 ## Prototype constraints

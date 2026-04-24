@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { classifyTrace, aggregateRisk } from "../../../use-cases/uc8-sof-verification/lib/riskClassifier";
-import { readCase, writeCase } from "../../../use-cases/uc8-sof-verification/lib/caseStore";
+import { classifyTrace, aggregateRisk } from "../../../use-cases/uc7-sow-verification/lib/riskClassifier";
+import { readCase, writeCase } from "../../../use-cases/uc7-sow-verification/lib/caseStore";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {

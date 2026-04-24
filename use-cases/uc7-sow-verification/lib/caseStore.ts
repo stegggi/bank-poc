@@ -8,13 +8,13 @@ function casePath(ref: string): string {
 }
 
 function isValidRef(ref: string): boolean {
-  return /^SOF-\d{4}-\d{5}$/.test(ref);
+  return /^SOW-\d{4}-\d{5}$/.test(ref);
 }
 
 export function generateCaseReference(): string {
   const year = new Date().getUTCFullYear();
   const rand = Math.floor(Math.random() * 90000) + 10000;
-  return `SOF-${year}-${rand}`;
+  return `SOW-${year}-${rand}`;
 }
 
 export async function createCase(

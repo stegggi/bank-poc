@@ -8,7 +8,7 @@ const USE_BLOB = !!process.env.BLOB_READ_WRITE_TOKEN;
 const LOCAL_ROOT = path.join(
   process.cwd(),
   "use-cases",
-  "uc8-sof-verification",
+  "uc7-sow-verification",
   "data"
 );
 

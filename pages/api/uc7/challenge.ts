@@ -1,7 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { generateChallenge } from "../../../use-cases/uc8-sof-verification/lib/ownershipChallenge";
-import { saveChallenge } from "../../../use-cases/uc8-sof-verification/lib/challengeStore";
-import { readCase, writeCase } from "../../../use-cases/uc8-sof-verification/lib/caseStore";
+import { generateChallenge } from "../../../use-cases/uc7-sow-verification/lib/ownershipChallenge";
+import { saveChallenge } from "../../../use-cases/uc7-sow-verification/lib/challengeStore";
+import { readCase, writeCase } from "../../../use-cases/uc7-sow-verification/lib/caseStore";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {

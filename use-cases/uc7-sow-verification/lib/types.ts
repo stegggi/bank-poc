@@ -1,4 +1,4 @@
-// Shared types for UC8 Source of Funds verification
+// Shared types for UC7 Source of Wealth verification
 
 export type ChainFamily =
   | "evm"
@@ -16,11 +16,21 @@ export type ChainDetection = {
   address: string;
 };
 
+export type TokenBalance = {
+  symbol: string;
+  contractAddress?: string;
+  amount: number;
+  chf: number;
+};
+
 export type ChainActivity = {
   chain: string;
   chainId?: number;
   nativeBalance: string;
-  nativeBalanceUsd: number;
+  nativeBalanceChf: number;
+  tokenBalances: TokenBalance[];
+  tokenValueChf: number;
+  totalChf: number;
   txCount: number;
   hasActivity: boolean;
 };
@@ -29,8 +39,9 @@ export type WalletScanResult = {
   address: string;
   chainFamily: ChainFamily;
   chains: ChainActivity[];
-  totalValueUsd: number;
+  totalValueChf: number;
   scannedAt: string;
+  warning?: string;
 };
 
 export type EntityType =
@@ -78,7 +89,7 @@ export type FundFlowNode = {
   id: string;
   address: string;
   label: AddressLabel | null;
-  valueUsd: number;
+  valueChf: number;
   hopDepth: number;
   kind: "wallet" | "source" | "intermediate";
 };
@@ -86,24 +97,25 @@ export type FundFlowNode = {
 export type FundFlowEdge = {
   from: string;
   to: string;
-  valueUsd: number;
+  valueChf: number;
   token?: string;
 };
 
 export type TracedSource = {
   address: string;
-  valueUsd: number;
+  valueChf: number;
   percentage: number;
   label: AddressLabel | null;
   hopDepth: number;
   path: string[];
+  unpriced?: boolean;
 };
 
 export type TraceResult = {
   walletAddress: string;
   chain: string;
-  totalIncomingValueUsd: number;
-  attributedValueUsd: number;
+  totalIncomingValueChf: number;
+  attributedValueChf: number;
   attributedPercentage: number;
   sources: TracedSource[];
   hopsUsed: number;

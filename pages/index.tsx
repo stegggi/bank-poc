@@ -104,17 +104,17 @@ const USE_CASES: UcDef[] = [
     links: [{ href: "/uc6", label: "Open LP Bot" }],
   },
   {
-    n: "08",
-    tag: "UC8 · Source of Funds",
-    title: "Crypto Onboarding SoF",
-    desc: "A compliance tool for onboarding clients with crypto assets. Verifies wallet ownership, traces funds back to regulated exchanges, classifies risk, and produces a FINMA-ready audit report.",
+    n: "07",
+    tag: "UC7 · Source of Wealth",
+    title: "Crypto Onboarding SoW",
+    desc: "A compliance tool for onboarding clients with crypto assets. Verifies wallet ownership, traces wealth back to regulated exchanges, classifies risk, and produces a FINMA-ready audit report.",
     accent: "#ec4899",
     highlights: [
       "Multi-chain ownership proof + OFAC screening",
       "GREEN / AMBER / RED tier classification",
       "Third-party forensic escalation for high-risk wallets",
     ],
-    links: [{ href: "/uc8", label: "Open Source of Funds" }],
+    links: [{ href: "/uc7", label: "Open Source of Wealth" }],
   },
 ];
 
@@ -181,7 +181,7 @@ export default function Home() {
             <div style={eyebrowRow}>
               <span style={eyebrowPill}>Blockchain Concept Bank</span>
               <span style={eyebrowSep} />
-              <span style={eyebrowMeta}>6 use cases · Arbitrum &amp; Base</span>
+              <span style={eyebrowMeta}>7 use cases · Arbitrum &amp; Base</span>
             </div>
 
             {/* Headline */}
@@ -222,7 +222,7 @@ export default function Home() {
             )}
 
             {/* Journey prompt */}
-            <div style={scrollNudge}>Explore all 6 use cases below ↓</div>
+            <div style={scrollNudge}>Explore all 7 use cases below ↓</div>
           </div>
         </section>
 

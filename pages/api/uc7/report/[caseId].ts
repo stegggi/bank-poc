@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readCase, writeCase } from "../../../../use-cases/uc8-sof-verification/lib/caseStore";
-import { generateReportHtml } from "../../../../use-cases/uc8-sof-verification/pdf/generateReport";
+import { readCase, writeCase } from "../../../../use-cases/uc7-sow-verification/lib/caseStore";
+import { generateReportHtml } from "../../../../use-cases/uc7-sow-verification/pdf/generateReport";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "GET" && req.method !== "POST") {

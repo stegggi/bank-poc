@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
 import { BrowserProvider } from "ethers";
-import type { Challenge } from "../../use-cases/uc8-sof-verification/lib/types";
+import type { Challenge } from "../../use-cases/uc7-sow-verification/lib/types";
 
 type EthereumWindow = typeof window & {
   ethereum?: {
@@ -48,7 +48,7 @@ export default function SignPage() {
   useEffect(() => {
     if (!challengeId || typeof challengeId !== "string") return;
     (async () => {
-      const res = await fetch(`/api/uc8/challenge/${challengeId}`);
+      const res = await fetch(`/api/uc7/challenge/${challengeId}`);
       if (!res.ok) {
         setError("Challenge not found or expired");
         setStatus("error");
@@ -85,7 +85,7 @@ export default function SignPage() {
       }
       const signature = await signer.signMessage(challenge.message);
       setStatus("verifying");
-      const res = await fetch("/api/uc8/verify-signature", {
+      const res = await fetch("/api/uc7/verify-signature", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ challengeId: challenge.challengeId, signature }),
@@ -126,7 +126,7 @@ export default function SignPage() {
       const signed = await w.solana.signMessage(encoded, "utf8");
       const sig = b58Encode(signed.signature);
       setStatus("verifying");
-      const res = await fetch("/api/uc8/verify-signature", {
+      const res = await fetch("/api/uc7/verify-signature", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ challengeId: challenge.challengeId, signature: sig, publicKey: pubKey }),

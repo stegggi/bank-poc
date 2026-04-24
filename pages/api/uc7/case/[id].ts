@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readCase, writeCase } from "../../../../use-cases/uc8-sof-verification/lib/caseStore";
-import type { CaseFile } from "../../../../use-cases/uc8-sof-verification/lib/types";
+import { readCase, writeCase } from "../../../../use-cases/uc7-sow-verification/lib/caseStore";
+import type { CaseFile } from "../../../../use-cases/uc7-sow-verification/lib/types";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = String(req.query.id || "");

@@ -3,8 +3,8 @@ import {
   createCase,
   generateCaseReference,
   listCases,
-} from "../../../use-cases/uc8-sof-verification/lib/caseStore";
-import type { CaseFile, CaseSettings } from "../../../use-cases/uc8-sof-verification/lib/types";
+} from "../../../use-cases/uc7-sow-verification/lib/caseStore";
+import type { CaseFile, CaseSettings } from "../../../use-cases/uc7-sow-verification/lib/types";
 
 const DEFAULT_SETTINGS: CaseSettings = {
   maxHopDepth: Number(process.env.MAX_HOP_DEPTH || 3),

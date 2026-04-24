@@ -137,7 +137,7 @@ export function renderFundFlowSvg(
       }
 
       const title = n.label?.name || (n.kind === "wallet" ? "Client wallet" : "Unknown");
-      const valLabel = `$${n.valueUsd.toLocaleString(undefined, {
+      const valLabel = `CHF ${n.valueChf.toLocaleString("de-CH", {
         maximumFractionDigits: 0,
       })}`;
 

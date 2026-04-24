@@ -2,6 +2,10 @@ import type { CaseFile, WalletRecord } from "../lib/types";
 import { renderFundFlowSvg } from "../lib/fundFlowGraph";
 import { tierDescription } from "../lib/exchangeTiers";
 
+function chf(n: number): string {
+  return `CHF ${n.toLocaleString("de-CH", { maximumFractionDigits: 0 })}`;
+}
+
 function esc(s: string): string {
   return s
     .replace(/&/g, "&amp;")
@@ -16,7 +20,7 @@ function short(addr: string): string {
 }
 
 function walletSection(wallet: WalletRecord, index: number): string {
-  const chainTotal = wallet.scan?.totalValueUsd ?? 0;
+  const chainTotal = wallet.scan?.totalValueChf ?? 0;
   const trace = wallet.trace;
   const classification = wallet.classification;
   const ttp = wallet.ttp;
@@ -43,7 +47,7 @@ function walletSection(wallet: WalletRecord, index: number): string {
             <td>${esc(entity)} ${tier}</td>
             <td>${esc(type)}</td>
             <td>${(s.percentage * 100).toFixed(1)}%</td>
-            <td>$${s.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td>
+            <td>${chf(s.valueChf)}</td>
             <td>${s.hopDepth}</td>
           </tr>`;
         })
@@ -68,13 +72,13 @@ function walletSection(wallet: WalletRecord, index: number): string {
         for (const t of ["A", "B", "C"] as const) {
           const v = trace.sources
             .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === t)
-            .reduce((sum, s) => sum + s.valueUsd, 0);
+            .reduce((sum, s) => sum + s.valueChf, 0);
           if (v > 0) rows.push([`Tier ${t}`, v]);
         }
         if (rows.length === 0) return "";
         return `<div class="tier-breakdown">
           <h4>Exchange Tier Breakdown</h4>
-          <ul>${rows.map(([t, v]) => `<li>${t}: $${v.toLocaleString(undefined, { maximumFractionDigits: 0 })}</li>`).join("")}</ul>
+          <ul>${rows.map(([t, v]) => `<li>${t}: ${chf(v)}</li>`).join("")}</ul>
         </div>`;
       })()
     : "";
@@ -118,14 +122,14 @@ function walletSection(wallet: WalletRecord, index: number): string {
       <tr><th>Full address</th><td><code>${esc(wallet.address)}</code></td></tr>
       <tr><th>Chain family</th><td>${esc(wallet.chainFamily)}</td></tr>
       <tr><th>Primary chain</th><td>${esc(wallet.primaryChain || "—")}</td></tr>
-      <tr><th>Portfolio value (scan time)</th><td>$${chainTotal.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td></tr>
+      <tr><th>Portfolio value (scan time)</th><td>${chf(chainTotal)}</td></tr>
       <tr><th>Ownership</th><td>${ownStatus}</td></tr>
     </table>
-    <h4>Source of Funds Coverage</h4>
+    <h4>Source of Wealth Coverage</h4>
     <p>Attributable coverage:
       <strong>${trace ? (trace.attributedPercentage * 100).toFixed(1) : "—"}%</strong>
-      ($${trace ? trace.attributedValueUsd.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"}
-      of $${trace ? trace.totalIncomingValueUsd.toLocaleString(undefined, { maximumFractionDigits: 0 }) : "—"} inflow)
+      (${trace ? chf(trace.attributedValueChf) : "—"}
+      of ${trace ? chf(trace.totalIncomingValueChf) : "—"} inflow)
     </p>
     <p class="muted">Hops traced: ${trace?.hopsUsed ?? 0} / ${trace?.maxHopsConfigured ?? 0}</p>
     ${sanctionsBlock}
@@ -133,7 +137,7 @@ function walletSection(wallet: WalletRecord, index: number): string {
     <h4>Traced Sources</h4>
     ${trace && trace.sources.length > 0
       ? `<table class="sources">
-          <thead><tr><th>Address</th><th>Entity</th><th>Type</th><th>Share</th><th>Value (USD)</th><th>Hop</th></tr></thead>
+          <thead><tr><th>Address</th><th>Entity</th><th>Type</th><th>Share</th><th>Value (CHF)</th><th>Hop</th></tr></thead>
           <tbody>${sourcesRows}</tbody>
          </table>`
       : `<p class="muted">No traced sources available.</p>`}
@@ -151,7 +155,7 @@ export function generateReportHtml(caseFile: CaseFile): string {
     .join("\n");
 
   const totalValue = caseFile.wallets.reduce(
-    (s, w) => s + (w.scan?.totalValueUsd ?? 0),
+    (s, w) => s + (w.scan?.totalValueChf ?? 0),
     0
   );
   const chains = Array.from(
@@ -174,7 +178,7 @@ export function generateReportHtml(caseFile: CaseFile): string {
 <html lang="en">
 <head>
 <meta charset="utf-8" />
-<title>SoF Compliance Report — ${esc(caseFile.caseReference)}</title>
+<title>SoW Compliance Report — ${esc(caseFile.caseReference)}</title>
 <style>
   @page { size: A4; margin: 18mm; }
   body {
@@ -262,7 +266,7 @@ export function generateReportHtml(caseFile: CaseFile): string {
 <body>
 <button class="print-btn" onclick="window.print()">Save as PDF</button>
 <header>
-  <h1>Crypto Source of Funds Compliance Report</h1>
+  <h1>Crypto Source of Wealth Compliance Report</h1>
   <div class="sub">Case ${esc(caseFile.caseReference)} · Generated ${esc(new Date().toISOString())}</div>
   <div class="confidential">CONFIDENTIAL — for client file and regulator use only</div>
 </header>
@@ -274,7 +278,7 @@ export function generateReportHtml(caseFile: CaseFile): string {
   <tr><th>Case status</th><td>${esc(caseFile.status)}</td></tr>
   <tr><th>Created</th><td>${esc(caseFile.createdAt)}</td></tr>
   <tr><th>Wallets submitted</th><td>${caseFile.wallets.length}</td></tr>
-  <tr><th>Aggregate portfolio value (scan time)</th><td>$${totalValue.toLocaleString(undefined, { maximumFractionDigits: 0 })}</td></tr>
+  <tr><th>Aggregate portfolio value (scan time)</th><td>${chf(totalValue)}</td></tr>
   <tr><th>Chains involved</th><td>${chains.length > 0 ? esc(chains.join(", ")) : "—"}</td></tr>
 </table>
 
@@ -294,7 +298,7 @@ ${walletSections}
 
 <div class="signoff">
   <h2>Compliance Officer Sign-off</h2>
-  <p>I have reviewed the source of funds evidence attached to this file and confirm the risk determination above is supported by the traceable on-chain evidence.</p>
+  <p>I have reviewed the source of wealth evidence attached to this file and confirm the risk determination above is supported by the traceable on-chain evidence.</p>
   <div class="sig-line">
     <div>
       <div class="lbl">Determination</div>

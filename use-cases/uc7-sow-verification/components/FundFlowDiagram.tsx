@@ -39,7 +39,7 @@ export default function FundFlowDiagram({ trace, height = 420 }: Props) {
         style={{ display: "block" }}
       >
         <defs>
-          <marker id="uc8arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+          <marker id="uc7arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
             <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(148,163,184,0.8)" />
           </marker>
         </defs>
@@ -56,7 +56,7 @@ export default function FundFlowDiagram({ trace, height = 420 }: Props) {
               stroke="rgba(148,163,184,0.55)"
               strokeWidth="1.6"
               fill="none"
-              markerEnd="url(#uc8arrow)"
+              markerEnd="url(#uc7arrow)"
             />
           );
         })}
@@ -80,12 +80,12 @@ export default function FundFlowDiagram({ trace, height = 420 }: Props) {
           const title =
             n.label?.name ||
             (n.kind === "wallet" ? "Client wallet" : "Unknown");
-          const valLabel = `$${n.valueUsd.toLocaleString(undefined, {
+          const valLabel = `CHF ${n.valueChf.toLocaleString("de-CH", {
             maximumFractionDigits: 0,
           })}`;
           return (
             <g key={n.id}>
-              <title>{`${title}\n${n.address}\n$${n.valueUsd.toFixed(2)}`}</title>
+              <title>{`${title}\n${n.address}\nCHF ${n.valueChf.toFixed(2)}`}</title>
               <rect
                 x={n.x}
                 y={n.y}

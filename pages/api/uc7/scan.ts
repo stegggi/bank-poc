@@ -1,6 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { detectChain } from "../../../use-cases/uc8-sof-verification/lib/chainDetect";
-import { scanWallet } from "../../../use-cases/uc8-sof-verification/lib/multiChainScan";
+import { detectChain } from "../../../use-cases/uc7-sow-verification/lib/chainDetect";
+import { scanWallet } from "../../../use-cases/uc7-sow-verification/lib/multiChainScan";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {

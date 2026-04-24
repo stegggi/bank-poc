@@ -1,14 +1,24 @@
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import NavBar from "../shared/components/NavBar";
-import FundFlowDiagram from "../use-cases/uc8-sof-verification/components/FundFlowDiagram";
-import ExchangeTierBadge from "../use-cases/uc8-sof-verification/components/ExchangeTierBadge";
-import { detectChain, chainFamilyLabel } from "../use-cases/uc8-sof-verification/lib/chainDetect";
+import FundFlowDiagram from "../use-cases/uc7-sow-verification/components/FundFlowDiagram";
+import ExchangeTierBadge from "../use-cases/uc7-sow-verification/components/ExchangeTierBadge";
+import { detectChain, chainFamilyLabel } from "../use-cases/uc7-sow-verification/lib/chainDetect";
+import { formatChf } from "../use-cases/uc7-sow-verification/lib/format";
 import type {
   CaseFile,
   CaseSummary,
+  ChainActivity,
   RiskTier,
   WalletRecord,
-} from "../use-cases/uc8-sof-verification/lib/types";
+  WalletScanResult,
+} from "../use-cases/uc7-sow-verification/lib/types";
 
 type Step = "setup" | "ownership" | "scan" | "classify" | "ttp" | "report";
 
@@ -23,9 +33,9 @@ const STEP_LABELS: Record<Step, string> = {
   report: "6. Report",
 };
 
-const UC8_ACCENT = "#ec4899";
+const UC7_ACCENT = "#ec4899";
 
-export default function Uc8Page() {
+export default function Uc7Page() {
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [activeCase, setActiveCase] = useState<CaseFile | null>(null);
   const [step, setStep] = useState<Step>("setup");
@@ -34,7 +44,7 @@ export default function Uc8Page() {
 
   const loadCases = useCallback(async () => {
     try {
-      const res = await fetch("/api/uc8/case");
+      const res = await fetch("/api/uc7/case");
       const json = await res.json();
       setCases(json.cases ?? []);
     } catch {
@@ -47,7 +57,7 @@ export default function Uc8Page() {
   }, [loadCases]);
 
   const refreshCase = useCallback(async (ref: string) => {
-    const res = await fetch(`/api/uc8/case/${ref}`);
+    const res = await fetch(`/api/uc7/case/${ref}`);
     if (!res.ok) return;
     const json = await res.json();
     setActiveCase(json.case);
@@ -55,14 +65,18 @@ export default function Uc8Page() {
 
   return (
     <>
-      <NavBar active="uc8" />
+      <style jsx global>{`
+        @keyframes uc7spin { to { transform: rotate(360deg); } }
+        .uc7-spin { animation: uc7spin 0.9s linear infinite; transform-origin: center; }
+      `}</style>
+      <NavBar active="uc7" />
       <main style={pageRoot}>
         <header style={headerWrap}>
-          <div style={eyebrow}>UC8 · Source of Funds Verification</div>
-          <h1 style={h1}>Crypto Onboarding · Source of Funds</h1>
+          <div style={eyebrow}>UC7 · Source of Wealth Verification</div>
+          <h1 style={h1}>Crypto Onboarding · Source of Wealth</h1>
           <p style={subtitle}>
-            Verify wallet ownership, trace incoming funds to regulated sources, classify risk, and produce
-            a FINMA-ready compliance report per client.
+            Verify wallet ownership, trace incoming wealth to regulated sources, classify risk, and produce
+            a FINMA-ready compliance report per client. All values shown in CHF.
           </p>
         </header>
 
@@ -75,7 +89,7 @@ export default function Uc8Page() {
                   setLoading(true);
                   setError("");
                   try {
-                    const res = await fetch("/api/uc8/case", {
+                    const res = await fetch("/api/uc7/case", {
                       method: "POST",
                       headers: { "content-type": "application/json" },
                       body: JSON.stringify({ clientName }),
@@ -116,6 +130,7 @@ export default function Uc8Page() {
                 {step === "setup" && (
                   <StepSetup
                     caseFile={activeCase}
+                    setActiveCase={setActiveCase}
                     onUpdated={refreshCase}
                     onNext={() => setStep("ownership")}
                   />
@@ -164,7 +179,29 @@ export default function Uc8Page() {
   );
 }
 
-/* ── Step: Case list ── */
+/* ── Spinner ── */
+function Spinner({ size = 14 }: { size?: number }) {
+  return (
+    <svg
+      className="uc7-spin"
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ display: "inline-block", verticalAlign: "middle" }}
+    >
+      <circle cx="12" cy="12" r="10" stroke="currentColor" strokeOpacity="0.25" strokeWidth="3" />
+      <path
+        d="M22 12a10 10 0 0 0-10-10"
+        stroke="currentColor"
+        strokeWidth="3"
+        strokeLinecap="round"
+      />
+    </svg>
+  );
+}
+
+/* ── Case list ── */
 function CaseListView({
   cases,
   onCreate,
@@ -194,7 +231,7 @@ function CaseListView({
           onClick={() => name.trim() && onCreate(name.trim())}
           disabled={loading || !name.trim()}
         >
-          Create case
+          {loading ? <><Spinner /> &nbsp;Creating…</> : "Create case"}
         </button>
       </div>
       {error && <div style={errorBox}>{error}</div>}
@@ -283,19 +320,14 @@ function Stepper({
       {STEP_ORDER.map((s, i) => {
         const isDone = i < active;
         const isActive = i === active;
-        const isTtp = s === "ttp";
-        const hasRed = caseFile.wallets.some((w) => w.classification?.requiresTTP);
-        const disabled = isTtp && !hasRed && step !== "ttp";
         return (
           <button
             key={s}
-            onClick={() => !disabled && onChange(s)}
-            disabled={disabled}
+            onClick={() => onChange(s)}
             style={{
               ...stepBtn,
               ...(isActive ? stepBtnActive : {}),
               ...(isDone ? stepBtnDone : {}),
-              ...(disabled ? { opacity: 0.4, cursor: "not-allowed" } : {}),
             }}
           >
             {STEP_LABELS[s]}
@@ -309,16 +341,19 @@ function Stepper({
 /* ── Step 1: setup (add wallets + scan chains) ── */
 function StepSetup({
   caseFile,
+  setActiveCase,
   onUpdated,
   onNext,
 }: {
   caseFile: CaseFile;
+  setActiveCase: (c: CaseFile) => void;
   onUpdated: (ref: string) => void;
   onNext: () => void;
 }) {
   const [addr, setAddr] = useState("");
   const [scanning, setScanning] = useState(false);
   const [error, setError] = useState("");
+  const [rescanning, setRescanning] = useState<string | null>(null);
 
   const addWallet = useCallback(async () => {
     const trimmed = addr.trim();
@@ -334,55 +369,113 @@ function StepSetup({
     }
     setScanning(true);
     setError("");
+
+    // Optimistic insert — wallet appears immediately while scan runs.
+    const optimisticWallet: WalletRecord = {
+      address: trimmed,
+      chainFamily: detection.chainFamily,
+      primaryChain:
+        detection.chainFamily === "bitcoin"
+          ? "bitcoin"
+          : detection.chainFamily === "solana"
+          ? "solana"
+          : undefined,
+    };
+    const optimisticCase: CaseFile = {
+      ...caseFile,
+      wallets: [...caseFile.wallets, optimisticWallet],
+    };
+    setActiveCase(optimisticCase);
+    setAddr("");
+
     try {
-      const scanRes = await fetch("/api/uc8/scan", {
+      const scanRes = await fetch("/api/uc7/scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ address: trimmed }),
       });
       const scanJson = await scanRes.json();
 
+      const scan: WalletScanResult | undefined = scanJson.scan ?? undefined;
       const newWallet: WalletRecord = {
         address: trimmed,
         chainFamily: detection.chainFamily,
-        scan: scanJson.scan ?? undefined,
+        scan,
         primaryChain:
-          scanJson.scan?.chains.find((c: { hasActivity: boolean }) => c.hasActivity)?.chain ||
-          (detection.chainFamily === "bitcoin"
-            ? "bitcoin"
-            : detection.chainFamily === "solana"
-            ? "solana"
-            : undefined),
+          scan?.chains.find((c) => c.hasActivity)?.chain ||
+          optimisticWallet.primaryChain,
       };
       const updated: CaseFile = {
-        ...caseFile,
-        wallets: [...caseFile.wallets, newWallet],
+        ...optimisticCase,
+        wallets: optimisticCase.wallets.map((w) =>
+          w.address === trimmed ? newWallet : w
+        ),
       };
-      await fetch(`/api/uc8/case/${caseFile.caseReference}`, {
+      setActiveCase(updated);
+
+      await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wallets: updated.wallets }),
       });
       onUpdated(caseFile.caseReference);
-      setAddr("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add wallet");
+      // Rollback on failure
+      setActiveCase(caseFile);
     } finally {
       setScanning(false);
     }
-  }, [addr, caseFile, onUpdated]);
+  }, [addr, caseFile, onUpdated, setActiveCase]);
 
   const removeWallet = useCallback(
     async (address: string) => {
       const wallets = caseFile.wallets.filter((w) => w.address !== address);
-      await fetch(`/api/uc8/case/${caseFile.caseReference}`, {
+      const updated = { ...caseFile, wallets };
+      setActiveCase(updated);
+      await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wallets }),
       });
       onUpdated(caseFile.caseReference);
     },
-    [caseFile, onUpdated]
+    [caseFile, onUpdated, setActiveCase]
+  );
+
+  const rescan = useCallback(
+    async (address: string) => {
+      setRescanning(address);
+      try {
+        const scanRes = await fetch("/api/uc7/scan", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ address }),
+        });
+        const scanJson = await scanRes.json();
+        const scan: WalletScanResult | undefined = scanJson.scan ?? undefined;
+        const wallets = caseFile.wallets.map((w) =>
+          w.address === address
+            ? {
+                ...w,
+                scan,
+                primaryChain: scan?.chains.find((c) => c.hasActivity)?.chain || w.primaryChain,
+              }
+            : w
+        );
+        const updated = { ...caseFile, wallets };
+        setActiveCase(updated);
+        await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+          method: "PUT",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ wallets }),
+        });
+        onUpdated(caseFile.caseReference);
+      } finally {
+        setRescanning(null);
+      }
+    },
+    [caseFile, onUpdated, setActiveCase]
   );
 
   return (
@@ -390,7 +483,7 @@ function StepSetup({
       <h3 style={h3}>Wallet intake</h3>
       <p style={para}>
         Enter each wallet address the client controls. The system detects the chain family and scans for
-        activity across supported networks.
+        activity across supported networks (native + USDC / USDT / DAI / WETH / WBTC).
       </p>
       <div style={{ display: "flex", gap: 10, marginTop: 12 }}>
         <input
@@ -399,12 +492,14 @@ function StepSetup({
           placeholder="0x… / bc1… / Solana pubkey"
           style={{ ...inputStyle, fontFamily: "monospace" }}
         />
-        <button
-          style={primaryBtn}
-          onClick={addWallet}
-          disabled={scanning || !addr.trim()}
-        >
-          {scanning ? "Scanning…" : "Add wallet"}
+        <button style={primaryBtn} onClick={addWallet} disabled={scanning || !addr.trim()}>
+          {scanning ? (
+            <>
+              <Spinner /> &nbsp;Scanning…
+            </>
+          ) : (
+            "Add wallet"
+          )}
         </button>
       </div>
       {error && <div style={errorBox}>{error}</div>}
@@ -416,41 +511,64 @@ function StepSetup({
         <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
           {caseFile.wallets.map((w) => {
             const detection = detectChain(w.address);
+            const isScanning =
+              (scanning && w.address === addr.trim()) || rescanning === w.address;
+            const hasScan = !!w.scan;
+            const chains = w.scan?.chains ?? [];
+            const hasChains = chains.length > 0;
             return (
               <div key={w.address} style={walletCardStyle}>
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
-                  <div>
-                    <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+                <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                      <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+                      {isScanning && <Spinner />}
+                    </div>
                     <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
                       {chainFamilyLabel(detection.chainFamily)}
                       {detection.subtype && ` · ${detection.subtype}`}
-                      {w.scan && ` · $${w.scan.totalValueUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}`}
                     </div>
+                    {hasScan && (
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginTop: 8 }}>
+                        {formatChf(w.scan!.totalValueChf)}
+                      </div>
+                    )}
                   </div>
-                  <button style={dangerBtn} onClick={() => removeWallet(w.address)}>
-                    Remove
-                  </button>
+                  <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
+                    {hasScan && !isScanning && (
+                      <button style={secondaryBtn} onClick={() => rescan(w.address)}>
+                        Re-scan
+                      </button>
+                    )}
+                    <button style={dangerBtn} onClick={() => removeWallet(w.address)}>
+                      Remove
+                    </button>
+                  </div>
                 </div>
-                {w.scan && w.scan.chains.length > 0 && (
+
+                {hasScan && w.scan?.warning && (
+                  <div style={{ ...errorBox, marginTop: 10 }}>
+                    {w.scan.warning}
+                  </div>
+                )}
+
+                {hasScan && hasChains && (
                   <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    {w.scan.chains.map((c) => (
-                      <span
-                        key={c.chain}
-                        style={{
-                          display: "inline-flex",
-                          alignItems: "center",
-                          gap: 4,
-                          fontSize: 11,
-                          padding: "4px 8px",
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.1)",
-                          borderRadius: 4,
-                          color: "rgba(255,255,255,0.85)",
-                        }}
-                      >
-                        {c.chain}: {Number(c.nativeBalance).toFixed(4)} (${c.nativeBalanceUsd.toFixed(0)})
-                      </span>
+                    {chains.map((c) => (
+                      <ChainPill key={c.chain} chain={c} />
                     ))}
+                  </div>
+                )}
+
+                {hasScan && !hasChains && !w.scan?.warning && (
+                  <div style={{ ...mutedBlock, marginTop: 10, textAlign: "left" }}>
+                    No on-chain activity detected on supported networks.
+                  </div>
+                )}
+
+                {!hasScan && isScanning && (
+                  <div style={{ marginTop: 10, color: "rgba(255,255,255,0.65)", fontSize: 13 }}>
+                    <Spinner /> &nbsp;Scanning {detection.chainFamily === "evm" ? "6 EVM chains" : "on-chain activity"}…
                   </div>
                 )}
               </div>
@@ -460,15 +578,46 @@ function StepSetup({
       )}
 
       <div style={{ marginTop: 24 }}>
-        <button
-          style={primaryBtn}
-          onClick={onNext}
-          disabled={caseFile.wallets.length === 0}
-        >
+        <button style={primaryBtn} onClick={onNext} disabled={caseFile.wallets.length === 0}>
           Proceed to ownership verification →
         </button>
       </div>
     </div>
+  );
+}
+
+function ChainPill({ chain }: { chain: ChainActivity }) {
+  const tokenSummary = chain.tokenBalances
+    .filter((t) => t.chf > 0)
+    .map((t) => `${t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })} ${t.symbol}`)
+    .join(", ");
+  const title = [
+    `${chain.chain}`,
+    `Native: ${chain.nativeBalance} (${formatChf(chain.nativeBalanceChf)})`,
+    tokenSummary ? `Tokens: ${tokenSummary} (${formatChf(chain.tokenValueChf)})` : null,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  return (
+    <span
+      title={title}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 6,
+        fontSize: 12,
+        padding: "5px 10px",
+        background: "rgba(255,255,255,0.06)",
+        border: "1px solid rgba(255,255,255,0.1)",
+        borderRadius: 6,
+        color: "rgba(255,255,255,0.9)",
+      }}
+    >
+      <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{chain.chain}</span>
+      <span style={{ color: "rgba(255,255,255,0.55)" }}>·</span>
+      <span>{formatChf(chain.totalChf)}</span>
+    </span>
   );
 }
 
@@ -488,7 +637,7 @@ function StepOwnership({
     async (address: string) => {
       setLoadingAddr(address);
       try {
-        await fetch("/api/uc8/challenge", {
+        await fetch("/api/uc7/challenge", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ caseReference: caseFile.caseReference, address }),
@@ -501,7 +650,6 @@ function StepOwnership({
     [caseFile, onUpdated]
   );
 
-  // Poll for verification updates
   useEffect(() => {
     const anyPending = caseFile.wallets.some((w) => w.challenge && w.challenge.status === "pending");
     if (!anyPending) return;
@@ -554,7 +702,7 @@ function OwnershipRow({
 }) {
   const challenge = wallet.challenge;
   const origin = typeof window !== "undefined" ? window.location.origin : "";
-  const signUrl = challenge ? `${origin}/uc8-sign/${challenge.challengeId}` : "";
+  const signUrl = challenge ? `${origin}/uc7-sign/${challenge.challengeId}` : "";
 
   return (
     <div style={walletCardStyle}>
@@ -576,7 +724,7 @@ function OwnershipRow({
         </div>
         {!challenge || challenge.status === "failed" ? (
           <button style={primaryBtn} onClick={onGenerate} disabled={loading}>
-            {loading ? "Generating…" : "Generate challenge"}
+            {loading ? <><Spinner /> &nbsp;Generating…</> : "Generate challenge"}
           </button>
         ) : null}
       </div>
@@ -589,7 +737,7 @@ function OwnershipRow({
             </div>
             <img
               alt="Sign challenge"
-              src={`/api/uc8/qr?data=${encodeURIComponent(signUrl)}`}
+              src={`/api/uc7/qr?data=${encodeURIComponent(signUrl)}`}
               style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 6 }}
             />
           </div>
@@ -620,7 +768,14 @@ function OwnershipRow({
   );
 }
 
-/* ── Step 3: source scan (backward trace) ── */
+/* ── Step 3: source trace ── */
+const TRACE_PROGRESS_STAGES = [
+  "Pulling incoming transactions…",
+  "Resolving counterparties via label DB…",
+  "Screening against OFAC SDN list…",
+  "Evaluating multi-hop provenance…",
+];
+
 function StepScan({
   caseFile,
   onUpdated,
@@ -630,51 +785,66 @@ function StepScan({
   onUpdated: (ref: string) => void;
   onNext: () => void;
 }) {
-  const [running, setRunning] = useState<string | null>(null);
+  const [runningSet, setRunningSet] = useState<Set<string>>(new Set());
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const runTrace = useCallback(
     async (address: string) => {
-      setRunning(address);
+      setRunningSet((prev) => new Set(prev).add(address));
       try {
-        await fetch("/api/uc8/trace", {
+        await fetch("/api/uc7/trace", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ caseReference: caseFile.caseReference, address }),
         });
         onUpdated(caseFile.caseReference);
       } finally {
-        setRunning(null);
+        setRunningSet((prev) => {
+          const next = new Set(prev);
+          next.delete(address);
+          return next;
+        });
       }
     },
-    [caseFile, onUpdated]
+    [caseFile.caseReference, onUpdated]
   );
 
   const runAll = useCallback(async () => {
-    for (const w of caseFile.wallets) {
-      if (!w.trace) await runTrace(w.address);
+    const addresses = caseFile.wallets.map((w) => w.address);
+    setProgress({ done: 0, total: addresses.length });
+    for (let i = 0; i < addresses.length; i++) {
+      setProgress({ done: i, total: addresses.length });
+      await runTrace(addresses[i]);
     }
+    setProgress(null);
   }, [caseFile.wallets, runTrace]);
 
   const allTraced = caseFile.wallets.every((w) => w.trace);
+  const anyRunning = runningSet.size > 0;
 
   return (
     <div>
       <h3 style={h3}>Backward source trace</h3>
       <p style={para}>
         Pull incoming transactions, identify counterparties via Etherscan labels, eth-labels, and OFAC screening,
-        and build a hop-by-hop picture of where the funds came from. Maximum depth: {caseFile.settings.maxHopDepth} hops.
+        and build a hop-by-hop picture of where the wealth came from. Maximum depth: {caseFile.settings.maxHopDepth} hops.
       </p>
-      <div style={{ marginBottom: 16 }}>
-        <button style={primaryBtn} onClick={runAll} disabled={running !== null}>
-          Run trace on all wallets
+      <div style={{ marginBottom: 16, display: "flex", alignItems: "center", gap: 16 }}>
+        <button style={primaryBtn} onClick={runAll} disabled={anyRunning}>
+          {anyRunning ? <><Spinner /> &nbsp;Tracing…</> : "Run trace on all wallets"}
         </button>
+        {progress && (
+          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13 }}>
+            Wallet {Math.min(progress.done + 1, progress.total)} / {progress.total}
+          </span>
+        )}
       </div>
       <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
         {caseFile.wallets.map((w) => (
           <TraceRow
             key={w.address}
             wallet={w}
-            running={running === w.address}
+            running={runningSet.has(w.address)}
             onRun={() => runTrace(w.address)}
           />
         ))}
@@ -698,6 +868,24 @@ function TraceRow({
   onRun: () => void;
 }) {
   const trace = wallet.trace;
+  const [stage, setStage] = useState(0);
+  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (running) {
+      setStage(0);
+      timerRef.current = setInterval(() => {
+        setStage((s) => (s + 1) % TRACE_PROGRESS_STAGES.length);
+      }, 2200);
+    } else if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    return () => {
+      if (timerRef.current) clearInterval(timerRef.current);
+    };
+  }, [running]);
+
   return (
     <div style={walletCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -709,11 +897,38 @@ function TraceRow({
           </div>
         </div>
         <button style={primaryBtn} onClick={onRun} disabled={running}>
-          {running ? "Tracing…" : trace ? "Re-run trace" : "Run trace"}
+          {running ? (
+            <>
+              <Spinner /> &nbsp;Tracing…
+            </>
+          ) : trace ? (
+            "Re-run trace"
+          ) : (
+            "Run trace"
+          )}
         </button>
       </div>
 
-      {trace && (
+      {running && (
+        <div
+          style={{
+            marginTop: 12,
+            padding: "10px 14px",
+            background: "rgba(59,130,246,0.08)",
+            border: "1px solid rgba(59,130,246,0.25)",
+            borderRadius: 8,
+            color: "#cbd5f5",
+            fontSize: 13,
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+          }}
+        >
+          <Spinner /> {TRACE_PROGRESS_STAGES[stage]}
+        </div>
+      )}
+
+      {trace && !running && (
         <div style={{ marginTop: 14 }}>
           <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14 }}>
             <Stat
@@ -727,18 +942,8 @@ function TraceRow({
                   : "#ef4444"
               }
             />
-            <Stat
-              label="Attributed"
-              value={`$${trace.attributedValueUsd.toLocaleString(undefined, {
-                maximumFractionDigits: 0,
-              })}`}
-            />
-            <Stat
-              label="Total inflow"
-              value={`$${trace.totalIncomingValueUsd.toLocaleString(undefined, {
-                maximumFractionDigits: 0,
-              })}`}
-            />
+            <Stat label="Attributed" value={formatChf(trace.attributedValueChf)} />
+            <Stat label="Total inflow" value={formatChf(trace.totalIncomingValueChf)} />
             <Stat label="Hops used" value={`${trace.hopsUsed} / ${trace.maxHopsConfigured}`} />
             <Stat
               label="Sanctions"
@@ -754,11 +959,11 @@ function TraceRow({
             </div>
           )}
 
-          <h5 style={{ ...h4, fontSize: 12 }}>Fund flow</h5>
-          <FundFlowDiagram trace={trace} height={360} />
-
-          {trace.sources.length > 0 && (
+          {trace.sources.length > 0 ? (
             <>
+              <h5 style={{ ...h4, fontSize: 12 }}>Fund flow</h5>
+              <FundFlowDiagram trace={trace} height={360} />
+
               <h5 style={{ ...h4, fontSize: 12, marginTop: 16 }}>Top sources</h5>
               <table style={tableStyle}>
                 <thead>
@@ -780,24 +985,43 @@ function TraceRow({
                         </code>
                       </td>
                       <td style={tdStyle}>
-                        {s.label?.name || <span style={{ color: "rgba(255,255,255,0.5)" }}>Unknown</span>}
+                        {s.label?.name || (
+                          <span style={{ color: "rgba(255,255,255,0.5)" }}>Unknown</span>
+                        )}
                         {s.label?.exchangeTier && (
                           <span style={{ marginLeft: 6 }}>
                             <ExchangeTierBadge tier={s.label.exchangeTier} size="sm" />
                           </span>
                         )}
+                        {s.unpriced && (
+                          <span
+                            style={{
+                              marginLeft: 6,
+                              fontSize: 10,
+                              color: "#fbbf24",
+                              border: "1px solid rgba(245,158,11,0.3)",
+                              padding: "1px 4px",
+                              borderRadius: 3,
+                            }}
+                          >
+                            UNPRICED
+                          </span>
+                        )}
                       </td>
                       <td style={tdStyle}>{s.label?.entityType || "unknown"}</td>
                       <td style={tdStyle}>{(s.percentage * 100).toFixed(1)}%</td>
-                      <td style={tdStyle}>
-                        ${s.valueUsd.toLocaleString(undefined, { maximumFractionDigits: 0 })}
-                      </td>
+                      <td style={tdStyle}>{formatChf(s.valueChf)}</td>
                       <td style={tdStyle}>{s.hopDepth}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </>
+          ) : (
+            <div style={mutedBlock}>
+              No incoming value detected. The wallet has no priced inflows on this chain — try re-running the
+              trace after setting <code>ETHERSCAN_API_KEY</code>, or confirm the wallet has activity on the expected chain.
+            </div>
           )}
         </div>
       )}
@@ -820,7 +1044,7 @@ function StepClassify({
   const classify = useCallback(async () => {
     setRunning(true);
     try {
-      await fetch("/api/uc8/classify", {
+      await fetch("/api/uc7/classify", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ caseReference: caseFile.caseReference }),
@@ -838,12 +1062,13 @@ function StepClassify({
     <div>
       <h3 style={h3}>Risk classification</h3>
       <p style={para}>
-        Apply deterministic rules to each wallet's trace results.
-        Thresholds: GREEN ≥ {(caseFile.settings.greenThreshold * 100).toFixed(0)}%, AMBER ≥ {(caseFile.settings.amberThreshold * 100).toFixed(0)}%.
+        Apply deterministic rules to each wallet's trace results. Thresholds: GREEN ≥{" "}
+        {(caseFile.settings.greenThreshold * 100).toFixed(0)}%, AMBER ≥{" "}
+        {(caseFile.settings.amberThreshold * 100).toFixed(0)}%.
       </p>
       <div style={{ marginBottom: 16 }}>
         <button style={primaryBtn} onClick={classify} disabled={running}>
-          {running ? "Classifying…" : "Run classification"}
+          {running ? <><Spinner /> &nbsp;Classifying…</> : "Run classification"}
         </button>
         {caseFile.overallRisk && (
           <span style={{ marginLeft: 16 }}>
@@ -881,7 +1106,7 @@ function StepClassify({
   );
 }
 
-/* ── Step 5: TTP escalation ── */
+/* ── Step 5: TTP escalation (all wallets visible) ── */
 function StepTtp({
   caseFile,
   onUpdated,
@@ -891,46 +1116,155 @@ function StepTtp({
   onUpdated: (ref: string) => void;
   onNext: () => void;
 }) {
-  const redWallets = caseFile.wallets.filter((w) => w.classification?.requiresTTP);
-  const [running, setRunning] = useState<string | null>(null);
+  const [runningSet, setRunningSet] = useState<Set<string>>(new Set());
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
   const escalate = useCallback(
     async (address: string) => {
-      setRunning(address);
+      setRunningSet((prev) => new Set(prev).add(address));
       try {
-        await fetch("/api/uc8/escalate", {
+        await fetch("/api/uc7/escalate", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ caseReference: caseFile.caseReference, address }),
         });
         onUpdated(caseFile.caseReference);
+        // Auto-expand report panel on completion
+        setExpanded((prev) => new Set(prev).add(address));
       } finally {
-        setRunning(null);
+        setRunningSet((prev) => {
+          const next = new Set(prev);
+          next.delete(address);
+          return next;
+        });
       }
     },
     [caseFile, onUpdated]
   );
 
+  const toggleExpand = useCallback((address: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(address)) next.delete(address);
+      else next.add(address);
+      return next;
+    });
+  }, []);
+
+  const tierRank: Record<RiskTier, number> = { RED: 0, AMBER: 1, GREEN: 2 };
+
+  const sortedWallets = useMemo(
+    () =>
+      [...caseFile.wallets].sort((a, b) => {
+        const ta = a.classification?.tier ?? "GREEN";
+        const tb = b.classification?.tier ?? "GREEN";
+        return tierRank[ta] - tierRank[tb];
+      }),
+    [caseFile.wallets]
+  );
+
+  const redWallets = caseFile.wallets.filter((w) => w.classification?.requiresTTP);
+  const redPending = redWallets.filter((w) => !w.ttp);
+  const canProceed = redWallets.length > 0 && redPending.length === 0;
+
   return (
     <div>
       <h3 style={h3}>Third-party forensic escalation</h3>
       <p style={para}>
-        RED-classified wallets are escalated to a third-party analytics provider for forensic screening.
-        Provider: <code>{caseFile.settings.ttpProvider}</code>.
+        RED-classified wallets <strong>must</strong> be sent to a third-party forensic analytics provider
+        before the compliance report can be issued. AMBER and GREEN wallets can optionally be submitted
+        for additional evidence. Provider: <code>{caseFile.settings.ttpProvider}</code>.
       </p>
-      {redWallets.length === 0 ? (
-        <div style={mutedBlock}>No RED wallets to escalate.</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          {redWallets.map((w) => (
-            <div key={w.address} style={walletCardStyle}>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
-                <button style={primaryBtn} onClick={() => escalate(w.address)} disabled={running === w.address}>
-                  {running === w.address ? "Escalating…" : w.ttp ? "Re-run screening" : "Send to TTP"}
+
+      {redWallets.length === 0 && (
+        <div style={mutedBlock}>
+          No RED wallets were flagged. Screening is optional for this case — you may proceed to the report.
+        </div>
+      )}
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 14, marginTop: 12 }}>
+        {sortedWallets.map((w) => {
+          const tier = w.classification?.tier;
+          const isRunning = runningSet.has(w.address);
+          const isExpanded = expanded.has(w.address);
+          const isRequired = !!w.classification?.requiresTTP;
+          const hasReport = !!w.ttp;
+
+          let actionNode: React.ReactNode;
+          if (isRunning) {
+            actionNode = (
+              <button style={{ ...primaryBtn, opacity: 0.85 }} disabled>
+                <Spinner /> &nbsp;Awaiting result…
+              </button>
+            );
+          } else if (hasReport) {
+            actionNode = (
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={secondaryBtn} onClick={() => toggleExpand(w.address)}>
+                  {isExpanded ? "Hide report" : "See result"}
+                </button>
+                <button style={linkBtn} onClick={() => escalate(w.address)}>
+                  Re-run
                 </button>
               </div>
-              {w.ttp && (
+            );
+          } else if (isRequired) {
+            actionNode = (
+              <button style={primaryBtn} onClick={() => escalate(w.address)}>
+                Send to TTP
+              </button>
+            );
+          } else {
+            actionNode = (
+              <button style={secondaryBtn} onClick={() => escalate(w.address)}>
+                Send to TTP (optional)
+              </button>
+            );
+          }
+
+          return (
+            <div
+              key={w.address}
+              style={{
+                ...walletCardStyle,
+                ...(isRequired && !hasReport
+                  ? { borderColor: "rgba(239,68,68,0.5)", background: "rgba(239,68,68,0.05)" }
+                  : {}),
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "space-between",
+                  alignItems: "center",
+                  gap: 12,
+                  flexWrap: "wrap",
+                }}
+              >
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+                    {tier && <RiskPill tier={tier} />}
+                    {isRequired && !hasReport && !isRunning && (
+                      <span style={{ fontSize: 11, color: "#fca5a5", fontWeight: 700 }}>
+                        REQUIRED
+                      </span>
+                    )}
+                    {hasReport && (
+                      <span style={{ fontSize: 11, color: "#6ee7b7", fontWeight: 700 }}>
+                        ✓ Report received
+                      </span>
+                    )}
+                  </div>
+                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+                    {chainFamilyLabel(w.chainFamily)}
+                    {w.primaryChain && ` · ${w.primaryChain}`}
+                  </div>
+                </div>
+                {actionNode}
+              </div>
+
+              {hasReport && isExpanded && w.ttp && (
                 <div style={{ marginTop: 14 }}>
                   <div style={{ display: "flex", gap: 20, flexWrap: "wrap", marginBottom: 10 }}>
                     <Stat label="Provider" value={w.ttp.provider} />
@@ -973,7 +1307,8 @@ function StepTtp({
                       <ul style={{ paddingLeft: 20, fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
                         {w.ttp.flaggedAddresses.map((f, i) => (
                           <li key={i}>
-                            <code>{f.address.slice(0, 10)}…{f.address.slice(-6)}</code> — {f.category} ({f.riskLevel}): {f.note}
+                            <code>{f.address.slice(0, 10)}…{f.address.slice(-6)}</code> —{" "}
+                            {f.category} ({f.riskLevel}): {f.note}
                           </li>
                         ))}
                       </ul>
@@ -982,17 +1317,19 @@ function StepTtp({
                 </div>
               )}
             </div>
-          ))}
-        </div>
-      )}
+          );
+        })}
+      </div>
+
       <div style={{ marginTop: 24 }}>
-        <button
-          style={primaryBtn}
-          onClick={onNext}
-          disabled={redWallets.some((w) => !w.ttp)}
-        >
+        <button style={primaryBtn} onClick={onNext} disabled={!canProceed && redWallets.length > 0}>
           Proceed to report →
         </button>
+        {redPending.length > 0 && (
+          <span style={{ marginLeft: 12, color: "rgba(255,255,255,0.55)", fontSize: 12 }}>
+            {redPending.length} RED wallet{redPending.length === 1 ? "" : "s"} still awaiting TTP result
+          </span>
+        )}
       </div>
     </div>
   );
@@ -1010,7 +1347,7 @@ function StepReport({
   const [determination, setDetermination] = useState(caseFile.determination || "");
 
   const saveSignoff = useCallback(async () => {
-    await fetch(`/api/uc8/case/${caseFile.caseReference}`, {
+    await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -1022,7 +1359,7 @@ function StepReport({
     onUpdated(caseFile.caseReference);
   }, [caseFile.caseReference, signOff, determination, onUpdated]);
 
-  const reportUrl = `/api/uc8/report/${caseFile.caseReference}`;
+  const reportUrl = `/api/uc7/report/${caseFile.caseReference}`;
 
   return (
     <div>
@@ -1068,7 +1405,7 @@ function StepReport({
         <button
           style={secondaryBtn}
           onClick={async () => {
-            await fetch(`/api/uc8/report/${caseFile.caseReference}`, { method: "POST" });
+            await fetch(`/api/uc7/report/${caseFile.caseReference}`, { method: "POST" });
             onUpdated(caseFile.caseReference);
             window.open(reportUrl, "_blank");
           }}
@@ -1142,9 +1479,9 @@ const eyebrow: CSSProperties = {
   fontSize: 11,
   letterSpacing: "0.08em",
   textTransform: "uppercase",
-  color: UC8_ACCENT,
+  color: UC7_ACCENT,
   fontWeight: 700,
-  background: `${UC8_ACCENT}1a`,
+  background: `${UC7_ACCENT}1a`,
   padding: "4px 10px",
   borderRadius: 20,
   marginBottom: 12,
@@ -1206,8 +1543,8 @@ const stepBtn: CSSProperties = {
   cursor: "pointer",
 };
 const stepBtnActive: CSSProperties = {
-  background: `${UC8_ACCENT}22`,
-  borderColor: `${UC8_ACCENT}66`,
+  background: `${UC7_ACCENT}22`,
+  borderColor: `${UC7_ACCENT}66`,
   color: "#fff",
 };
 const stepBtnDone: CSSProperties = {
@@ -1243,12 +1580,14 @@ const labelStyle: CSSProperties = {
 const primaryBtn: CSSProperties = {
   padding: "10px 16px",
   borderRadius: 8,
-  border: `1px solid ${UC8_ACCENT}66`,
-  background: `${UC8_ACCENT}1c`,
+  border: `1px solid ${UC7_ACCENT}66`,
+  background: `${UC7_ACCENT}1c`,
   color: "#fff",
   fontSize: 14,
   fontWeight: 600,
   cursor: "pointer",
+  display: "inline-flex",
+  alignItems: "center",
 };
 
 const secondaryBtn: CSSProperties = {

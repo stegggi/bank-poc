@@ -7,7 +7,7 @@ import type {
   TracedSource,
 } from "./types";
 import { lookupAddress } from "./labelDatabase";
-import { getPriceUsd } from "./multiChainScan";
+import { getPriceChf } from "./multiChainScan";
 
 type EvmInflow = {
   from: string;
@@ -15,8 +15,9 @@ type EvmInflow = {
   valueWei: bigint;
   token: string;
   tokenDecimals: number;
-  priceUsd: number;
-  valueUsd: number;
+  priceChf: number;
+  valueChf: number;
+  unpriced: boolean;
   timestamp: number;
   txHash: string;
 };
@@ -38,6 +39,28 @@ const CHAIN_NATIVE: Record<string, string> = {
   bsc: "BNB",
   optimism: "ETH",
 };
+
+const STABLECOIN_SYMBOLS = new Set([
+  "USDC",
+  "USDT",
+  "DAI",
+  "BUSD",
+  "FDUSD",
+  "PYUSD",
+  "USDBC",
+  "USDC.E",
+]);
+
+// Symbols we will try to look up via getPriceChf (beyond stables/native).
+const PRICEABLE_SYMBOLS = new Set([
+  "WETH",
+  "WBTC",
+  "BTCB",
+  "CBBTC",
+  "WMATIC",
+  "WBNB",
+  "WSOL",
+]);
 
 async function fetchEtherscan<T>(
   params: Record<string, string>,
@@ -77,6 +100,19 @@ type RawTokenTx = RawTx & {
   tokenDecimal: string;
   contractAddress: string;
 };
+
+async function priceForSymbol(sym: string): Promise<{ price: number; unpriced: boolean }> {
+  const upper = sym.toUpperCase();
+  if (STABLECOIN_SYMBOLS.has(upper)) {
+    const price = await getPriceChf(upper);
+    return { price: price || 0.9, unpriced: false };
+  }
+  if (PRICEABLE_SYMBOLS.has(upper)) {
+    const price = await getPriceChf(upper);
+    return { price, unpriced: price === 0 };
+  }
+  return { price: 0, unpriced: true };
+}
 
 async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflow[]> {
   const chainId = CHAIN_ID_MAP[chain];
@@ -122,7 +158,7 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
 
   const addr = address.toLowerCase();
   const nativeSymbol = CHAIN_NATIVE[chain] || "ETH";
-  const nativePrice = await getPriceUsd(nativeSymbol);
+  const nativePrice = await getPriceChf(nativeSymbol);
 
   const inflows: EvmInflow[] = [];
 
@@ -137,8 +173,9 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
       valueWei: wei,
       token: nativeSymbol,
       tokenDecimals: 18,
-      priceUsd: nativePrice,
-      valueUsd: native * nativePrice,
+      priceChf: nativePrice,
+      valueChf: native * nativePrice,
+      unpriced: false,
       timestamp: Number(tx.timeStamp) * 1000,
       txHash: tx.hash,
     });
@@ -148,22 +185,22 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
   if (Array.isArray(internal)) internal.forEach(pushNative);
 
   if (Array.isArray(tokens)) {
-    const stableSymbols = new Set(["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD"]);
     for (const tx of tokens) {
       if (!tx.to || tx.to.toLowerCase() !== addr) continue;
       const dec = Number(tx.tokenDecimal || "18");
       const sym = (tx.tokenSymbol || "").toUpperCase();
       const raw = BigInt(tx.value || "0");
       const amount = Number(raw) / Math.pow(10, dec);
-      const price = stableSymbols.has(sym) ? 1 : 0;
+      const { price, unpriced } = await priceForSymbol(sym);
       inflows.push({
         from: tx.from.toLowerCase(),
         to: addr,
         valueWei: raw,
         token: sym,
         tokenDecimals: dec,
-        priceUsd: price,
-        valueUsd: amount * price,
+        priceChf: price,
+        valueChf: amount * price,
+        unpriced,
         timestamp: Number(tx.timeStamp) * 1000,
         txHash: tx.hash,
       });
@@ -173,38 +210,42 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
   return inflows;
 }
 
-function aggregateBySource(inflows: EvmInflow[]): Map<string, number> {
-  const map = new Map<string, number>();
+function aggregateBySource(inflows: EvmInflow[]): {
+  values: Map<string, number>;
+  unpricedMask: Map<string, boolean>;
+} {
+  const values = new Map<string, number>();
+  const unpricedMask = new Map<string, boolean>();
   for (const inf of inflows) {
-    const cur = map.get(inf.from) || 0;
-    map.set(inf.from, cur + inf.valueUsd);
+    const cur = values.get(inf.from) || 0;
+    values.set(inf.from, cur + inf.valueChf);
+    if (inf.unpriced) unpricedMask.set(inf.from, true);
   }
-  return map;
+  return { values, unpricedMask };
 }
 
-function topSources(agg: Map<string, number>, coveragePct: number = 0.9): {
-  sources: Array<{ address: string; valueUsd: number }>;
-  total: number;
-} {
-  const entries = Array.from(agg.entries())
-    .map(([address, valueUsd]) => ({ address, valueUsd }))
-    .sort((a, b) => b.valueUsd - a.valueUsd);
+function topSources(
+  values: Map<string, number>,
+  coveragePct = 0.9
+): { sources: Array<{ address: string; valueChf: number }>; total: number } {
+  const entries = Array.from(values.entries())
+    .map(([address, valueChf]) => ({ address, valueChf }))
+    .sort((a, b) => b.valueChf - a.valueChf);
 
-  const total = entries.reduce((s, e) => s + e.valueUsd, 0);
+  const total = entries.reduce((s, e) => s + e.valueChf, 0);
   if (total <= 0) return { sources: [], total };
 
-  const out: Array<{ address: string; valueUsd: number }> = [];
+  const out: Array<{ address: string; valueChf: number }> = [];
   let acc = 0;
   for (const e of entries) {
     out.push(e);
-    acc += e.valueUsd;
+    acc += e.valueChf;
     if (acc >= total * coveragePct) break;
   }
   return { sources: out, total };
 }
 
 async function traceBitcoin(address: string): Promise<TraceResult> {
-  // Minimal BTC trace via Blockstream. Focus on Hop 1 source addresses.
   const tracedAt = new Date().toISOString();
   try {
     const res = await fetch(`https://blockstream.info/api/address/${address}/txs`, {
@@ -218,37 +259,35 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
       vin: Array<{ prevout?: { scriptpubkey_address?: string; value?: number } }>;
       vout: Array<{ scriptpubkey_address?: string; value?: number }>;
     }>;
-    const btcPrice = await getPriceUsd("BTC");
+    const btcPrice = await getPriceChf("BTC");
     const agg = new Map<string, number>();
     for (const tx of txs) {
-      // Inputs contribute to previous-hop source addresses
       for (const vin of tx.vin) {
         const src = vin.prevout?.scriptpubkey_address;
         if (!src || src === address) continue;
-        // Distribute input value proportionally to outputs credited to our address
         const ourOut = tx.vout
           .filter((v) => v.scriptpubkey_address === address)
           .reduce((s, v) => s + (v.value ?? 0), 0);
         if (ourOut <= 0) continue;
         const btc = ourOut / 1e8;
-        const usd = btc * btcPrice;
+        const chf = btc * btcPrice;
         const cur = agg.get(src) || 0;
-        agg.set(src, cur + usd);
+        agg.set(src, cur + chf);
       }
     }
     const { sources, total } = topSources(agg);
     const tracedSources: TracedSource[] = [];
     const sanctionsHits: SanctionsHit[] = [];
     const nodes: FundFlowNode[] = [
-      { id: address, address, label: null, valueUsd: total, hopDepth: 0, kind: "wallet" },
+      { id: address, address, label: null, valueChf: total, hopDepth: 0, kind: "wallet" },
     ];
     const edges: FundFlowEdge[] = [];
     for (const s of sources) {
       const label = await lookupAddress(s.address, "bitcoin");
       tracedSources.push({
         address: s.address,
-        valueUsd: s.valueUsd,
-        percentage: total > 0 ? s.valueUsd / total : 0,
+        valueChf: s.valueChf,
+        percentage: total > 0 ? s.valueChf / total : 0,
         label,
         hopDepth: 1,
         path: [address, s.address],
@@ -257,11 +296,11 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
         id: s.address,
         address: s.address,
         label,
-        valueUsd: s.valueUsd,
+        valueChf: s.valueChf,
         hopDepth: 1,
         kind: "source",
       });
-      edges.push({ from: s.address, to: address, valueUsd: s.valueUsd, token: "BTC" });
+      edges.push({ from: s.address, to: address, valueChf: s.valueChf, token: "BTC" });
       if (label.sanctioned) {
         sanctionsHits.push({
           address: s.address,
@@ -272,13 +311,13 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
     }
     const attributed = tracedSources
       .filter((s) => s.label && s.label.entityType !== "unknown")
-      .reduce((acc, s) => acc + s.valueUsd, 0);
+      .reduce((acc, s) => acc + s.valueChf, 0);
 
     return {
       walletAddress: address,
       chain: "bitcoin",
-      totalIncomingValueUsd: total,
-      attributedValueUsd: attributed,
+      totalIncomingValueChf: total,
+      attributedValueChf: attributed,
       attributedPercentage: total > 0 ? attributed / total : 0,
       sources: tracedSources,
       hopsUsed: 1,
@@ -297,14 +336,14 @@ function emptyTrace(address: string, chain: string, tracedAt: string): TraceResu
   return {
     walletAddress: address,
     chain,
-    totalIncomingValueUsd: 0,
-    attributedValueUsd: 0,
+    totalIncomingValueChf: 0,
+    attributedValueChf: 0,
     attributedPercentage: 0,
     sources: [],
     hopsUsed: 0,
     maxHopsConfigured: 0,
     sanctionsHits: [],
-    nodes: [{ id: address, address, label: null, valueUsd: 0, hopDepth: 0, kind: "wallet" }],
+    nodes: [{ id: address, address, label: null, valueChf: 0, hopDepth: 0, kind: "wallet" }],
     edges: [],
     tracedAt,
   };
@@ -322,34 +361,39 @@ export async function traceBackward(
     return traceBitcoin(address);
   }
   if (chain === "solana") {
-    // For prototype, return empty trace for Solana with a stub note.
     return emptyTrace(address, "solana", tracedAt);
   }
 
-  // EVM trace
   const initialInflows = await loadIncomingEvm(address, chain);
   if (initialInflows.length === 0) {
     return emptyTrace(address, chain, tracedAt);
   }
   const aggHop1 = aggregateBySource(initialInflows);
-  const { sources: hop1, total } = topSources(aggHop1);
+  const { sources: hop1, total } = topSources(aggHop1.values);
 
   const tracedSources: TracedSource[] = [];
   const sanctionsHits: SanctionsHit[] = [];
   const nodes: FundFlowNode[] = [
-    { id: address, address, label: null, valueUsd: total, hopDepth: 0, kind: "wallet" },
+    { id: address, address, label: null, valueChf: total, hopDepth: 0, kind: "wallet" },
   ];
   const edges: FundFlowEdge[] = [];
   const seenNodeIds = new Set<string>([address]);
 
-  // Traverse sources BFS up to maxHopDepth
-  type Queue = Array<{ src: string; parent: string; valueUsd: number; depth: number; path: string[] }>;
+  type Queue = Array<{
+    src: string;
+    parent: string;
+    valueChf: number;
+    depth: number;
+    path: string[];
+    unpriced: boolean;
+  }>;
   const queue: Queue = hop1.map((s) => ({
     src: s.address,
     parent: address,
-    valueUsd: s.valueUsd,
+    valueChf: s.valueChf,
     depth: 1,
     path: [address, s.address],
+    unpriced: !!aggHop1.unpricedMask.get(s.address),
   }));
 
   let hopsUsed = 0;
@@ -364,13 +408,13 @@ export async function traceBackward(
         id: item.src,
         address: item.src,
         label,
-        valueUsd: item.valueUsd,
+        valueChf: item.valueChf,
         hopDepth: item.depth,
         kind: "source",
       });
       seenNodeIds.add(item.src);
     }
-    edges.push({ from: item.src, to: item.parent, valueUsd: item.valueUsd });
+    edges.push({ from: item.src, to: item.parent, valueChf: item.valueChf });
 
     if (label.sanctioned) {
       sanctionsHits.push({
@@ -380,97 +424,100 @@ export async function traceBackward(
       });
       tracedSources.push({
         address: item.src,
-        valueUsd: item.valueUsd,
-        percentage: total > 0 ? item.valueUsd / total : 0,
+        valueChf: item.valueChf,
+        percentage: total > 0 ? item.valueChf / total : 0,
         label,
         hopDepth: item.depth,
         path: item.path,
+        unpriced: item.unpriced,
       });
       continue;
     }
 
-    // Identified exchange -> STOP
     if (label.entityType === "exchange") {
       tracedSources.push({
         address: item.src,
-        valueUsd: item.valueUsd,
-        percentage: total > 0 ? item.valueUsd / total : 0,
+        valueChf: item.valueChf,
+        percentage: total > 0 ? item.valueChf / total : 0,
         label,
         hopDepth: item.depth,
         path: item.path,
+        unpriced: item.unpriced,
       });
       continue;
     }
 
-    // DEX/bridge/contract -> neutral, trace one more hop through it (unless at max)
     if (
-      (label.entityType === "dex" || label.entityType === "bridge" || label.entityType === "contract") &&
+      (label.entityType === "dex" ||
+        label.entityType === "bridge" ||
+        label.entityType === "contract") &&
       item.depth < maxHopDepth
     ) {
       const deeper = await loadIncomingEvm(item.src, chain);
       const agg = aggregateBySource(deeper);
-      const top = topSources(agg);
+      const top = topSources(agg.values);
       for (const s of top.sources.slice(0, 5)) {
         queue.push({
           src: s.address,
           parent: item.src,
-          valueUsd: s.valueUsd,
+          valueChf: s.valueChf,
           depth: item.depth + 1,
           path: [...item.path, s.address],
+          unpriced: !!agg.unpricedMask.get(s.address),
         });
       }
-      // Also record the intermediate neutral node as a passthrough
       continue;
     }
 
-    // Unknown -> continue deeper if hops remaining
     if (label.entityType === "unknown" && item.depth < maxHopDepth) {
       const deeper = await loadIncomingEvm(item.src, chain);
       if (deeper.length === 0) {
         tracedSources.push({
           address: item.src,
-          valueUsd: item.valueUsd,
-          percentage: total > 0 ? item.valueUsd / total : 0,
+          valueChf: item.valueChf,
+          percentage: total > 0 ? item.valueChf / total : 0,
           label,
           hopDepth: item.depth,
           path: item.path,
+          unpriced: item.unpriced,
         });
         continue;
       }
       const agg = aggregateBySource(deeper);
-      const top = topSources(agg);
+      const top = topSources(agg.values);
       for (const s of top.sources.slice(0, 5)) {
         queue.push({
           src: s.address,
           parent: item.src,
-          valueUsd: Math.min(s.valueUsd, item.valueUsd),
+          valueChf: Math.min(s.valueChf, item.valueChf),
           depth: item.depth + 1,
           path: [...item.path, s.address],
+          unpriced: !!agg.unpricedMask.get(s.address),
         });
       }
       continue;
     }
 
-    // Max hops reached or mixer
     tracedSources.push({
       address: item.src,
-      valueUsd: item.valueUsd,
-      percentage: total > 0 ? item.valueUsd / total : 0,
+      valueChf: item.valueChf,
+      percentage: total > 0 ? item.valueChf / total : 0,
       label,
       hopDepth: item.depth,
       path: item.path,
+      unpriced: item.unpriced,
     });
   }
 
   const attributed = tracedSources
     .filter((s) => s.label && s.label.entityType !== "unknown" && !s.label.sanctioned)
-    .reduce((acc, s) => acc + s.valueUsd, 0);
+    .reduce((acc, s) => acc + s.valueChf, 0);
 
   return {
     walletAddress: address,
     chain,
-    totalIncomingValueUsd: total,
-    attributedValueUsd: attributed,
+    totalIncomingValueChf: total,
+    attributedValueChf: attributed,
     attributedPercentage: total > 0 ? attributed / total : 0,
     sources: tracedSources,
     hopsUsed,

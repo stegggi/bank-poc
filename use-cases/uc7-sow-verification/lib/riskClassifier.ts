@@ -45,21 +45,21 @@ export function classifyTrace(
   // Tier breakdown
   const tierAValue = trace.sources
     .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === "A")
-    .reduce((sum, s) => sum + s.valueUsd, 0);
+    .reduce((sum, s) => sum + s.valueChf, 0);
 
   const tierBValue = trace.sources
     .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === "B")
-    .reduce((sum, s) => sum + s.valueUsd, 0);
+    .reduce((sum, s) => sum + s.valueChf, 0);
 
   const tierCValue = trace.sources
     .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === "C")
-    .reduce((sum, s) => sum + s.valueUsd, 0);
+    .reduce((sum, s) => sum + s.valueChf, 0);
 
   const dexBridgeValue = trace.sources
     .filter((s) => s.label?.entityType === "dex" || s.label?.entityType === "bridge")
-    .reduce((sum, s) => sum + s.valueUsd, 0);
+    .reduce((sum, s) => sum + s.valueChf, 0);
 
-  const total = trace.totalIncomingValueUsd || 1;
+  const total = trace.totalIncomingValueChf || 1;
   const tierCShare = tierCValue / total;
 
   const cov = trace.attributedPercentage;
