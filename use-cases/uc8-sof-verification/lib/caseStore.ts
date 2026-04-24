@@ -1,17 +1,10 @@
-import fs from "fs";
-import path from "path";
 import type { CaseFile, CaseSummary } from "./types";
+import { readJson, writeJson, listJson } from "./blobStore";
 
-const CASES_DIR = path.join(process.cwd(), "use-cases", "uc8-sof-verification", "data", "cases");
+const CASES_PREFIX = "cases/";
 
-function ensureDir() {
-  if (!fs.existsSync(CASES_DIR)) {
-    fs.mkdirSync(CASES_DIR, { recursive: true });
-  }
-}
-
-function caseFilePath(ref: string): string {
-  return path.join(CASES_DIR, `${ref}.json`);
+function casePath(ref: string): string {
+  return `${CASES_PREFIX}${ref}.json`;
 }
 
 function isValidRef(ref: string): boolean {
@@ -24,8 +17,10 @@ export function generateCaseReference(): string {
   return `SOF-${year}-${rand}`;
 }
 
-export function createCase(init: Omit<CaseFile, "createdAt" | "updatedAt" | "status"> & Partial<Pick<CaseFile, "status">>): CaseFile {
-  ensureDir();
+export async function createCase(
+  init: Omit<CaseFile, "createdAt" | "updatedAt" | "status"> &
+    Partial<Pick<CaseFile, "status">>
+): Promise<CaseFile> {
   const now = new Date().toISOString();
   const file: CaseFile = {
     ...init,
@@ -33,52 +28,35 @@ export function createCase(init: Omit<CaseFile, "createdAt" | "updatedAt" | "sta
     createdAt: now,
     updatedAt: now,
   };
-  fs.writeFileSync(caseFilePath(file.caseReference), JSON.stringify(file, null, 2));
+  await writeJson(casePath(file.caseReference), file);
   return file;
 }
 
-export function readCase(ref: string): CaseFile | null {
+export async function readCase(ref: string): Promise<CaseFile | null> {
   if (!isValidRef(ref)) return null;
-  ensureDir();
-  const p = caseFilePath(ref);
-  if (!fs.existsSync(p)) return null;
-  try {
-    return JSON.parse(fs.readFileSync(p, "utf-8")) as CaseFile;
-  } catch {
-    return null;
-  }
+  return await readJson<CaseFile>(casePath(ref));
 }
 
-export function writeCase(file: CaseFile): CaseFile {
+export async function writeCase(file: CaseFile): Promise<CaseFile> {
   if (!isValidRef(file.caseReference)) {
     throw new Error(`Invalid case reference: ${file.caseReference}`);
   }
-  ensureDir();
   file.updatedAt = new Date().toISOString();
-  fs.writeFileSync(caseFilePath(file.caseReference), JSON.stringify(file, null, 2));
+  await writeJson(casePath(file.caseReference), file);
   return file;
 }
 
-export function listCases(): CaseSummary[] {
-  ensureDir();
-  const files = fs.readdirSync(CASES_DIR).filter((f) => f.endsWith(".json"));
-  const summaries: CaseSummary[] = [];
-  for (const f of files) {
-    try {
-      const content = JSON.parse(fs.readFileSync(path.join(CASES_DIR, f), "utf-8")) as CaseFile;
-      summaries.push({
-        caseReference: content.caseReference,
-        clientName: content.clientName,
-        createdAt: content.createdAt,
-        updatedAt: content.updatedAt,
-        status: content.status,
-        walletCount: content.wallets?.length ?? 0,
-        overallRisk: content.overallRisk,
-      });
-    } catch {
-      // skip invalid file
-    }
-  }
+export async function listCases(): Promise<CaseSummary[]> {
+  const cases = await listJson<CaseFile>(CASES_PREFIX);
+  const summaries: CaseSummary[] = cases.map((c) => ({
+    caseReference: c.caseReference,
+    clientName: c.clientName,
+    createdAt: c.createdAt,
+    updatedAt: c.updatedAt,
+    status: c.status,
+    walletCount: c.wallets?.length ?? 0,
+    overallRisk: c.overallRisk,
+  }));
   summaries.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   return summaries;
 }

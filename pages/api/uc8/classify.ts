@@ -16,7 +16,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "caseReference is required" });
   }
 
-  const caseFile = readCase(caseReference);
+  const caseFile = await readCase(caseReference);
   if (!caseFile) return res.status(404).json({ error: "Case not found" });
 
   const wallets = address
@@ -33,7 +33,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   caseFile.overallRisk = aggregateRisk(caseFile.wallets.map((w) => w.classification));
   caseFile.status = "classified";
-  writeCase(caseFile);
+  await writeCase(caseFile);
 
   return res.status(200).json({
     classifications: wallets.map((w) => ({

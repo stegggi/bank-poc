@@ -44,6 +44,7 @@ and produces a FINMA-ready compliance report per client.
 ## Environment
 
 ```
+BLOB_READ_WRITE_TOKEN=   # Required in prod — case/challenge storage via Vercel Blob
 ETHERSCAN_API_KEY=       # Required for EVM scan + trace
 HELIUS_API_KEY=          # Optional, falls back to public RPC
 COINGECKO_API_KEY=       # Optional for price conversion
@@ -57,8 +58,10 @@ MAX_HOP_DEPTH=3
 - `data/exchange-tiers.json` — exchange classification DB (Tier A/B/C + known hot wallets)
 - `data/ofac-sdn-addresses.json` — OFAC SDN seed set
 - `data/known-dex-labels.json` — DEX routers, bridges, staking, tokens
-- `data/cases/{ref}.json` — per-case file store
-- `data/challenges/{id}.json` — per-challenge file store
+
+Cases and challenges are stored in Vercel Blob (`cases/{ref}.json`, `challenges/{id}.json`).
+Without `BLOB_READ_WRITE_TOKEN` set, the stores transparently fall back to local disk under
+`data/cases/` and `data/challenges/` for development.
 
 ## API routes
 

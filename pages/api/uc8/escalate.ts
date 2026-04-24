@@ -14,7 +14,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "caseReference and address are required" });
   }
 
-  const caseFile = readCase(caseReference);
+  const caseFile = await readCase(caseReference);
   if (!caseFile) return res.status(404).json({ error: "Case not found" });
   const wallet = caseFile.wallets.find(
     (w) => w.address.toLowerCase() === address.toLowerCase()
@@ -30,7 +30,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const report = await escalateAddress(address, chain);
     wallet.ttp = report;
     caseFile.status = "escalated";
-    writeCase(caseFile);
+    await writeCase(caseFile);
     return res.status(200).json({ report });
   } catch (err) {
     return res.status(500).json({

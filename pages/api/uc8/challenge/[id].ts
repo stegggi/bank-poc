@@ -7,7 +7,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(405).json({ error: "Method not allowed" });
   }
   const id = String(req.query.id || "");
-  const ch = readChallenge(id);
+  const ch = await readChallenge(id);
   if (!ch) return res.status(404).json({ error: "Challenge not found" });
   return res.status(200).json({ challenge: ch });
 }

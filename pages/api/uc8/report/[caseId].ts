@@ -9,7 +9,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const caseId = String(req.query.caseId || "");
-  const caseFile = readCase(caseId);
+  const caseFile = await readCase(caseId);
   if (!caseFile) return res.status(404).json({ error: "Case not found" });
 
   const html = generateReportHtml(caseFile);
@@ -18,7 +18,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     caseFile.reportGenerated = true;
     caseFile.reportGeneratedAt = new Date().toISOString();
     if (caseFile.status !== "escalated") caseFile.status = "completed";
-    writeCase(caseFile);
+    await writeCase(caseFile);
   }
 
   res.setHeader("content-type", "text/html; charset=utf-8");

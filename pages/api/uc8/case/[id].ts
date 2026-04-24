@@ -4,7 +4,7 @@ import type { CaseFile } from "../../../../use-cases/uc8-sof-verification/lib/ty
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const id = String(req.query.id || "");
-  const existing = readCase(id);
+  const existing = await readCase(id);
   if (!existing) {
     return res.status(404).json({ error: "Case not found" });
   }
@@ -23,7 +23,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       wallets: body.wallets ?? existing.wallets,
       settings: { ...existing.settings, ...(body.settings || {}) },
     };
-    const saved = writeCase(next);
+    const saved = await writeCase(next);
     return res.status(200).json({ case: saved });
   }
 

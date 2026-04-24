@@ -15,7 +15,7 @@ const DEFAULT_SETTINGS: CaseSettings = {
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method === "GET") {
-    const summaries = listCases();
+    const summaries = await listCases();
     return res.status(200).json({ cases: summaries });
   }
 
@@ -26,7 +26,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: "clientName is required" });
     }
     const caseReference = body.caseReference || generateCaseReference();
-    const file = createCase({
+    const file = await createCase({
       caseReference,
       clientName,
       wallets: [],

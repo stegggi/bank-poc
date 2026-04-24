@@ -16,7 +16,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "caseReference and address are required" });
   }
 
-  const caseFile = readCase(caseReference);
+  const caseFile = await readCase(caseReference);
   if (!caseFile) {
     return res.status(404).json({ error: "Case not found" });
   }
@@ -28,9 +28,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   const challenge = generateChallenge({ caseReference, address });
-  saveChallenge(challenge);
+  await saveChallenge(challenge);
   wallet.challenge = challenge;
-  writeCase(caseFile);
+  await writeCase(caseFile);
 
   return res.status(200).json({ challenge });
 }

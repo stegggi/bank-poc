@@ -17,7 +17,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(400).json({ error: "challengeId and signature are required" });
   }
 
-  const challenge = readChallenge(challengeId);
+  const challenge = await readChallenge(challengeId);
   if (!challenge) return res.status(404).json({ error: "Challenge not found" });
 
   const result = await verifySignature(challenge, signature, { publicKey });
@@ -29,17 +29,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     verifiedAt: result.ok ? new Date().toISOString() : undefined,
     failReason: result.ok ? undefined : result.error,
   };
-  updateChallenge(updated);
+  await updateChallenge(updated);
 
   // Mirror to case file
-  const caseFile = readCase(challenge.caseReference);
+  const caseFile = await readCase(challenge.caseReference);
   if (caseFile) {
     const wallet = caseFile.wallets.find(
       (w) => w.address.toLowerCase() === challenge.address.toLowerCase()
     );
     if (wallet) {
       wallet.challenge = updated;
-      writeCase(caseFile);
+      await writeCase(caseFile);
     }
   }
 
