@@ -4,87 +4,27 @@ import { detectChain } from "./chainDetect";
 type EvmChainConfig = {
   name: string;
   chainId: number;
-  symbol: string; // native token symbol for pricing
-  tokens: Array<{
-    symbol: string;
-    address: string; // lowercase
-    decimals: number;
-  }>;
+  symbol: string; // native token symbol
+  cgPlatform: string; // CoinGecko platform id for token-by-contract pricing
 };
 
-// Tracked token set: stablecoins + major wrapped assets on each chain.
-// Addresses are the canonical/native deployments; use lowercase.
+// Chain metadata. Tokens are discovered dynamically from each wallet's
+// transfer history rather than from a hard-coded list, so we can value any
+// ERC-20 (stablecoins, governance tokens, memes, custom assets) the wallet
+// actually holds.
 const EVM_CHAINS: EvmChainConfig[] = [
-  {
-    name: "ethereum",
-    chainId: 1,
-    symbol: "ETH",
-    tokens: [
-      { symbol: "USDC", address: "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", decimals: 6 },
-      { symbol: "USDT", address: "0xdac17f958d2ee523a2206206994597c13d831ec7", decimals: 6 },
-      { symbol: "DAI", address: "0x6b175474e89094c44da98b954eedeac495271d0f", decimals: 18 },
-      { symbol: "WETH", address: "0xc02aaa39b223fe8d0a0e5c4f27ead9083c756cc2", decimals: 18 },
-      { symbol: "WBTC", address: "0x2260fac5e5542a773aa44fbcfedf7c193bc2c599", decimals: 8 },
-    ],
-  },
-  {
-    name: "base",
-    chainId: 8453,
-    symbol: "ETH",
-    tokens: [
-      { symbol: "USDC", address: "0x833589fcd6edb6e08f4c7c32d4f71b54bda02913", decimals: 6 },
-      { symbol: "USDbC", address: "0xd9aaec86b65d86f6a7b5b1b0c42ffa531710b6ca", decimals: 6 },
-      { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
-      { symbol: "cbBTC", address: "0xcbb7c0000ab88b473b1f5afd9ef808440eed33bf", decimals: 8 },
-    ],
-  },
-  {
-    name: "arbitrum",
-    chainId: 42161,
-    symbol: "ETH",
-    tokens: [
-      { symbol: "USDC", address: "0xaf88d065e77c8cc2239327c5edb3a432268e5831", decimals: 6 },
-      { symbol: "USDT", address: "0xfd086bc7cd5c481dcc9c85ebe478a1c0b69fcbb9", decimals: 6 },
-      { symbol: "DAI", address: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", decimals: 18 },
-      { symbol: "WETH", address: "0x82af49447d8a07e3bd95bd0d56f35241523fbab1", decimals: 18 },
-      { symbol: "WBTC", address: "0x2f2a2543b76a4166549f7aab2e75bef0aefc5b0f", decimals: 8 },
-    ],
-  },
-  {
-    name: "polygon",
-    chainId: 137,
-    symbol: "MATIC",
-    tokens: [
-      { symbol: "USDC", address: "0x3c499c542cef5e3811e1192ce70d8cc03d5c3359", decimals: 6 },
-      { symbol: "USDT", address: "0xc2132d05d31c914a87c6611c10748aeb04b58e8f", decimals: 6 },
-      { symbol: "DAI", address: "0x8f3cf7ad23cd3cadbd9735aff958023239c6a063", decimals: 18 },
-      { symbol: "WETH", address: "0x7ceb23fd6bc0add59e62ac25578270cff1b9f619", decimals: 18 },
-    ],
-  },
-  {
-    name: "bsc",
-    chainId: 56,
-    symbol: "BNB",
-    tokens: [
-      { symbol: "USDT", address: "0x55d398326f99059ff775485246999027b3197955", decimals: 18 },
-      { symbol: "USDC", address: "0x8ac76a51cc950d9822d68b83fe1ad97b32cd580d", decimals: 18 },
-      { symbol: "DAI", address: "0x1af3f329e8be154074d8769d1ffa4ee058b1dbc3", decimals: 18 },
-      { symbol: "BTCB", address: "0x7130d2a12b9bcbfae4f2634d864a1ee1ce3ead9c", decimals: 18 },
-    ],
-  },
-  {
-    name: "optimism",
-    chainId: 10,
-    symbol: "ETH",
-    tokens: [
-      { symbol: "USDC", address: "0x0b2c639c533813f4aa9d7837caf62653d097ff85", decimals: 6 },
-      { symbol: "USDT", address: "0x94b008aa00579c1307b0ef2c499ad98a8ce58e58", decimals: 6 },
-      { symbol: "DAI", address: "0xda10009cbd5d07dd0cecc66161fc93d7c9000da1", decimals: 18 },
-      { symbol: "WETH", address: "0x4200000000000000000000000000000000000006", decimals: 18 },
-      { symbol: "WBTC", address: "0x68f180fcce6836688e9084f035309e29bf0a2095", decimals: 8 },
-    ],
-  },
+  { name: "ethereum", chainId: 1, symbol: "ETH", cgPlatform: "ethereum" },
+  { name: "base", chainId: 8453, symbol: "ETH", cgPlatform: "base" },
+  { name: "arbitrum", chainId: 42161, symbol: "ETH", cgPlatform: "arbitrum-one" },
+  { name: "polygon", chainId: 137, symbol: "MATIC", cgPlatform: "polygon-pos" },
+  { name: "bsc", chainId: 56, symbol: "BNB", cgPlatform: "binance-smart-chain" },
+  { name: "optimism", chainId: 10, symbol: "ETH", cgPlatform: "optimistic-ethereum" },
 ];
+
+// Cap concurrent Etherscan calls to stay within the 5 req/sec free-tier limit.
+const TOKEN_BALANCE_CONCURRENCY = 4;
+// How many distinct contracts per chain we query balances for (most recent first).
+const MAX_TOKENS_PER_CHAIN = 40;
 
 const STABLECOINS = new Set(["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "USDBC"]);
 
@@ -125,6 +65,60 @@ async function fetchChfPrice(cgId: string): Promise<number | null> {
   } catch {
     return null;
   }
+}
+
+// Contract-address price lookup. Cache key is `${platform}:${address}`.
+const contractPriceCache: Record<string, PriceCache> = {};
+
+async function fetchTokenPricesByContract(
+  platform: string,
+  contracts: string[]
+): Promise<Record<string, number>> {
+  if (contracts.length === 0) return {};
+  const out: Record<string, number> = {};
+  // Resolve from cache first
+  const fresh = Date.now();
+  const toFetch: string[] = [];
+  for (const c of contracts) {
+    const key = `${platform}:${c.toLowerCase()}`;
+    const hit = contractPriceCache[key];
+    if (hit && fresh - hit.fetchedAt < PRICE_TTL_MS) {
+      out[c.toLowerCase()] = hit.price;
+    } else {
+      toFetch.push(c.toLowerCase());
+    }
+  }
+  if (toFetch.length === 0) return out;
+
+  // CoinGecko allows up to 100 contracts per request; we batch in chunks of 50.
+  const chunkSize = 50;
+  for (let i = 0; i < toFetch.length; i += chunkSize) {
+    const chunk = toFetch.slice(i, i + chunkSize);
+    try {
+      const url = new URL(`https://api.coingecko.com/api/v3/simple/token_price/${platform}`);
+      url.searchParams.set("contract_addresses", chunk.join(","));
+      url.searchParams.set("vs_currencies", "chf");
+      const res = await fetch(url.toString(), {
+        headers: { accept: "application/json" },
+        cache: "no-store",
+      });
+      if (!res.ok) continue;
+      const json = (await res.json()) as Record<string, { chf?: number }>;
+      for (const addr of chunk) {
+        const price = json[addr]?.chf ?? 0;
+        out[addr] = price;
+        contractPriceCache[`${platform}:${addr}`] = { price, fetchedAt: Date.now() };
+      }
+    } catch {
+      // ignore — tokens for which we have no price simply stay at 0 (unpriced)
+    }
+  }
+  // Make sure every requested contract has an entry, even if 0.
+  for (const c of contracts) {
+    const k = c.toLowerCase();
+    if (!(k in out)) out[k] = 0;
+  }
+  return out;
 }
 
 export async function getPriceChf(symbol: string): Promise<number> {
@@ -205,6 +199,38 @@ async function etherscanTokenBalance(
   return json.result;
 }
 
+type RawTokenTx = {
+  contractAddress: string;
+  tokenSymbol: string;
+  tokenDecimal: string;
+  from: string;
+  to: string;
+  value: string;
+  timeStamp: string;
+};
+
+async function etherscanTokenTx(
+  address: string,
+  chainId: number,
+  apiKey: string
+): Promise<RawTokenTx[]> {
+  const url = new URL("https://api.etherscan.io/v2/api");
+  url.searchParams.set("chainid", String(chainId));
+  url.searchParams.set("module", "account");
+  url.searchParams.set("action", "tokentx");
+  url.searchParams.set("address", address);
+  url.searchParams.set("page", "1");
+  url.searchParams.set("offset", "300");
+  url.searchParams.set("sort", "desc");
+  url.searchParams.set("apikey", apiKey);
+
+  const res = await fetch(url.toString(), { cache: "no-store" });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { status: string; result: unknown };
+  if (!Array.isArray(json.result)) return [];
+  return json.result as RawTokenTx[];
+}
+
 async function etherscanTxCount(
   address: string,
   chainId: number,
@@ -227,27 +253,65 @@ async function etherscanTxCount(
   return 0;
 }
 
+type DiscoveredToken = {
+  contractAddress: string;
+  symbol: string;
+  decimals: number;
+};
+
+function uniqueRecentTokens(txs: RawTokenTx[], cap: number): DiscoveredToken[] {
+  const seen = new Map<string, DiscoveredToken>();
+  for (const tx of txs) {
+    const addr = (tx.contractAddress || "").toLowerCase();
+    if (!addr) continue;
+    if (seen.has(addr)) continue;
+    const decimals = Number(tx.tokenDecimal || "18");
+    if (!Number.isFinite(decimals) || decimals < 0 || decimals > 30) continue;
+    seen.set(addr, {
+      contractAddress: addr,
+      symbol: (tx.tokenSymbol || "").trim() || addr.slice(0, 8),
+      decimals,
+    });
+    if (seen.size >= cap) break;
+  }
+  return Array.from(seen.values());
+}
+
+async function batchTokenBalances(
+  address: string,
+  tokens: DiscoveredToken[],
+  chainId: number,
+  apiKey: string
+): Promise<Array<DiscoveredToken & { raw: string }>> {
+  const out: Array<DiscoveredToken & { raw: string }> = [];
+  let i = 0;
+  async function worker() {
+    while (i < tokens.length) {
+      const idx = i++;
+      const t = tokens[idx];
+      const raw = await etherscanTokenBalance(address, t.contractAddress, chainId, apiKey);
+      out[idx] = { ...t, raw };
+    }
+  }
+  const workers = Array.from(
+    { length: Math.min(TOKEN_BALANCE_CONCURRENCY, tokens.length) },
+    () => worker()
+  );
+  await Promise.all(workers);
+  return out;
+}
+
 async function scanEvmChain(
   address: string,
   chain: EvmChainConfig,
   apiKey: string
 ): Promise<ChainActivity> {
   try {
-    const nativePromise = etherscanBalance(address, chain.chainId, apiKey);
-    const txPromise = etherscanTxCount(address, chain.chainId, apiKey);
-    const tokenPromises = chain.tokens.map((t) =>
-      etherscanTokenBalance(address, t.address, chain.chainId, apiKey).then((raw) => ({
-        symbol: t.symbol,
-        address: t.address,
-        decimals: t.decimals,
-        raw,
-      }))
-    );
-
-    const [nativeWei, txCount, ...tokenResults] = await Promise.all([
-      nativePromise,
-      txPromise,
-      ...tokenPromises,
+    // 1. Native balance + tx count + token transfer history in parallel.
+    const [nativeWei, txCount, tokenTxs] = await Promise.all([
+      etherscanBalance(address, chain.chainId, apiKey),
+      etherscanTxCount(address, chain.chainId, apiKey),
+      etherscanTokenTx(address, chain.chainId, apiKey),
     ]);
 
     const wei = BigInt(nativeWei || "0");
@@ -255,25 +319,60 @@ async function scanEvmChain(
     const nativePrice = await getPriceChf(chain.symbol);
     const nativeBalanceChf = nativeAmount * nativePrice;
 
+    // Short-circuit if there's clearly no activity at all.
+    if (wei === BigInt(0) && tokenTxs.length === 0 && txCount === 0) {
+      return {
+        chain: chain.name,
+        chainId: chain.chainId,
+        nativeBalance: "0",
+        nativeBalanceChf: 0,
+        tokenBalances: [],
+        tokenValueChf: 0,
+        totalChf: 0,
+        txCount: 0,
+        hasActivity: false,
+      };
+    }
+
+    // 2. Discover unique token contracts from transfer history (most recent first).
+    const discovered = uniqueRecentTokens(tokenTxs, MAX_TOKENS_PER_CHAIN);
+
+    // 3. Fetch current balance for each, with bounded concurrency.
+    const withBalances = await batchTokenBalances(address, discovered, chain.chainId, apiKey);
+
+    // 4. Filter to non-zero, then price by contract address via CoinGecko.
+    const heldRaw = withBalances.filter((t) => {
+      try {
+        return BigInt(t.raw || "0") > BigInt(0);
+      } catch {
+        return false;
+      }
+    });
+
+    const priceMap = await fetchTokenPricesByContract(
+      chain.cgPlatform,
+      heldRaw.map((t) => t.contractAddress)
+    );
+
     const tokenBalances: TokenBalance[] = [];
-    for (const t of tokenResults as Array<{
-      symbol: string;
-      address: string;
-      decimals: number;
-      raw: string;
-    }>) {
-      const rawBig = BigInt(t.raw || "0");
-      if (rawBig === BigInt(0)) continue;
-      const amount = Number(rawBig) / Math.pow(10, t.decimals);
-      const price = await getPriceChf(t.symbol);
+    for (const t of heldRaw) {
+      const amount = Number(BigInt(t.raw)) / Math.pow(10, t.decimals);
+      let price = priceMap[t.contractAddress.toLowerCase()] ?? 0;
+      // For known stablecoins by symbol, fall back to peg if CoinGecko missed it.
+      if (price === 0 && STABLECOINS.has(t.symbol.toUpperCase())) {
+        price = await getPriceChf(t.symbol);
+      }
       const chf = amount * price;
       tokenBalances.push({
         symbol: t.symbol,
-        contractAddress: t.address,
+        contractAddress: t.contractAddress,
         amount,
         chf,
       });
     }
+
+    // Sort tokens by CHF descending for a tidy display.
+    tokenBalances.sort((a, b) => b.chf - a.chf);
 
     const tokenValueChf = tokenBalances.reduce((s, t) => s + t.chf, 0);
     const totalChf = nativeBalanceChf + tokenValueChf;

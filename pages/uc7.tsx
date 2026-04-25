@@ -564,11 +564,29 @@ function StepSetup({
                 )}
 
                 {hasScan && hasChains && (
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                    {chains.map((c) => (
-                      <ChainPill key={c.chain} chain={c} />
-                    ))}
-                  </div>
+                  <>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                      {chains.map((c) => (
+                        <ChainPill key={c.chain} chain={c} />
+                      ))}
+                    </div>
+                    <details style={{ marginTop: 10 }}>
+                      <summary
+                        style={{
+                          cursor: "pointer",
+                          fontSize: 12,
+                          color: "rgba(255,255,255,0.55)",
+                        }}
+                      >
+                        View holdings breakdown
+                      </summary>
+                      <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                        {chains.map((c) => (
+                          <ChainBreakdown key={c.chain} chain={c} />
+                        ))}
+                      </div>
+                    </details>
+                  </>
                 )}
 
                 {hasScan && !hasChains && !w.scan?.warning && (
@@ -629,6 +647,72 @@ function ChainPill({ chain }: { chain: ChainActivity }) {
       <span style={{ color: "rgba(255,255,255,0.55)" }}>·</span>
       <span>{formatChf(chain.totalChf)}</span>
     </span>
+  );
+}
+
+function ChainBreakdown({ chain }: { chain: ChainActivity }) {
+  const hasNative = Number(chain.nativeBalance) > 0;
+  const tokens = chain.tokenBalances;
+  return (
+    <div
+      style={{
+        background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderRadius: 6,
+        padding: "8px 10px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          color: "rgba(255,255,255,0.7)",
+          textTransform: "capitalize",
+          marginBottom: 6,
+        }}
+      >
+        {chain.chain} · {formatChf(chain.totalChf)}
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "2px 12px", fontSize: 12 }}>
+        {hasNative && (
+          <>
+            <span style={{ color: "rgba(255,255,255,0.85)" }}>Native</span>
+            <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
+              {Number(chain.nativeBalance).toLocaleString("de-CH", { maximumFractionDigits: 6 })}
+            </span>
+            <span style={{ color: "#fff", textAlign: "right" }}>{formatChf(chain.nativeBalanceChf)}</span>
+          </>
+        )}
+        {tokens.map((t) => (
+          <span key={t.contractAddress || t.symbol} style={{ display: "contents" }}>
+            <span
+              style={{ color: "rgba(255,255,255,0.85)" }}
+              title={t.contractAddress}
+            >
+              {t.symbol}
+              {t.chf === 0 && (
+                <span
+                  style={{
+                    marginLeft: 6,
+                    fontSize: 10,
+                    color: "#fbbf24",
+                    border: "1px solid rgba(245,158,11,0.3)",
+                    padding: "0 4px",
+                    borderRadius: 3,
+                  }}
+                >
+                  unpriced
+                </span>
+              )}
+            </span>
+            <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
+              {t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}
+            </span>
+            <span style={{ color: "#fff", textAlign: "right" }}>{formatChf(t.chf)}</span>
+          </span>
+        ))}
+      </div>
+    </div>
   );
 }
 
