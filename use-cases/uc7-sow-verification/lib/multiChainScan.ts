@@ -19,6 +19,8 @@ const EVM_CHAINS: EvmChainConfig[] = [
   { name: "polygon", chainId: 137, symbol: "MATIC", cgPlatform: "polygon-pos" },
   { name: "bsc", chainId: 56, symbol: "BNB", cgPlatform: "binance-smart-chain" },
   { name: "optimism", chainId: 10, symbol: "ETH", cgPlatform: "optimistic-ethereum" },
+  { name: "avalanche", chainId: 43114, symbol: "AVAX", cgPlatform: "avalanche" },
+  { name: "monad", chainId: 10143, symbol: "MON", cgPlatform: "monad" },
 ];
 
 // Cap concurrent Etherscan calls to stay within the 5 req/sec free-tier limit.
@@ -92,6 +94,10 @@ const FALLBACK_CHF: Record<string, number> = {
   SOL: 125,
   MATIC: 0.6,
   BNB: 530,
+  AVAX: 30,
+  WAVAX: 30,
+  MON: 0.03,
+  WMON: 0.03,
   USDC: 0.9,
   USDT: 0.9,
   DAI: 0.9,
@@ -196,9 +202,12 @@ const SYMBOL_TO_CG_ID: Record<string, string> = {
   SOL: "solana",
   WSOL: "wrapped-solana",
   AVAX: "avalanche-2",
+  WAVAX: "wrapped-avax",
   // L2 governance / native
   ARB: "arbitrum",
   OP: "optimism",
+  MON: "monad",
+  WMON: "monad",
   // DeFi blue chips
   UNI: "uniswap",
   AAVE: "aave",
