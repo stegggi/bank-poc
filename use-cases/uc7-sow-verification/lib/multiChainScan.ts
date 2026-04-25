@@ -22,9 +22,58 @@ const EVM_CHAINS: EvmChainConfig[] = [
 ];
 
 // Cap concurrent Etherscan calls to stay within the 5 req/sec free-tier limit.
-const TOKEN_BALANCE_CONCURRENCY = 4;
+const TOKEN_BALANCE_CONCURRENCY = 3;
 // How many distinct contracts per chain we query balances for (most recent first).
 const MAX_TOKENS_PER_CHAIN = 40;
+// Etherscan free-tier limit is 5 req/sec. We pace at ~4 req/sec to leave headroom.
+const ETHERSCAN_MIN_INTERVAL_MS = 260;
+const ETHERSCAN_MAX_RETRIES = 3;
+
+// Global FIFO rate-limiter: every Etherscan request waits its turn so we never
+// burst above ~4/sec across all chains and parallel workers.
+let etherscanQueueTail: Promise<void> = Promise.resolve();
+async function paceEtherscan(): Promise<void> {
+  let release: () => void = () => {};
+  const slot = new Promise<void>((res) => {
+    release = res;
+  });
+  const previous = etherscanQueueTail;
+  etherscanQueueTail = etherscanQueueTail.then(() => slot);
+  await previous;
+  setTimeout(release, ETHERSCAN_MIN_INTERVAL_MS);
+}
+
+type EtherscanResp = { status?: string; message?: string; result?: unknown };
+
+function isRateLimited(json: EtherscanResp): boolean {
+  if (typeof json.result === "string" && /Max\s*rate\s*limit/i.test(json.result)) return true;
+  if (typeof json.message === "string" && /rate\s*limit/i.test(json.message)) return true;
+  return false;
+}
+
+async function etherscanFetch(url: string): Promise<EtherscanResp | null> {
+  for (let attempt = 0; attempt < ETHERSCAN_MAX_RETRIES; attempt++) {
+    await paceEtherscan();
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (res.status === 429) {
+        // Backoff and retry
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        continue;
+      }
+      if (!res.ok) return null;
+      const json = (await res.json()) as EtherscanResp;
+      if (isRateLimited(json)) {
+        await new Promise((r) => setTimeout(r, 600 * (attempt + 1)));
+        continue;
+      }
+      return json;
+    } catch {
+      await new Promise((r) => setTimeout(r, 400 * (attempt + 1)));
+    }
+  }
+  return null;
+}
 
 const STABLECOINS = new Set(["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "USDBC"]);
 
@@ -158,23 +207,33 @@ export async function getPriceChf(symbol: string): Promise<number> {
   return fallback;
 }
 
+function buildEtherscanUrl(
+  chainId: number,
+  apiKey: string,
+  params: Record<string, string>
+): string {
+  const url = new URL("https://api.etherscan.io/v2/api");
+  url.searchParams.set("chainid", String(chainId));
+  url.searchParams.set("apikey", apiKey);
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+  return url.toString();
+}
+
 async function etherscanBalance(
   address: string,
   chainId: number,
   apiKey: string
 ): Promise<string> {
-  const url = new URL("https://api.etherscan.io/v2/api");
-  url.searchParams.set("chainid", String(chainId));
-  url.searchParams.set("module", "account");
-  url.searchParams.set("action", "balance");
-  url.searchParams.set("address", address);
-  url.searchParams.set("tag", "latest");
-  url.searchParams.set("apikey", apiKey);
-
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) return "0";
-  const json = (await res.json()) as { status: string; result: string };
-  return json.result ?? "0";
+  const json = await etherscanFetch(
+    buildEtherscanUrl(chainId, apiKey, {
+      module: "account",
+      action: "balance",
+      address,
+      tag: "latest",
+    })
+  );
+  if (!json || typeof json.result !== "string") return "0";
+  return /^\d+$/.test(json.result) ? json.result : "0";
 }
 
 async function etherscanTokenBalance(
@@ -183,20 +242,17 @@ async function etherscanTokenBalance(
   chainId: number,
   apiKey: string
 ): Promise<string> {
-  const url = new URL("https://api.etherscan.io/v2/api");
-  url.searchParams.set("chainid", String(chainId));
-  url.searchParams.set("module", "account");
-  url.searchParams.set("action", "tokenbalance");
-  url.searchParams.set("contractaddress", contractAddress);
-  url.searchParams.set("address", address);
-  url.searchParams.set("tag", "latest");
-  url.searchParams.set("apikey", apiKey);
-
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) return "0";
-  const json = (await res.json()) as { status: string; result: unknown };
-  if (typeof json.result !== "string" || !/^\d+$/.test(json.result)) return "0";
-  return json.result;
+  const json = await etherscanFetch(
+    buildEtherscanUrl(chainId, apiKey, {
+      module: "account",
+      action: "tokenbalance",
+      contractaddress: contractAddress,
+      address,
+      tag: "latest",
+    })
+  );
+  if (!json || typeof json.result !== "string") return "0";
+  return /^\d+$/.test(json.result) ? json.result : "0";
 }
 
 type RawTokenTx = {
@@ -214,20 +270,17 @@ async function etherscanTokenTx(
   chainId: number,
   apiKey: string
 ): Promise<RawTokenTx[]> {
-  const url = new URL("https://api.etherscan.io/v2/api");
-  url.searchParams.set("chainid", String(chainId));
-  url.searchParams.set("module", "account");
-  url.searchParams.set("action", "tokentx");
-  url.searchParams.set("address", address);
-  url.searchParams.set("page", "1");
-  url.searchParams.set("offset", "300");
-  url.searchParams.set("sort", "desc");
-  url.searchParams.set("apikey", apiKey);
-
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) return [];
-  const json = (await res.json()) as { status: string; result: unknown };
-  if (!Array.isArray(json.result)) return [];
+  const json = await etherscanFetch(
+    buildEtherscanUrl(chainId, apiKey, {
+      module: "account",
+      action: "tokentx",
+      address,
+      page: "1",
+      offset: "300",
+      sort: "desc",
+    })
+  );
+  if (!json || !Array.isArray(json.result)) return [];
   return json.result as RawTokenTx[];
 }
 
@@ -236,21 +289,18 @@ async function etherscanTxCount(
   chainId: number,
   apiKey: string
 ): Promise<number> {
-  const url = new URL("https://api.etherscan.io/v2/api");
-  url.searchParams.set("chainid", String(chainId));
-  url.searchParams.set("module", "account");
-  url.searchParams.set("action", "txlist");
-  url.searchParams.set("address", address);
-  url.searchParams.set("page", "1");
-  url.searchParams.set("offset", "1");
-  url.searchParams.set("sort", "desc");
-  url.searchParams.set("apikey", apiKey);
-
-  const res = await fetch(url.toString(), { cache: "no-store" });
-  if (!res.ok) return 0;
-  const json = (await res.json()) as { status: string; result: unknown };
-  if (Array.isArray(json.result)) return json.result.length > 0 ? 1 : 0;
-  return 0;
+  const json = await etherscanFetch(
+    buildEtherscanUrl(chainId, apiKey, {
+      module: "account",
+      action: "txlist",
+      address,
+      page: "1",
+      offset: "1",
+      sort: "desc",
+    })
+  );
+  if (!json || !Array.isArray(json.result)) return 0;
+  return (json.result as unknown[]).length > 0 ? 1 : 0;
 }
 
 type DiscoveredToken = {
@@ -525,9 +575,14 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
           "ETHERSCAN_API_KEY not configured on server. Add it to the environment and re-scan.",
       };
     }
-    const chains = await Promise.all(
-      EVM_CHAINS.map((c) => scanEvmChain(address, c, apiKey))
-    );
+    // Scan chains sequentially to keep total throughput under Etherscan's
+    // 5 req/sec free-tier limit. Bursting in parallel triggers rate-limit
+    // responses that silently zero out balances and missed tokens.
+    const chains: ChainActivity[] = [];
+    for (const c of EVM_CHAINS) {
+      // eslint-disable-next-line no-await-in-loop
+      chains.push(await scanEvmChain(address, c, apiKey));
+    }
     const active = chains.filter((c) => c.hasActivity);
     const total = active.reduce((s, c) => s + c.totalChf, 0);
     return {
@@ -570,4 +625,4 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
   };
 }
 
-export { EVM_CHAINS };
+export { EVM_CHAINS, etherscanFetch, buildEtherscanUrl };

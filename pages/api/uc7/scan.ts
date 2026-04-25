@@ -2,6 +2,10 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { detectChain } from "../../../use-cases/uc7-sow-verification/lib/chainDetect";
 import { scanWallet } from "../../../use-cases/uc7-sow-verification/lib/multiChainScan";
 
+// Sequential rate-limited scan across 6 EVM chains can take 10–25s.
+// Bump the Vercel function timeout above the default 10s.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("allow", "POST");

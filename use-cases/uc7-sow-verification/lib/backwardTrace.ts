@@ -7,7 +7,7 @@ import type {
   TracedSource,
 } from "./types";
 import { lookupAddress } from "./labelDatabase";
-import { getPriceChf } from "./multiChainScan";
+import { getPriceChf, etherscanFetch, buildEtherscanUrl } from "./multiChainScan";
 
 type EvmInflow = {
   from: string;
@@ -68,23 +68,10 @@ async function fetchEtherscan<T>(
 ): Promise<T | null> {
   const apiKey = process.env.ETHERSCAN_API_KEY;
   if (!apiKey) return null;
-  const url = new URL("https://api.etherscan.io/v2/api");
-  url.searchParams.set("chainid", String(chainId));
-  url.searchParams.set("apikey", apiKey);
-  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-
-  try {
-    const res = await fetch(url.toString(), {
-      headers: { accept: "application/json" },
-      cache: "no-store",
-    });
-    if (!res.ok) return null;
-    const json = (await res.json()) as { status: string; message?: string; result?: T };
-    if (!json.result) return null;
-    return json.result as T;
-  } catch {
-    return null;
-  }
+  const url = buildEtherscanUrl(chainId, apiKey, params);
+  const json = await etherscanFetch(url);
+  if (!json || json.result == null) return null;
+  return json.result as T;
 }
 
 type RawTx = {

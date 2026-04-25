@@ -2,6 +2,9 @@ import type { NextApiRequest, NextApiResponse } from "next";
 import { traceBackward } from "../../../use-cases/uc7-sow-verification/lib/backwardTrace";
 import { readCase, writeCase } from "../../../use-cases/uc7-sow-verification/lib/caseStore";
 
+// Multi-hop backward trace can take 30–60s with the Etherscan rate limiter.
+export const config = { maxDuration: 60 };
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   if (req.method !== "POST") {
     res.setHeader("allow", "POST");
