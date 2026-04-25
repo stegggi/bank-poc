@@ -21,6 +21,7 @@ export type TokenBalance = {
   contractAddress?: string;
   amount: number;
   chf: number;
+  suspicious?: boolean;
 };
 
 export type ChainActivity = {

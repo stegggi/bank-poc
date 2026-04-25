@@ -683,34 +683,50 @@ function ChainBreakdown({ chain }: { chain: ChainActivity }) {
             <span style={{ color: "#fff", textAlign: "right" }}>{formatChf(chain.nativeBalanceChf)}</span>
           </>
         )}
-        {tokens.map((t) => (
-          <span key={t.contractAddress || t.symbol} style={{ display: "contents" }}>
-            <span
-              style={{ color: "rgba(255,255,255,0.85)" }}
-              title={t.contractAddress}
-            >
-              {t.symbol}
-              {t.chf === 0 && (
-                <span
-                  style={{
-                    marginLeft: 6,
-                    fontSize: 10,
-                    color: "#fbbf24",
-                    border: "1px solid rgba(245,158,11,0.3)",
-                    padding: "0 4px",
-                    borderRadius: 3,
-                  }}
-                >
-                  unpriced
-                </span>
-              )}
+        {tokens.map((t) => {
+          const dim = !!t.suspicious;
+          const labelColor = dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.85)";
+          const valueColor = dim ? "rgba(255,255,255,0.4)" : "#fff";
+          return (
+            <span key={t.contractAddress || t.symbol} style={{ display: "contents" }}>
+              <span style={{ color: labelColor }} title={t.contractAddress}>
+                {t.symbol}
+                {t.suspicious ? (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 10,
+                      color: "#fca5a5",
+                      border: "1px solid rgba(239,68,68,0.4)",
+                      padding: "0 4px",
+                      borderRadius: 3,
+                    }}
+                    title="Likely airdrop spam — excluded from total"
+                  >
+                    spam
+                  </span>
+                ) : t.chf === 0 ? (
+                  <span
+                    style={{
+                      marginLeft: 6,
+                      fontSize: 10,
+                      color: "#fbbf24",
+                      border: "1px solid rgba(245,158,11,0.3)",
+                      padding: "0 4px",
+                      borderRadius: 3,
+                    }}
+                  >
+                    unpriced
+                  </span>
+                ) : null}
+              </span>
+              <span style={{ color: dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
+                {t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}
+              </span>
+              <span style={{ color: valueColor, textAlign: "right" }}>{formatChf(t.chf)}</span>
             </span>
-            <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
-              {t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}
-            </span>
-            <span style={{ color: "#fff", textAlign: "right" }}>{formatChf(t.chf)}</span>
-          </span>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

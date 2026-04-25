@@ -102,11 +102,18 @@ const FALLBACK_CHF: Record<string, number> = {
   WETH: 3100,
 };
 
+function coingeckoHeaders(): HeadersInit {
+  const key = process.env.COINGECKO_API_KEY;
+  const headers: Record<string, string> = { accept: "application/json" };
+  if (key) headers["x-cg-demo-api-key"] = key;
+  return headers;
+}
+
 async function fetchChfPrice(cgId: string): Promise<number | null> {
   try {
     const res = await fetch(
       `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=chf`,
-      { headers: { accept: "application/json" }, cache: "no-store" }
+      { headers: coingeckoHeaders(), cache: "no-store" }
     );
     if (!res.ok) return null;
     const json = (await res.json()) as Record<string, { chf?: number }>;
@@ -148,7 +155,7 @@ async function fetchTokenPricesByContract(
       url.searchParams.set("contract_addresses", chunk.join(","));
       url.searchParams.set("vs_currencies", "chf");
       const res = await fetch(url.toString(), {
-        headers: { accept: "application/json" },
+        headers: coingeckoHeaders(),
         cache: "no-store",
       });
       if (!res.ok) continue;
@@ -170,6 +177,79 @@ async function fetchTokenPricesByContract(
   return out;
 }
 
+// Symbol → CoinGecko coin ID. Only legit, well-known symbols belong here so
+// we can confidently fall back to symbol-based pricing when contract lookup
+// fails (rate limit, missing platform coverage, etc.). Adding scam-token
+// symbols here would risk pricing airdrop spam.
+const SYMBOL_TO_CG_ID: Record<string, string> = {
+  // Native / wrapped / majors
+  ETH: "ethereum",
+  WETH: "weth",
+  MATIC: "matic-network",
+  POL: "matic-network",
+  BNB: "binancecoin",
+  WBNB: "wbnb",
+  BTC: "bitcoin",
+  WBTC: "wrapped-bitcoin",
+  BTCB: "bitcoin-bep2",
+  CBBTC: "coinbase-wrapped-btc",
+  SOL: "solana",
+  WSOL: "wrapped-solana",
+  AVAX: "avalanche-2",
+  // L2 governance / native
+  ARB: "arbitrum",
+  OP: "optimism",
+  // DeFi blue chips
+  UNI: "uniswap",
+  AAVE: "aave",
+  LINK: "chainlink",
+  CRV: "curve-dao-token",
+  COMP: "compound-governance-token",
+  MKR: "maker",
+  SNX: "havven",
+  GRT: "the-graph",
+  LDO: "lido-dao",
+  "1INCH": "1inch",
+  BAL: "balancer",
+  SUSHI: "sushi",
+  YFI: "yearn-finance",
+  ENS: "ethereum-name-service",
+  APE: "apecoin",
+  RPL: "rocket-pool",
+  IMX: "immutable-x",
+  // Memes / common holdings
+  PEPE: "pepe",
+  SHIB: "shiba-inu",
+  DOGE: "dogecoin",
+  // Liquid staking / wrapped ETH variants
+  STETH: "staked-ether",
+  WSTETH: "wrapped-steth",
+  RETH: "rocket-pool-eth",
+  CBETH: "coinbase-wrapped-staked-eth",
+  // Cross-chain assets
+  FET: "fetch-ai",
+};
+
+export function isKnownSymbol(symbol: string): boolean {
+  return symbol.toUpperCase() in SYMBOL_TO_CG_ID;
+}
+
+// Reject symbols that contain non-ASCII letters (Cyrillic look-alikes used
+// in airdrop scam impersonation tokens like "UЅDС") or that contain URLs /
+// telegram handles in the symbol itself. When a wallet is dusted with such
+// tokens we never want to apply a real-token price to them.
+export function isLikelyLegitSymbol(rawSymbol: string): boolean {
+  const trimmed = (rawSymbol || "").trim();
+  if (!trimmed) return false;
+  // Must be ASCII letters/digits/hyphen/underscore/dot/space only.
+  if (!/^[A-Za-z0-9._\- ]+$/.test(trimmed)) return false;
+  // No URL-ish or "claim" markers.
+  if (/(https?:|t\.me|claim|visit|airdrop|reward|🎁|💰)/i.test(trimmed)) return false;
+  // Reasonable length.
+  if (trimmed.length > 12) return false;
+  return true;
+}
+
 export async function getPriceChf(symbol: string): Promise<number> {
   const key = symbol.toUpperCase();
   const hit = priceCache[key];
@@ -182,18 +262,7 @@ export async function getPriceChf(symbol: string): Promise<number> {
     return p;
   }
 
-  const idMap: Record<string, string> = {
-    ETH: "ethereum",
-    WETH: "weth",
-    MATIC: "matic-network",
-    BNB: "binancecoin",
-    BTC: "bitcoin",
-    WBTC: "wrapped-bitcoin",
-    BTCB: "bitcoin-bep2",
-    CBBTC: "coinbase-wrapped-btc",
-    SOL: "solana",
-  };
-  const cgId = idMap[key];
+  const cgId = SYMBOL_TO_CG_ID[key];
   if (cgId) {
     const chf = await fetchChfPrice(cgId);
     if (chf != null && chf > 0) {
@@ -408,23 +477,40 @@ async function scanEvmChain(
     for (const t of heldRaw) {
       const amount = Number(BigInt(t.raw)) / Math.pow(10, t.decimals);
       let price = priceMap[t.contractAddress.toLowerCase()] ?? 0;
-      // For known stablecoins by symbol, fall back to peg if CoinGecko missed it.
-      if (price === 0 && STABLECOINS.has(t.symbol.toUpperCase())) {
-        price = await getPriceChf(t.symbol);
+      const upper = t.symbol.toUpperCase();
+      const looksLegit = isLikelyLegitSymbol(t.symbol);
+      // Fallback chain when contract pricing missed:
+      //   1. Stablecoin pegged-to-USD price (only if symbol passes spam check).
+      //   2. Known popular symbol (ARB, OP, UNI, …) via CoinGecko by ID.
+      if (price === 0 && STABLECOINS.has(upper) && looksLegit) {
+        price = await getPriceChf(upper);
+      } else if (price === 0 && isKnownSymbol(upper) && looksLegit) {
+        price = await getPriceChf(upper);
       }
       const chf = amount * price;
+      // Treat tokens that fail the legit-symbol check as airdrop spam.
+      // CHF must stay zero — ignoring `chf > 0` defends against price oracles
+      // that mistakenly quote impersonation contracts.
+      const suspicious = !looksLegit;
       tokenBalances.push({
         symbol: t.symbol,
         contractAddress: t.contractAddress,
         amount,
-        chf,
+        chf: suspicious ? 0 : chf,
+        suspicious,
       });
     }
 
-    // Sort tokens by CHF descending for a tidy display.
-    tokenBalances.sort((a, b) => b.chf - a.chf);
+    // Sort tokens by CHF descending; suspicious items sink to the bottom.
+    tokenBalances.sort((a, b) => {
+      if (!!a.suspicious !== !!b.suspicious) return a.suspicious ? 1 : -1;
+      return b.chf - a.chf;
+    });
 
-    const tokenValueChf = tokenBalances.reduce((s, t) => s + t.chf, 0);
+    // Total only counts non-suspicious balances.
+    const tokenValueChf = tokenBalances
+      .filter((t) => !t.suspicious)
+      .reduce((s, t) => s + t.chf, 0);
     const totalChf = nativeBalanceChf + tokenValueChf;
 
     return {
