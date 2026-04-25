@@ -10,7 +10,7 @@ import NavBar from "../shared/components/NavBar";
 import FundFlowDiagram from "../use-cases/uc7-sow-verification/components/FundFlowDiagram";
 import ExchangeTierBadge from "../use-cases/uc7-sow-verification/components/ExchangeTierBadge";
 import { detectChain, chainFamilyLabel } from "../use-cases/uc7-sow-verification/lib/chainDetect";
-import { formatChf } from "../use-cases/uc7-sow-verification/lib/format";
+import { formatChf, formatMoney, type Currency } from "../use-cases/uc7-sow-verification/lib/format";
 import type {
   CaseFile,
   CaseSummary,
@@ -35,12 +35,31 @@ const STEP_LABELS: Record<Step, string> = {
 
 const UC7_ACCENT = "#ec4899";
 
+function useCurrency(): [Currency, (c: Currency) => void] {
+  const [currency, setCurrencyState] = useState<Currency>("CHF");
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem("uc7:currency");
+    if (stored === "CHF" || stored === "USD") setCurrencyState(stored);
+  }, []);
+  const setCurrency = useCallback((c: Currency) => {
+    setCurrencyState(c);
+    if (typeof window !== "undefined") window.localStorage.setItem("uc7:currency", c);
+  }, []);
+  return [currency, setCurrency];
+}
+
+function pickValue(chf: number, usd: number, currency: Currency): number {
+  return currency === "USD" ? usd : chf;
+}
+
 export default function Uc7Page() {
   const [cases, setCases] = useState<CaseSummary[]>([]);
   const [activeCase, setActiveCase] = useState<CaseFile | null>(null);
   const [step, setStep] = useState<Step>("setup");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [currency, setCurrency] = useCurrency();
 
   const loadCases = useCallback(async () => {
     try {
@@ -82,12 +101,17 @@ export default function Uc7Page() {
       <NavBar active="uc7" />
       <main style={pageRoot}>
         <header style={headerWrap}>
-          <div style={eyebrow}>UC7 · Source of Wealth Verification</div>
-          <h1 style={h1}>Crypto Onboarding · Source of Wealth</h1>
-          <p style={subtitle}>
-            Verify wallet ownership, trace incoming wealth to regulated sources, classify risk, and produce
-            a FINMA-ready compliance report per client. All values shown in CHF.
-          </p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 280 }}>
+              <div style={eyebrow}>UC7 · Source of Wealth Verification</div>
+              <h1 style={h1}>Crypto Onboarding · Source of Wealth</h1>
+              <p style={subtitle}>
+                Verify wallet ownership, trace incoming wealth to regulated sources, classify risk, and produce
+                a FINMA-ready compliance report per client. The compliance PDF is always denominated in CHF.
+              </p>
+            </div>
+            <CurrencyToggle currency={currency} onChange={setCurrency} />
+          </div>
         </header>
 
         <div style={contentWrap}>
@@ -144,6 +168,7 @@ export default function Uc7Page() {
                     setActiveCase={setActiveCase}
                     onUpdated={refreshCase}
                     onNext={() => setStep("ownership")}
+                    currency={currency}
                   />
                 )}
                 {step === "ownership" && (
@@ -187,6 +212,57 @@ export default function Uc7Page() {
         </div>
       </main>
     </>
+  );
+}
+
+/* ── Currency toggle ── */
+function CurrencyToggle({
+  currency,
+  onChange,
+}: {
+  currency: Currency;
+  onChange: (c: Currency) => void;
+}) {
+  const item = (label: Currency) => {
+    const active = currency === label;
+    return (
+      <button
+        key={label}
+        onClick={() => onChange(label)}
+        style={{
+          padding: "6px 14px",
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: "0.04em",
+          border: "none",
+          background: active ? "rgba(255,255,255,0.12)" : "transparent",
+          color: active ? "#fff" : "rgba(255,255,255,0.55)",
+          cursor: active ? "default" : "pointer",
+          borderRadius: 6,
+        }}
+        aria-pressed={active}
+      >
+        {label}
+      </button>
+    );
+  };
+  return (
+    <div
+      style={{
+        display: "inline-flex",
+        gap: 2,
+        padding: 3,
+        border: "1px solid rgba(255,255,255,0.12)",
+        background: "rgba(255,255,255,0.04)",
+        borderRadius: 8,
+        marginTop: 4,
+      }}
+      role="group"
+      aria-label="Display currency"
+    >
+      {item("CHF")}
+      {item("USD")}
+    </div>
   );
 }
 
@@ -355,11 +431,13 @@ function StepSetup({
   setActiveCase,
   onUpdated,
   onNext,
+  currency,
 }: {
   caseFile: CaseFile;
   setActiveCase: (c: CaseFile) => void;
   onUpdated: (ref: string) => void;
   onNext: () => void;
+  currency: Currency;
 }) {
   const [addr, setAddr] = useState("");
   const [scanning, setScanning] = useState(false);
@@ -541,7 +619,14 @@ function StepSetup({
                     </div>
                     {hasScan && (
                       <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginTop: 8 }}>
-                        {formatChf(w.scan!.totalValueChf)}
+                        {formatMoney(
+                          pickValue(
+                            w.scan!.totalValueChf,
+                            w.scan!.totalValueUsd ?? 0,
+                            currency
+                          ),
+                          currency
+                        )}
                       </div>
                     )}
                   </div>
@@ -567,7 +652,7 @@ function StepSetup({
                   <>
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                       {chains.map((c) => (
-                        <ChainPill key={c.chain} chain={c} />
+                        <ChainPill key={c.chain} chain={c} currency={currency} />
                       ))}
                     </div>
                     <details style={{ marginTop: 10 }}>
@@ -582,7 +667,7 @@ function StepSetup({
                       </summary>
                       <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
                         {chains.map((c) => (
-                          <ChainBreakdown key={c.chain} chain={c} />
+                          <ChainBreakdown key={c.chain} chain={c} currency={currency} />
                         ))}
                       </div>
                     </details>
@@ -615,15 +700,18 @@ function StepSetup({
   );
 }
 
-function ChainPill({ chain }: { chain: ChainActivity }) {
+function ChainPill({ chain, currency }: { chain: ChainActivity; currency: Currency }) {
+  const total = pickValue(chain.totalChf, chain.totalUsd ?? 0, currency);
+  const native = pickValue(chain.nativeBalanceChf, chain.nativeBalanceUsd ?? 0, currency);
+  const tokens = pickValue(chain.tokenValueChf, chain.tokenValueUsd ?? 0, currency);
   const tokenSummary = chain.tokenBalances
-    .filter((t) => t.chf > 0)
+    .filter((t) => (currency === "USD" ? (t.usd ?? 0) : t.chf) > 0)
     .map((t) => `${t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })} ${t.symbol}`)
     .join(", ");
   const title = [
     `${chain.chain}`,
-    `Native: ${chain.nativeBalance} (${formatChf(chain.nativeBalanceChf)})`,
-    tokenSummary ? `Tokens: ${tokenSummary} (${formatChf(chain.tokenValueChf)})` : null,
+    `Native: ${chain.nativeBalance} (${formatMoney(native, currency)})`,
+    tokenSummary ? `Tokens: ${tokenSummary} (${formatMoney(tokens, currency)})` : null,
   ]
     .filter(Boolean)
     .join("\n");
@@ -645,14 +733,16 @@ function ChainPill({ chain }: { chain: ChainActivity }) {
     >
       <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{chain.chain}</span>
       <span style={{ color: "rgba(255,255,255,0.55)" }}>·</span>
-      <span>{formatChf(chain.totalChf)}</span>
+      <span>{formatMoney(total, currency)}</span>
     </span>
   );
 }
 
-function ChainBreakdown({ chain }: { chain: ChainActivity }) {
+function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: Currency }) {
   const hasNative = Number(chain.nativeBalance) > 0;
   const tokens = chain.tokenBalances;
+  const totalForCurrency = pickValue(chain.totalChf, chain.totalUsd ?? 0, currency);
+  const nativeForCurrency = pickValue(chain.nativeBalanceChf, chain.nativeBalanceUsd ?? 0, currency);
   return (
     <div
       style={{
@@ -671,7 +761,7 @@ function ChainBreakdown({ chain }: { chain: ChainActivity }) {
           marginBottom: 6,
         }}
       >
-        {chain.chain} · {formatChf(chain.totalChf)}
+        {chain.chain} · {formatMoney(totalForCurrency, currency)}
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "2px 12px", fontSize: 12 }}>
         {hasNative && (
@@ -680,13 +770,17 @@ function ChainBreakdown({ chain }: { chain: ChainActivity }) {
             <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
               {Number(chain.nativeBalance).toLocaleString("de-CH", { maximumFractionDigits: 6 })}
             </span>
-            <span style={{ color: "#fff", textAlign: "right" }}>{formatChf(chain.nativeBalanceChf)}</span>
+            <span style={{ color: "#fff", textAlign: "right" }}>
+              {formatMoney(nativeForCurrency, currency)}
+            </span>
           </>
         )}
         {tokens.map((t) => {
           const dim = !!t.suspicious;
           const labelColor = dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.85)";
           const valueColor = dim ? "rgba(255,255,255,0.4)" : "#fff";
+          const tokenValue = pickValue(t.chf, t.usd ?? 0, currency);
+          const isUnpriced = !t.suspicious && t.chf === 0 && (t.usd ?? 0) === 0;
           return (
             <span key={t.contractAddress || t.symbol} style={{ display: "contents" }}>
               <span style={{ color: labelColor }} title={t.contractAddress}>
@@ -705,7 +799,7 @@ function ChainBreakdown({ chain }: { chain: ChainActivity }) {
                   >
                     spam
                   </span>
-                ) : t.chf === 0 ? (
+                ) : isUnpriced ? (
                   <span
                     style={{
                       marginLeft: 6,
@@ -723,7 +817,9 @@ function ChainBreakdown({ chain }: { chain: ChainActivity }) {
               <span style={{ color: dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
                 {t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}
               </span>
-              <span style={{ color: valueColor, textAlign: "right" }}>{formatChf(t.chf)}</span>
+              <span style={{ color: valueColor, textAlign: "right" }}>
+                {formatMoney(tokenValue, currency)}
+              </span>
             </span>
           );
         })}

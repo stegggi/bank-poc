@@ -21,6 +21,7 @@ export type TokenBalance = {
   contractAddress?: string;
   amount: number;
   chf: number;
+  usd: number;
   suspicious?: boolean;
 };
 
@@ -29,9 +30,12 @@ export type ChainActivity = {
   chainId?: number;
   nativeBalance: string;
   nativeBalanceChf: number;
+  nativeBalanceUsd: number;
   tokenBalances: TokenBalance[];
   tokenValueChf: number;
+  tokenValueUsd: number;
   totalChf: number;
+  totalUsd: number;
   txCount: number;
   hasActivity: boolean;
 };
@@ -41,6 +45,7 @@ export type WalletScanResult = {
   chainFamily: ChainFamily;
   chains: ChainActivity[];
   totalValueChf: number;
+  totalValueUsd: number;
   scannedAt: string;
   warning?: string;
 };

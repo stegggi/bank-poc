@@ -1,10 +1,28 @@
-export function formatChf(n: number, opts: { decimals?: number } = {}): string {
-  if (!Number.isFinite(n)) return "CHF –";
+export type Currency = "CHF" | "USD";
+
+export function formatMoney(
+  n: number,
+  currency: Currency = "CHF",
+  opts: { decimals?: number } = {}
+): string {
+  if (!Number.isFinite(n)) return currency === "USD" ? "$ –" : "CHF –";
+  const decimals = opts.decimals ?? 0;
+  if (currency === "USD") {
+    const formatted = n.toLocaleString("en-US", {
+      minimumFractionDigits: decimals,
+      maximumFractionDigits: decimals,
+    });
+    return `$${formatted}`;
+  }
   const formatted = n.toLocaleString("de-CH", {
-    minimumFractionDigits: opts.decimals ?? 0,
-    maximumFractionDigits: opts.decimals ?? 0,
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals,
   });
   return `CHF ${formatted}`;
+}
+
+export function formatChf(n: number, opts: { decimals?: number } = {}): string {
+  return formatMoney(n, "CHF", opts);
 }
 
 export function formatChfCompact(n: number): string {

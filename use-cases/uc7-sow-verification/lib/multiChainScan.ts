@@ -79,33 +79,39 @@ async function etherscanFetch(url: string): Promise<EtherscanResp | null> {
 
 const STABLECOINS = new Set(["USDC", "USDT", "DAI", "BUSD", "FDUSD", "PYUSD", "USDBC"]);
 
-// Price cache in CHF (in-memory, short TTL)
-type PriceCache = { price: number; fetchedAt: number };
+// Price cache (in-memory, short TTL). Stores CHF and USD per symbol.
+export type DualPrice = { chf: number; usd: number };
+type PriceCache = { price: DualPrice; fetchedAt: number };
 const priceCache: Record<string, PriceCache> = {};
 const PRICE_TTL_MS = 5 * 60 * 1000;
+// USD/CHF approximate FX (used to derive missing currency when CoinGecko
+// only returned one of the two). Refreshed opportunistically on each ETH price
+// fetch via the inferred ratio chf/usd.
+let dynamicUsdPerChf = 1.10; // 1 CHF ≈ 1.10 USD (CHF is stronger than USD)
 
-// Static fallback CHF prices (approximate, used when CoinGecko unavailable).
-const FALLBACK_CHF: Record<string, number> = {
-  ETH: 3100,
-  BTC: 58000,
-  WBTC: 58000,
-  BTCB: 58000,
-  CBBTC: 58000,
-  SOL: 125,
-  MATIC: 0.6,
-  BNB: 530,
-  AVAX: 30,
-  WAVAX: 30,
-  MON: 0.03,
-  WMON: 0.03,
-  USDC: 0.9,
-  USDT: 0.9,
-  DAI: 0.9,
-  BUSD: 0.9,
-  FDUSD: 0.9,
-  PYUSD: 0.9,
-  USDBC: 0.9,
-  WETH: 3100,
+// Static fallback prices (approximate, used when CoinGecko unavailable).
+// First number is CHF, second is USD.
+const FALLBACK_PRICE: Record<string, DualPrice> = {
+  ETH: { chf: 3100, usd: 3400 },
+  BTC: { chf: 58000, usd: 64000 },
+  WBTC: { chf: 58000, usd: 64000 },
+  BTCB: { chf: 58000, usd: 64000 },
+  CBBTC: { chf: 58000, usd: 64000 },
+  SOL: { chf: 125, usd: 138 },
+  MATIC: { chf: 0.6, usd: 0.66 },
+  BNB: { chf: 530, usd: 580 },
+  AVAX: { chf: 30, usd: 33 },
+  WAVAX: { chf: 30, usd: 33 },
+  MON: { chf: 0.03, usd: 0.033 },
+  WMON: { chf: 0.03, usd: 0.033 },
+  USDC: { chf: 0.9, usd: 1 },
+  USDT: { chf: 0.9, usd: 1 },
+  DAI: { chf: 0.9, usd: 1 },
+  BUSD: { chf: 0.9, usd: 1 },
+  FDUSD: { chf: 0.9, usd: 1 },
+  PYUSD: { chf: 0.9, usd: 1 },
+  USDBC: { chf: 0.9, usd: 1 },
+  WETH: { chf: 3100, usd: 3400 },
 };
 
 function coingeckoHeaders(): HeadersInit {
@@ -115,18 +121,32 @@ function coingeckoHeaders(): HeadersInit {
   return headers;
 }
 
-async function fetchChfPrice(cgId: string): Promise<number | null> {
+async function fetchPriceById(cgId: string): Promise<DualPrice | null> {
   try {
     const res = await fetch(
-      `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=chf`,
+      `https://api.coingecko.com/api/v3/simple/price?ids=${cgId}&vs_currencies=chf,usd`,
       { headers: coingeckoHeaders(), cache: "no-store" }
     );
     if (!res.ok) return null;
-    const json = (await res.json()) as Record<string, { chf?: number }>;
-    return json[cgId]?.chf ?? null;
+    const json = (await res.json()) as Record<string, { chf?: number; usd?: number }>;
+    const r = json[cgId];
+    if (!r) return null;
+    const chf = typeof r.chf === "number" ? r.chf : 0;
+    const usd = typeof r.usd === "number" ? r.usd : 0;
+    if (chf > 0 && usd > 0) {
+      // Refresh global FX hint from a real quote.
+      dynamicUsdPerChf = usd / chf;
+    }
+    return fillMissing({ chf, usd });
   } catch {
     return null;
   }
+}
+
+function fillMissing(p: DualPrice): DualPrice {
+  if (p.chf > 0 && p.usd === 0) return { chf: p.chf, usd: p.chf * dynamicUsdPerChf };
+  if (p.usd > 0 && p.chf === 0) return { chf: p.usd / dynamicUsdPerChf, usd: p.usd };
+  return p;
 }
 
 // Contract-address price lookup. Cache key is `${platform}:${address}`.
@@ -135,10 +155,9 @@ const contractPriceCache: Record<string, PriceCache> = {};
 async function fetchTokenPricesByContract(
   platform: string,
   contracts: string[]
-): Promise<Record<string, number>> {
+): Promise<Record<string, DualPrice>> {
   if (contracts.length === 0) return {};
-  const out: Record<string, number> = {};
-  // Resolve from cache first
+  const out: Record<string, DualPrice> = {};
   const fresh = Date.now();
   const toFetch: string[] = [];
   for (const c of contracts) {
@@ -152,33 +171,35 @@ async function fetchTokenPricesByContract(
   }
   if (toFetch.length === 0) return out;
 
-  // CoinGecko allows up to 100 contracts per request; we batch in chunks of 50.
   const chunkSize = 50;
   for (let i = 0; i < toFetch.length; i += chunkSize) {
     const chunk = toFetch.slice(i, i + chunkSize);
     try {
       const url = new URL(`https://api.coingecko.com/api/v3/simple/token_price/${platform}`);
       url.searchParams.set("contract_addresses", chunk.join(","));
-      url.searchParams.set("vs_currencies", "chf");
+      url.searchParams.set("vs_currencies", "chf,usd");
       const res = await fetch(url.toString(), {
         headers: coingeckoHeaders(),
         cache: "no-store",
       });
       if (!res.ok) continue;
-      const json = (await res.json()) as Record<string, { chf?: number }>;
+      const json = (await res.json()) as Record<string, { chf?: number; usd?: number }>;
       for (const addr of chunk) {
-        const price = json[addr]?.chf ?? 0;
+        const raw = json[addr] || {};
+        const price = fillMissing({
+          chf: typeof raw.chf === "number" ? raw.chf : 0,
+          usd: typeof raw.usd === "number" ? raw.usd : 0,
+        });
         out[addr] = price;
         contractPriceCache[`${platform}:${addr}`] = { price, fetchedAt: Date.now() };
       }
     } catch {
-      // ignore — tokens for which we have no price simply stay at 0 (unpriced)
+      // ignore — tokens for which we have no price stay at zero (unpriced)
     }
   }
-  // Make sure every requested contract has an entry, even if 0.
   for (const c of contracts) {
     const k = c.toLowerCase();
-    if (!(k in out)) out[k] = 0;
+    if (!(k in out)) out[k] = { chf: 0, usd: 0 };
   }
   return out;
 }
@@ -259,30 +280,34 @@ export function isLikelyLegitSymbol(rawSymbol: string): boolean {
   return true;
 }
 
-export async function getPriceChf(symbol: string): Promise<number> {
+export async function getPrice(symbol: string): Promise<DualPrice> {
   const key = symbol.toUpperCase();
   const hit = priceCache[key];
   if (hit && Date.now() - hit.fetchedAt < PRICE_TTL_MS) return hit.price;
 
   // Stablecoins: trust the peg
   if (STABLECOINS.has(key)) {
-    const p = FALLBACK_CHF[key] ?? 0.9;
+    const p = FALLBACK_PRICE[key] ?? { chf: 0.9, usd: 1 };
     priceCache[key] = { price: p, fetchedAt: Date.now() };
     return p;
   }
 
   const cgId = SYMBOL_TO_CG_ID[key];
   if (cgId) {
-    const chf = await fetchChfPrice(cgId);
-    if (chf != null && chf > 0) {
-      priceCache[key] = { price: chf, fetchedAt: Date.now() };
-      return chf;
+    const live = await fetchPriceById(cgId);
+    if (live && live.chf > 0 && live.usd > 0) {
+      priceCache[key] = { price: live, fetchedAt: Date.now() };
+      return live;
     }
   }
 
-  const fallback = FALLBACK_CHF[key] ?? 0;
+  const fallback = FALLBACK_PRICE[key] ?? { chf: 0, usd: 0 };
   priceCache[key] = { price: fallback, fetchedAt: Date.now() };
   return fallback;
+}
+
+export async function getPriceChf(symbol: string): Promise<number> {
+  return (await getPrice(symbol)).chf;
 }
 
 function buildEtherscanUrl(
@@ -444,8 +469,9 @@ async function scanEvmChain(
 
     const wei = BigInt(nativeWei || "0");
     const nativeAmount = Number(wei) / 1e18;
-    const nativePrice = await getPriceChf(chain.symbol);
-    const nativeBalanceChf = nativeAmount * nativePrice;
+    const nativePrice = await getPrice(chain.symbol);
+    const nativeBalanceChf = nativeAmount * nativePrice.chf;
+    const nativeBalanceUsd = nativeAmount * nativePrice.usd;
 
     // Short-circuit if there's clearly no activity at all.
     if (wei === BigInt(0) && tokenTxs.length === 0 && txCount === 0) {
@@ -454,9 +480,12 @@ async function scanEvmChain(
         chainId: chain.chainId,
         nativeBalance: "0",
         nativeBalanceChf: 0,
+        nativeBalanceUsd: 0,
         tokenBalances: [],
         tokenValueChf: 0,
+        tokenValueUsd: 0,
         totalChf: 0,
+        totalUsd: 0,
         txCount: 0,
         hasActivity: false,
       };
@@ -485,27 +514,28 @@ async function scanEvmChain(
     const tokenBalances: TokenBalance[] = [];
     for (const t of heldRaw) {
       const amount = Number(BigInt(t.raw)) / Math.pow(10, t.decimals);
-      let price = priceMap[t.contractAddress.toLowerCase()] ?? 0;
+      let price = priceMap[t.contractAddress.toLowerCase()] ?? { chf: 0, usd: 0 };
       const upper = t.symbol.toUpperCase();
       const looksLegit = isLikelyLegitSymbol(t.symbol);
       // Fallback chain when contract pricing missed:
-      //   1. Stablecoin pegged-to-USD price (only if symbol passes spam check).
+      //   1. Stablecoin pegged price (only if symbol passes spam check).
       //   2. Known popular symbol (ARB, OP, UNI, …) via CoinGecko by ID.
-      if (price === 0 && STABLECOINS.has(upper) && looksLegit) {
-        price = await getPriceChf(upper);
-      } else if (price === 0 && isKnownSymbol(upper) && looksLegit) {
-        price = await getPriceChf(upper);
+      if (price.chf === 0 && price.usd === 0 && STABLECOINS.has(upper) && looksLegit) {
+        price = await getPrice(upper);
+      } else if (price.chf === 0 && price.usd === 0 && isKnownSymbol(upper) && looksLegit) {
+        price = await getPrice(upper);
       }
-      const chf = amount * price;
+      const filled = fillMissing(price);
+      const chf = amount * filled.chf;
+      const usd = amount * filled.usd;
       // Treat tokens that fail the legit-symbol check as airdrop spam.
-      // CHF must stay zero — ignoring `chf > 0` defends against price oracles
-      // that mistakenly quote impersonation contracts.
       const suspicious = !looksLegit;
       tokenBalances.push({
         symbol: t.symbol,
         contractAddress: t.contractAddress,
         amount,
         chf: suspicious ? 0 : chf,
+        usd: suspicious ? 0 : usd,
         suspicious,
       });
     }
@@ -516,20 +546,27 @@ async function scanEvmChain(
       return b.chf - a.chf;
     });
 
-    // Total only counts non-suspicious balances.
+    // Totals exclude suspicious balances.
     const tokenValueChf = tokenBalances
       .filter((t) => !t.suspicious)
       .reduce((s, t) => s + t.chf, 0);
+    const tokenValueUsd = tokenBalances
+      .filter((t) => !t.suspicious)
+      .reduce((s, t) => s + t.usd, 0);
     const totalChf = nativeBalanceChf + tokenValueChf;
+    const totalUsd = nativeBalanceUsd + tokenValueUsd;
 
     return {
       chain: chain.name,
       chainId: chain.chainId,
       nativeBalance: nativeAmount.toFixed(6),
       nativeBalanceChf,
+      nativeBalanceUsd,
       tokenBalances,
       tokenValueChf,
+      tokenValueUsd,
       totalChf,
+      totalUsd,
       txCount,
       hasActivity: wei > BigInt(0) || tokenBalances.length > 0 || txCount > 0,
     };
@@ -539,9 +576,12 @@ async function scanEvmChain(
       chainId: chain.chainId,
       nativeBalance: "0",
       nativeBalanceChf: 0,
+      nativeBalanceUsd: 0,
       tokenBalances: [],
       tokenValueChf: 0,
+      tokenValueUsd: 0,
       totalChf: 0,
+      totalUsd: 0,
       txCount: 0,
       hasActivity: false,
     };
@@ -562,15 +602,19 @@ async function scanBitcoin(address: string): Promise<ChainActivity> {
     const spent = json.chain_stats?.spent_txo_sum ?? 0;
     const sats = funded - spent;
     const btc = sats / 1e8;
-    const priceChf = await getPriceChf("BTC");
-    const balanceChf = btc * priceChf;
+    const priceBtc = await getPrice("BTC");
+    const balanceChf = btc * priceBtc.chf;
+    const balanceUsd = btc * priceBtc.usd;
     return {
       chain: "bitcoin",
       nativeBalance: btc.toFixed(8),
       nativeBalanceChf: balanceChf,
+      nativeBalanceUsd: balanceUsd,
       tokenBalances: [],
       tokenValueChf: 0,
+      tokenValueUsd: 0,
       totalChf: balanceChf,
+      totalUsd: balanceUsd,
       txCount: json.chain_stats?.tx_count ?? 0,
       hasActivity: (json.chain_stats?.tx_count ?? 0) > 0,
     };
@@ -579,9 +623,12 @@ async function scanBitcoin(address: string): Promise<ChainActivity> {
       chain: "bitcoin",
       nativeBalance: "0",
       nativeBalanceChf: 0,
+      nativeBalanceUsd: 0,
       tokenBalances: [],
       tokenValueChf: 0,
+      tokenValueUsd: 0,
       totalChf: 0,
+      totalUsd: 0,
       txCount: 0,
       hasActivity: false,
     };
@@ -625,16 +672,20 @@ async function scanSolana(address: string): Promise<ChainActivity> {
 
     const lamports = balJson.result?.value ?? 0;
     const sol = lamports / 1e9;
-    const priceChf = await getPriceChf("SOL");
-    const balanceChf = sol * priceChf;
+    const priceSol = await getPrice("SOL");
+    const balanceChf = sol * priceSol.chf;
+    const balanceUsd = sol * priceSol.usd;
 
     return {
       chain: "solana",
       nativeBalance: sol.toFixed(6),
       nativeBalanceChf: balanceChf,
+      nativeBalanceUsd: balanceUsd,
       tokenBalances: [],
       tokenValueChf: 0,
+      tokenValueUsd: 0,
       totalChf: balanceChf,
+      totalUsd: balanceUsd,
       txCount: Array.isArray(sigJson.result) ? sigJson.result.length : 0,
       hasActivity:
         lamports > 0 || (Array.isArray(sigJson.result) && sigJson.result.length > 0),
@@ -644,9 +695,12 @@ async function scanSolana(address: string): Promise<ChainActivity> {
       chain: "solana",
       nativeBalance: "0",
       nativeBalanceChf: 0,
+      nativeBalanceUsd: 0,
       tokenBalances: [],
       tokenValueChf: 0,
+      tokenValueUsd: 0,
       totalChf: 0,
+      totalUsd: 0,
       txCount: 0,
       hasActivity: false,
     };
@@ -665,26 +719,26 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
         chainFamily: "evm",
         chains: [],
         totalValueChf: 0,
+        totalValueUsd: 0,
         scannedAt,
         warning:
           "ETHERSCAN_API_KEY not configured on server. Add it to the environment and re-scan.",
       };
     }
-    // Scan chains sequentially to keep total throughput under Etherscan's
-    // 5 req/sec free-tier limit. Bursting in parallel triggers rate-limit
-    // responses that silently zero out balances and missed tokens.
     const chains: ChainActivity[] = [];
     for (const c of EVM_CHAINS) {
       // eslint-disable-next-line no-await-in-loop
       chains.push(await scanEvmChain(address, c, apiKey));
     }
     const active = chains.filter((c) => c.hasActivity);
-    const total = active.reduce((s, c) => s + c.totalChf, 0);
+    const totalChf = active.reduce((s, c) => s + c.totalChf, 0);
+    const totalUsd = active.reduce((s, c) => s + c.totalUsd, 0);
     return {
       address,
       chainFamily: "evm",
       chains: active,
-      totalValueChf: total,
+      totalValueChf: totalChf,
+      totalValueUsd: totalUsd,
       scannedAt,
     };
   }
@@ -696,6 +750,7 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
       chainFamily: "bitcoin",
       chains: [c],
       totalValueChf: c.totalChf,
+      totalValueUsd: c.totalUsd,
       scannedAt,
     };
   }
@@ -707,6 +762,7 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
       chainFamily: "solana",
       chains: [c],
       totalValueChf: c.totalChf,
+      totalValueUsd: c.totalUsd,
       scannedAt,
     };
   }
@@ -716,6 +772,7 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
     chainFamily: detection.chainFamily as ChainFamily,
     chains: [],
     totalValueChf: 0,
+    totalValueUsd: 0,
     scannedAt,
   };
 }
