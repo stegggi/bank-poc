@@ -100,6 +100,21 @@ function walletSection(wallet: WalletRecord, index: number): string {
     ? `<span class="fail">Failed — ${esc(ownership.failReason || "")}</span>`
     : `<span class="pending">Pending</span>`;
 
+  const proofBlock = ownership?.status === "verified"
+    ? `<div class="proof">
+         <h5>Cryptographic ownership proof</h5>
+         <p class="muted">Off-chain ${ownership.chainFamily === "evm" ? "EIP-191" : "Ed25519"} signature — independently verifiable with the data below.</p>
+         <table class="meta">
+           <tr><th style="width:30%">Wallet</th><td><code>${esc(ownership.address)}</code></td></tr>
+           <tr><th>Verified at</th><td><code>${esc(ownership.verifiedAt || "")}</code></td></tr>
+           <tr><th>Nonce</th><td><code>${esc(ownership.nonce)}</code></td></tr>
+           <tr><th>Signed message</th><td><code style="white-space:pre-wrap;">${esc(ownership.message)}</code></td></tr>
+           <tr><th>Signature</th><td><code style="word-break:break-all;">${esc(ownership.signature || "—")}</code></td></tr>
+           <tr><th>Verifier link</th><td><code>${esc(`/uc7-verify/${ownership.challengeId}`)}</code></td></tr>
+         </table>
+       </div>`
+    : "";
+
   const totalIncoming = traces.reduce((s, t) => s + t.totalIncomingValueChf, 0);
   const totalAttributed = traces.reduce((s, t) => s + t.attributedValueChf, 0);
   const overallPct = totalIncoming > 0 ? totalAttributed / totalIncoming : 0;
@@ -148,6 +163,7 @@ function walletSection(wallet: WalletRecord, index: number): string {
       <tr><th>Portfolio value (scan time)</th><td>${chf(chainTotal)}</td></tr>
       <tr><th>Ownership</th><td>${ownStatus}</td></tr>
     </table>
+    ${proofBlock}
     <h4>Source of Wealth Coverage</h4>
     <p>Attributable coverage:
       <strong>${traces.length > 0 ? (overallPct * 100).toFixed(1) : "—"}%</strong>
@@ -253,6 +269,15 @@ export function generateReportHtml(caseFile: CaseFile): string {
     border-radius: 6px;
     margin: 14px 0;
   }
+  .proof {
+    background: #f0fdf4;
+    border: 1px solid #bbf7d0;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin: 12px 0;
+  }
+  .proof h5 { margin: 0 0 4px; color: #14532d; }
+  .proof code { font-size: 10.5px; }
   .svg-wrap { margin: 10px 0; overflow: hidden; border: 1px solid #e2e8f0; border-radius: 6px; }
   .svg-wrap svg { max-width: 100%; height: auto; display: block; }
   .tier { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 10px; font-weight: 700; margin-left: 4px; }

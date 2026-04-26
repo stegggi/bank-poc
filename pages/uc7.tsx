@@ -975,7 +975,7 @@ function OwnershipRow({
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>Challenge message</div>
             <pre style={preBlock}>{challenge.message}</pre>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 10, marginBottom: 4 }}>
-              Shareable link
+              Shareable link (send to client)
             </div>
             <div style={{ display: "flex", gap: 6 }}>
               <code style={{ ...codeInline, flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
@@ -994,6 +994,144 @@ function OwnershipRow({
           </div>
         </div>
       )}
+
+      {challenge && challenge.status === "verified" && (
+        <VerificationProof challenge={challenge} origin={origin} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Shows the cryptographic proof for a verified ownership signature.
+ * EIP-191 / Ed25519 signatures are off-chain — there's no transaction
+ * hash to link to — but the message + signature + recovered address
+ * are sufficient evidence for any auditor.
+ */
+function VerificationProof({
+  challenge,
+  origin,
+}: {
+  challenge: NonNullable<WalletRecord["challenge"]>;
+  origin: string;
+}) {
+  const verifyUrl = `${origin}/uc7-verify/${challenge.challengeId}`;
+  const sig = challenge.signature || "";
+
+  const labelStyle: CSSProperties = {
+    fontSize: 11,
+    color: "rgba(255,255,255,0.55)",
+    letterSpacing: "0.04em",
+    textTransform: "uppercase",
+    fontWeight: 700,
+    marginBottom: 4,
+  };
+  const codeBox: CSSProperties = {
+    background: "rgba(0,0,0,0.25)",
+    border: "1px solid rgba(255,255,255,0.06)",
+    borderRadius: 6,
+    padding: 10,
+    fontSize: 11,
+    color: "#fff",
+    fontFamily: "monospace",
+    wordBreak: "break-all",
+  };
+
+  return (
+    <div
+      style={{
+        marginTop: 14,
+        padding: 14,
+        borderRadius: 8,
+        background: "rgba(16,185,129,0.05)",
+        border: "1px solid rgba(16,185,129,0.25)",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "center",
+          gap: 10,
+          marginBottom: 10,
+          flexWrap: "wrap",
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 700, color: "#6ee7b7" }}>
+          ✓ Cryptographic ownership proof
+        </div>
+        <a
+          href={verifyUrl}
+          target="_blank"
+          rel="noreferrer"
+          style={{
+            fontSize: 12,
+            color: "#93c5fd",
+            textDecoration: "none",
+            border: "1px solid rgba(147,197,253,0.4)",
+            padding: "4px 10px",
+            borderRadius: 4,
+          }}
+        >
+          Open public verification page ↗
+        </a>
+      </div>
+      <div
+        style={{
+          fontSize: 11,
+          color: "rgba(255,255,255,0.55)",
+          marginBottom: 10,
+          lineHeight: 1.5,
+        }}
+      >
+        Off-chain {challenge.chainFamily === "evm" ? "EIP-191" : "Ed25519"} signature — no
+        gas, no on-chain transaction. The data below is the complete proof and can be
+        re-verified independently with{" "}
+        <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+          {challenge.chainFamily === "evm" ? "ethers.verifyMessage(...)" : "nacl.sign.detached.verify(...)"}
+        </code>{" "}
+        or any standard verifier.
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "auto 1fr", gap: "8px 12px" }}>
+        <div style={labelStyle}>Wallet</div>
+        <div style={codeBox}>{challenge.address}</div>
+
+        <div style={labelStyle}>Verified at</div>
+        <div style={codeBox}>{challenge.verifiedAt}</div>
+
+        <div style={labelStyle}>Nonce</div>
+        <div style={codeBox}>{challenge.nonce}</div>
+
+        <div style={labelStyle}>Signature</div>
+        <div style={codeBox}>
+          {sig ? sig : "—"}
+          {sig && (
+            <button
+              onClick={() => navigator.clipboard?.writeText(sig)}
+              style={{
+                marginLeft: 8,
+                background: "transparent",
+                border: "1px solid rgba(255,255,255,0.15)",
+                color: "rgba(255,255,255,0.65)",
+                fontSize: 10,
+                padding: "1px 6px",
+                borderRadius: 3,
+                cursor: "pointer",
+              }}
+            >
+              Copy
+            </button>
+          )}
+        </div>
+
+        <div style={labelStyle}>Verifier link</div>
+        <div style={codeBox}>
+          <a href={verifyUrl} target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+            {verifyUrl}
+          </a>
+        </div>
+      </div>
     </div>
   );
 }

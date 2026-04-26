@@ -44,6 +44,8 @@ export default function SignPage() {
   const [status, setStatus] = useState<"idle" | "signing" | "verifying" | "done" | "error">("idle");
   const [error, setError] = useState<string>("");
   const [result, setResult] = useState<string>("");
+  const [manualSig, setManualSig] = useState<string>("");
+  const [manualPubKey, setManualPubKey] = useState<string>("");
 
   useEffect(() => {
     if (!challengeId || typeof challengeId !== "string") return;
@@ -145,6 +147,42 @@ export default function SignPage() {
     }
   }, [challenge]);
 
+  const submitManual = useCallback(async () => {
+    if (!challenge) return;
+    const sig = manualSig.trim();
+    if (!sig) {
+      setError("Paste the signature you produced from your wallet");
+      setStatus("error");
+      return;
+    }
+    setStatus("verifying");
+    setError("");
+    try {
+      const res = await fetch("/api/uc7/verify-signature", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          challengeId: challenge.challengeId,
+          signature: sig,
+          ...(challenge.chainFamily === "solana" && manualPubKey.trim()
+            ? { publicKey: manualPubKey.trim() }
+            : {}),
+        }),
+      });
+      const json = await res.json();
+      if (json.result?.ok) {
+        setStatus("done");
+        setResult("Ownership verified. You can close this page.");
+      } else {
+        setError(json.result?.error || "Signature did not verify against the expected wallet address.");
+        setStatus("error");
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Submission failed");
+      setStatus("error");
+    }
+  }, [challenge, manualSig, manualPubKey]);
+
   const pageStyle: CSSProperties = {
     minHeight: "100vh",
     background: "linear-gradient(180deg, #0b1220 0%, #07080f 100%)",
@@ -181,7 +219,7 @@ export default function SignPage() {
     <div style={pageStyle}>
       <div style={cardStyle}>
         <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
-          LGT Digital Asset Onboarding
+          Digital Asset Wallet Verification
         </div>
         <h1 style={{ margin: "0 0 6px", fontSize: 22 }}>Verify Wallet Ownership</h1>
         <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 13, marginBottom: 20 }}>
@@ -203,23 +241,127 @@ export default function SignPage() {
           <div style={{ padding: 14, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 8, color: "#6ee7b7" }}>
             {result}
           </div>
-        ) : status === "error" ? (
-          <>
-            <div style={{ padding: 14, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8, color: "#fca5a5", marginBottom: 14 }}>
-              {error}
-            </div>
-            <SignButtons challenge={challenge} onEvm={signEvm} onSol={signSolana} />
-          </>
-        ) : status === "signing" || status === "verifying" ? (
-          <div style={{ padding: 14, color: "rgba(255,255,255,0.65)", textAlign: "center" }}>
-            {status === "signing" ? "Please sign the message in your wallet…" : "Verifying signature…"}
-          </div>
         ) : (
-          <SignButtons challenge={challenge} onEvm={signEvm} onSol={signSolana} />
+          <>
+            {status === "error" && (
+              <div style={{ padding: 14, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8, color: "#fca5a5", marginBottom: 14 }}>
+                {error}
+              </div>
+            )}
+            {status === "signing" || status === "verifying" ? (
+              <div style={{ padding: 14, color: "rgba(255,255,255,0.65)", textAlign: "center" }}>
+                {status === "signing" ? "Please sign the message in your wallet…" : "Verifying signature…"}
+              </div>
+            ) : (
+              <SignButtons challenge={challenge} onEvm={signEvm} onSol={signSolana} />
+            )}
+
+            {/* Manual signature paste — works for any wallet (Ledger Live,
+                Rabby, Brave Wallet, Frame, OKX, hardware wallets, etc.) */}
+            {(challenge.chainFamily === "evm" || challenge.chainFamily === "solana") && (
+              <details style={{ marginTop: 16 }}>
+                <summary
+                  style={{
+                    cursor: "pointer",
+                    color: "rgba(255,255,255,0.65)",
+                    fontSize: 13,
+                    padding: "8px 0",
+                  }}
+                >
+                  Or paste a signature from another wallet
+                </summary>
+                <div
+                  style={{
+                    background: "rgba(255,255,255,0.03)",
+                    border: "1px solid rgba(255,255,255,0.08)",
+                    borderRadius: 8,
+                    padding: 14,
+                    marginTop: 6,
+                  }}
+                >
+                  <ol
+                    style={{
+                      fontSize: 12,
+                      color: "rgba(255,255,255,0.7)",
+                      paddingLeft: 18,
+                      margin: "0 0 10px",
+                      lineHeight: 1.7,
+                    }}
+                  >
+                    <li>Copy the challenge message above.</li>
+                    <li>
+                      Open your wallet (MetaMask, Rabby, Ledger Live, Phantom, Trust, OKX, …)
+                      and use its <em>Sign Message</em> / <em>Personal Sign</em> feature.
+                    </li>
+                    <li>
+                      Paste the resulting signature here.
+                      {challenge.chainFamily === "solana" &&
+                        " For Solana, also paste the public key you signed with."}
+                    </li>
+                  </ol>
+                  <textarea
+                    placeholder="0x… (hex signature)"
+                    value={manualSig}
+                    onChange={(e) => setManualSig(e.target.value)}
+                    style={{
+                      width: "100%",
+                      minHeight: 70,
+                      padding: 10,
+                      borderRadius: 6,
+                      border: "1px solid rgba(255,255,255,0.1)",
+                      background: "rgba(0,0,0,0.25)",
+                      color: "#fff",
+                      fontFamily: "monospace",
+                      fontSize: 11,
+                      resize: "vertical",
+                    }}
+                  />
+                  {challenge.chainFamily === "solana" && (
+                    <input
+                      placeholder="Solana public key (base58) — only if signing wallet differs"
+                      value={manualPubKey}
+                      onChange={(e) => setManualPubKey(e.target.value)}
+                      style={{
+                        width: "100%",
+                        marginTop: 6,
+                        padding: 8,
+                        borderRadius: 6,
+                        border: "1px solid rgba(255,255,255,0.1)",
+                        background: "rgba(0,0,0,0.25)",
+                        color: "#fff",
+                        fontFamily: "monospace",
+                        fontSize: 11,
+                      }}
+                    />
+                  )}
+                  <button
+                    onClick={submitManual}
+                    disabled={status === "verifying" || !manualSig.trim()}
+                    style={{
+                      marginTop: 10,
+                      padding: "10px 14px",
+                      borderRadius: 8,
+                      border: "1px solid rgba(255,255,255,0.15)",
+                      background: "rgba(255,255,255,0.06)",
+                      color: "#fff",
+                      fontSize: 13,
+                      fontWeight: 600,
+                      cursor: status === "verifying" || !manualSig.trim() ? "not-allowed" : "pointer",
+                      opacity: status === "verifying" || !manualSig.trim() ? 0.6 : 1,
+                    }}
+                  >
+                    Submit signature
+                  </button>
+                </div>
+              </details>
+            )}
+          </>
         )}
 
         <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 20, lineHeight: 1.5 }}>
-          This challenge contains no personal information. Signing proves you control the wallet address without revealing any private keys.
+          This challenge contains no personal information. Signing proves you control the wallet
+          address without revealing any private keys, without paying gas, and without sending an
+          on-chain transaction.
         </p>
       </div>
     </div>
@@ -249,16 +391,27 @@ function SignButtons({
   };
   if (challenge.chainFamily === "evm") {
     return (
-      <button style={btn} onClick={onEvm}>
-        Connect wallet and sign
-      </button>
+      <>
+        <button style={btn} onClick={onEvm}>
+          Connect wallet and sign
+        </button>
+        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Detects MetaMask / Rabby / Brave Wallet / Coinbase Wallet automatically. On mobile,
+          open this link in your wallet app's built-in browser.
+        </p>
+      </>
     );
   }
   if (challenge.chainFamily === "solana") {
     return (
-      <button style={btn} onClick={onSol}>
-        Connect Solana wallet and sign
-      </button>
+      <>
+        <button style={btn} onClick={onSol}>
+          Connect Solana wallet and sign
+        </button>
+        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Detects Phantom / Solflare automatically.
+        </p>
+      </>
     );
   }
   return (

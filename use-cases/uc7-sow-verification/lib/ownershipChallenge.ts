@@ -43,7 +43,7 @@ export function buildChallengeMessage(params: {
   timestamp: string;
 }): string {
   return [
-    "LGT Digital Asset Onboarding",
+    "Digital Asset Wallet Ownership Verification",
     `Reference: ${params.caseReference}`,
     `Nonce: ${params.nonce}`,
     `Timestamp: ${params.timestamp}`,
