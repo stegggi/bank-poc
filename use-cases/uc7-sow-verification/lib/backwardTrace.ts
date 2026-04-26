@@ -17,6 +17,7 @@ import {
   EVM_CHAINS,
   isKnownSymbol,
   isLikelyLegitSymbol,
+  looksUsdPegged,
   type DualPrice,
 } from "./multiChainScan";
 
@@ -106,6 +107,13 @@ async function priceForToken(
     } else if (isKnownSymbol(upper) && looksLegit) {
       price = await getPrice(upper);
     }
+  }
+
+  // Final fallback: USD-pegged derivatives (sUSDai, USDai, PT-/YT-/PLP-…USDai,
+  // USDe, etc.) that CoinGecko doesn't index by contract still settle to ~$1
+  // of underlying, so price them at the stable peg instead of leaving at $0.
+  if (price.chf === 0 && price.usd === 0 && looksLegit && looksUsdPegged(trimmedSym)) {
+    price = { chf: 0.9, usd: 1 };
   }
 
   const unpriced = price.chf === 0 && price.usd === 0;

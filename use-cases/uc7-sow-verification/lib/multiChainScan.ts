@@ -258,6 +258,10 @@ const SYMBOL_TO_CG_ID: Record<string, string> = {
   CBETH: "coinbase-wrapped-staked-eth",
   // Cross-chain assets
   FET: "fetch-ai",
+  // Pendle
+  PENDLE: "pendle",
+  SPENDLE: "pendle",
+  VEPENDLE: "pendle",
 };
 
 export function isKnownSymbol(symbol: string): boolean {
@@ -275,9 +279,27 @@ export function isLikelyLegitSymbol(rawSymbol: string): boolean {
   if (!/^[A-Za-z0-9._\- ]+$/.test(trimmed)) return false;
   // No URL-ish or "claim" markers.
   if (/(https?:|t\.me|claim|visit|airdrop|reward|🎁|💰)/i.test(trimmed)) return false;
-  // Reasonable length.
-  if (trimmed.length > 12) return false;
+  // Reasonable length — long Pendle PT/YT/PLP symbols (e.g. PT-sUSDai-19FEB2026)
+  // can hit ~25 chars, so allow up to 30. Scam tokens typically blow well past
+  // this once their telegram-bait gets stripped by the URL filter above.
+  if (trimmed.length > 30) return false;
   return true;
+}
+
+/**
+ * Heuristic: does this symbol look like a USD-pegged stablecoin or a
+ * stablecoin-derivative (Pendle PT/YT/PLP, wrapped USDai, sUSDai, …)?
+ * Used as a final pricing fallback when CoinGecko has no contract or
+ * symbol entry — those derivatives all settle to ~$1 of underlying so
+ * pricing them at the peg is closer than leaving them at $0.
+ */
+export function looksUsdPegged(symbol: string): boolean {
+  const upper = symbol.trim().toUpperCase();
+  if (!upper) return false;
+  if (STABLECOINS.has(upper)) return true;
+  // Pattern matches: USDai, sUSDai, PT-sUSDai-XXX, PT-USDai-XXX,
+  // PLP-sUSDai-XXX, SY-USDai, YT-sUSDai-XXX, USDe, sUSDe, etc.
+  return /(?:^|[^A-Z])(USD|DAI)(?:[^A-Z]|$)|USDAI|SUSDAI|USDC?\b|USDE/.test(upper);
 }
 
 export async function getPrice(symbol: string): Promise<DualPrice> {
@@ -524,6 +546,14 @@ async function scanEvmChain(
         price = await getPrice(upper);
       } else if (price.chf === 0 && price.usd === 0 && isKnownSymbol(upper) && looksLegit) {
         price = await getPrice(upper);
+      } else if (
+        price.chf === 0 &&
+        price.usd === 0 &&
+        looksLegit &&
+        looksUsdPegged(t.symbol)
+      ) {
+        // USD-pegged stablecoin derivative not on CoinGecko by contract.
+        price = { chf: 0.9, usd: 1 };
       }
       const filled = fillMissing(price);
       const chf = amount * filled.chf;
