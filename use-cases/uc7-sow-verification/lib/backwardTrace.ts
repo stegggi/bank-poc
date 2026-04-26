@@ -8,7 +8,22 @@ import type {
   TracedSource,
 } from "./types";
 import { lookupAddress } from "./labelDatabase";
-import { getPrice, etherscanFetch, buildEtherscanUrl, type DualPrice } from "./multiChainScan";
+import {
+  getPrice,
+  etherscanFetch,
+  buildEtherscanUrl,
+  fetchTokenPricesByContract,
+  STABLECOINS,
+  EVM_CHAINS,
+  isKnownSymbol,
+  isLikelyLegitSymbol,
+  type DualPrice,
+} from "./multiChainScan";
+
+// chain name → CoinGecko platform id (e.g. "arbitrum" → "arbitrum-one")
+const CHAIN_CG_PLATFORM: Record<string, string> = Object.fromEntries(
+  EVM_CHAINS.map((c) => [c.name, c.cgPlatform])
+);
 
 type EvmInflow = {
   from: string;
@@ -35,36 +50,9 @@ const CHAIN_ID_MAP: Record<string, number> = {
   optimism: 10,
 };
 
-const CHAIN_NATIVE: Record<string, string> = {
-  ethereum: "ETH",
-  base: "ETH",
-  arbitrum: "ETH",
-  polygon: "MATIC",
-  bsc: "BNB",
-  optimism: "ETH",
-};
-
-const STABLECOIN_SYMBOLS = new Set([
-  "USDC",
-  "USDT",
-  "DAI",
-  "BUSD",
-  "FDUSD",
-  "PYUSD",
-  "USDBC",
-  "USDC.E",
-]);
-
-// Symbols we will try to look up via getPriceChf (beyond stables/native).
-const PRICEABLE_SYMBOLS = new Set([
-  "WETH",
-  "WBTC",
-  "BTCB",
-  "CBBTC",
-  "WMATIC",
-  "WBNB",
-  "WSOL",
-]);
+const CHAIN_NATIVE: Record<string, string> = Object.fromEntries(
+  EVM_CHAINS.map((c) => [c.name, c.symbol])
+);
 
 async function fetchEtherscan<T>(
   params: Record<string, string>,
@@ -93,20 +81,35 @@ type RawTokenTx = RawTx & {
   contractAddress: string;
 };
 
-async function priceForSymbol(sym: string): Promise<{ price: DualPrice; unpriced: boolean }> {
-  const upper = sym.toUpperCase();
-  if (STABLECOIN_SYMBOLS.has(upper)) {
-    const price = await getPrice(upper);
-    return {
-      price: { chf: price.chf || 0.9, usd: price.usd || 1 },
-      unpriced: false,
-    };
+/**
+ * Resolve a token-transfer's price using the same fallback chain as the wallet
+ * scan: contract-address lookup → stablecoin peg → known-symbol fallback.
+ *
+ * `contractPrices` is the batched CoinGecko `simple/token_price/{platform}`
+ * response keyed by lower-case contract. `symbol`/`contractAddress` are taken
+ * from the Etherscan tokentx record.
+ */
+async function priceForToken(
+  contractAddress: string,
+  symbol: string,
+  contractPrices: Record<string, DualPrice>
+): Promise<{ price: DualPrice; unpriced: boolean }> {
+  const trimmedSym = (symbol || "").trim();
+  const upper = trimmedSym.toUpperCase();
+  let price = contractPrices[contractAddress.toLowerCase()] ?? { chf: 0, usd: 0 };
+  const looksLegit = isLikelyLegitSymbol(trimmedSym);
+
+  if (price.chf === 0 && price.usd === 0) {
+    if (STABLECOINS.has(upper) && looksLegit) {
+      const p = await getPrice(upper);
+      price = { chf: p.chf || 0.9, usd: p.usd || 1 };
+    } else if (isKnownSymbol(upper) && looksLegit) {
+      price = await getPrice(upper);
+    }
   }
-  if (PRICEABLE_SYMBOLS.has(upper)) {
-    const price = await getPrice(upper);
-    return { price, unpriced: price.chf === 0 && price.usd === 0 };
-  }
-  return { price: { chf: 0, usd: 0 }, unpriced: true };
+
+  const unpriced = price.chf === 0 && price.usd === 0;
+  return { price, unpriced };
 }
 
 async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflow[]> {
@@ -183,18 +186,36 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
   if (Array.isArray(internal)) internal.forEach(pushNative);
 
   if (Array.isArray(tokens)) {
-    for (const tx of tokens) {
-      if (!tx.to || tx.to.toLowerCase() !== addr) continue;
+    const incoming = tokens.filter(
+      (tx) => tx.to && tx.to.toLowerCase() === addr && tx.contractAddress
+    );
+
+    // Batch-fetch CoinGecko prices for every unique token contract on this
+    // chain in a single call, instead of one-by-one symbol lookups. This
+    // catches the long tail (ARB, FET, PENDLE, sUSDai, …) directly.
+    const cgPlatform = CHAIN_CG_PLATFORM[chain];
+    const uniqueContracts = Array.from(
+      new Set(incoming.map((tx) => tx.contractAddress.toLowerCase()))
+    );
+    const contractPrices = cgPlatform
+      ? await fetchTokenPricesByContract(cgPlatform, uniqueContracts)
+      : {};
+
+    for (const tx of incoming) {
       const dec = Number(tx.tokenDecimal || "18");
-      const sym = (tx.tokenSymbol || "").toUpperCase();
+      const symRaw = (tx.tokenSymbol || "").trim();
       const raw = BigInt(tx.value || "0");
       const amount = Number(raw) / Math.pow(10, dec);
-      const { price, unpriced } = await priceForSymbol(sym);
+      const { price, unpriced } = await priceForToken(
+        tx.contractAddress,
+        symRaw,
+        contractPrices
+      );
       inflows.push({
         from: tx.from.toLowerCase(),
         to: addr,
         valueWei: raw,
-        token: sym,
+        token: symRaw || tx.contractAddress.slice(0, 8),
         tokenDecimals: dec,
         priceChf: price.chf,
         priceUsd: price.usd,

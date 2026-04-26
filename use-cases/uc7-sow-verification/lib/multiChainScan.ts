@@ -794,4 +794,10 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
   };
 }
 
-export { EVM_CHAINS, etherscanFetch, buildEtherscanUrl };
+export {
+  EVM_CHAINS,
+  etherscanFetch,
+  buildEtherscanUrl,
+  fetchTokenPricesByContract,
+  STABLECOINS,
+};
