@@ -28,7 +28,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   if (!wallet) return res.status(404).json({ error: "Wallet not found in case" });
 
   // Decide which chains to trace.
-  // - Explicit `chains` argument wins.
+  // - Explicit `chains` argument wins (used for per-chain retry from the UI).
   // - Otherwise scan every chain that the wallet has on-chain activity on.
   // - Fall back to a single inferred chain for legacy data.
   const explicit: string[] | undefined = Array.isArray(body.chains)
@@ -55,44 +55,57 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? fromScan
         : [fallback];
 
-  // Trace each chain in parallel — the Etherscan rate-limiter naturally
-  // serializes the API calls underneath, so this won't blow the rate limit
-  // and total wall-clock time is roughly the same as sequential.
   // Hop 1 only — the UI is a flat per-chain inflow list à la Etherscan.
   const hopDepth = Math.min(caseFile.settings.maxHopDepth ?? 1, 1);
 
-  // Per-chain try/catch so a single chain failing (e.g. Etherscan returning
-  // garbage) doesn't kill the entire trace. Empty traces are also retained
-  // so the user sees "no incoming transactions on this chain" rather than
-  // the chain disappearing silently.
-  const results: TraceResult[] = await Promise.all(
-    chains.map(async (ch) => {
-      try {
-        return await traceBackward(address, ch, { maxHopDepth: hopDepth });
-      } catch {
-        return {
-          walletAddress: address,
-          chain: ch,
-          totalIncomingValueChf: 0,
-          totalIncomingValueUsd: 0,
-          attributedValueChf: 0,
-          attributedValueUsd: 0,
-          attributedPercentage: 0,
-          sources: [],
-          hopsUsed: 0,
-          maxHopsConfigured: hopDepth,
-          sanctionsHits: [],
-          nodes: [],
-          edges: [],
-          inflowsByParent: {},
-          tracedAt: new Date().toISOString(),
-        } as TraceResult;
-      }
-    })
-  );
+  // Trace each chain SEQUENTIALLY. Parallel Promise.all flooded the
+  // shared Etherscan rate limiter and individual chains intermittently
+  // came back empty when their queued calls got starved. Sequential
+  // gives predictable per-chain timing and per-chain logging.
+  const results: TraceResult[] = [];
+  for (const ch of chains) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      const t = await traceBackward(address, ch, { maxHopDepth: hopDepth });
+      results.push(t);
+    } catch {
+      results.push({
+        walletAddress: address,
+        chain: ch,
+        totalIncomingValueChf: 0,
+        totalIncomingValueUsd: 0,
+        attributedValueChf: 0,
+        attributedValueUsd: 0,
+        attributedPercentage: 0,
+        sources: [],
+        hopsUsed: 0,
+        maxHopsConfigured: hopDepth,
+        sanctionsHits: [],
+        nodes: [],
+        edges: [],
+        inflowsByParent: {},
+        tracedAt: new Date().toISOString(),
+      } as TraceResult);
+    }
+  }
 
-  wallet.traces = results;
-  // Drop the legacy single-chain field once we've populated `traces`.
+  // Merge into wallet.traces:
+  // - If `chains` was explicit (UI retry of one chain), splice the results
+  //   into the existing `traces` array, replacing matching chains and
+  //   keeping the rest intact.
+  // - Otherwise replace the whole array.
+  if (explicit && explicit.length > 0 && wallet.traces && wallet.traces.length > 0) {
+    const merged = [...wallet.traces];
+    for (const t of results) {
+      const idx = merged.findIndex((x) => x.chain === t.chain);
+      if (idx >= 0) merged[idx] = t;
+      else merged.push(t);
+    }
+    wallet.traces = merged;
+  } else {
+    wallet.traces = results;
+  }
+
   delete wallet.trace;
   if (!wallet.primaryChain) wallet.primaryChain = chains[0];
   await writeCase(caseFile);

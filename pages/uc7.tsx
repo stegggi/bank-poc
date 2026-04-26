@@ -1018,16 +1018,29 @@ function StepScan({
   currency: Currency;
 }) {
   const [runningSet, setRunningSet] = useState<Set<string>>(new Set());
+  // Tracks per-(wallet,chain) retries: key = "address::chain"
+  const [retryingChains, setRetryingChains] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
 
   const runTrace = useCallback(
-    async (address: string) => {
+    async (address: string, chains?: string[]) => {
       setRunningSet((prev) => new Set(prev).add(address));
+      if (chains) {
+        setRetryingChains((prev) => {
+          const next = new Set(prev);
+          for (const c of chains) next.add(`${address.toLowerCase()}::${c}`);
+          return next;
+        });
+      }
       try {
         await fetch("/api/uc7/trace", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ caseReference: caseFile.caseReference, address }),
+          body: JSON.stringify({
+            caseReference: caseFile.caseReference,
+            address,
+            ...(chains && chains.length > 0 ? { chains } : {}),
+          }),
         });
         onUpdated(caseFile.caseReference);
       } finally {
@@ -1036,6 +1049,13 @@ function StepScan({
           next.delete(address);
           return next;
         });
+        if (chains) {
+          setRetryingChains((prev) => {
+            const next = new Set(prev);
+            for (const c of chains) next.delete(`${address.toLowerCase()}::${c}`);
+            return next;
+          });
+        }
       }
     },
     [caseFile.caseReference, onUpdated]
@@ -1080,6 +1100,8 @@ function StepScan({
             wallet={w}
             running={runningSet.has(w.address)}
             onRun={() => runTrace(w.address)}
+            onRunChain={(chain) => runTrace(w.address, [chain])}
+            retryingChains={retryingChains}
             currency={currency}
           />
         ))}
@@ -1097,11 +1119,15 @@ function TraceRow({
   wallet,
   running,
   onRun,
+  onRunChain,
+  retryingChains,
   currency,
 }: {
   wallet: WalletRecord;
   running: boolean;
   onRun: () => void;
+  onRunChain: (chain: string) => void;
+  retryingChains: Set<string>;
   currency: Currency;
 }) {
   // Prefer the new multi-chain `traces` array; fall back to the legacy single
@@ -1255,7 +1281,13 @@ function TraceRow({
           {/* One card per chain with its own hop tree */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             {traces.map((trace) => (
-              <ChainTraceCard key={trace.chain} trace={trace} currency={currency} />
+              <ChainTraceCard
+                key={trace.chain}
+                trace={trace}
+                currency={currency}
+                onRetry={() => onRunChain(trace.chain)}
+                retrying={retryingChains.has(`${wallet.address.toLowerCase()}::${trace.chain}`)}
+              />
             ))}
           </div>
         </div>
@@ -1268,9 +1300,13 @@ function TraceRow({
 function ChainTraceCard({
   trace,
   currency,
+  onRetry,
+  retrying,
 }: {
   trace: TraceResult;
   currency: Currency;
+  onRetry: () => void;
+  retrying: boolean;
 }) {
   const noActivity = trace.sources.length === 0 && trace.totalIncomingValueChf === 0;
 
@@ -1310,21 +1346,43 @@ function ChainTraceCard({
             inflow · hops {trace.hopsUsed}/{trace.maxHopsConfigured}
           </div>
         </div>
-        {trace.sanctionsHits.length > 0 && (
-          <span
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          {trace.sanctionsHits.length > 0 && (
+            <span
+              style={{
+                fontSize: 11,
+                color: "#fca5a5",
+                background: "rgba(239,68,68,0.12)",
+                border: "1px solid rgba(239,68,68,0.4)",
+                padding: "3px 8px",
+                borderRadius: 4,
+                fontWeight: 700,
+              }}
+            >
+              ⚠ {trace.sanctionsHits.length} OFAC HIT
+            </span>
+          )}
+          <button
+            onClick={onRetry}
+            disabled={retrying}
             style={{
-              fontSize: 11,
-              color: "#fca5a5",
-              background: "rgba(239,68,68,0.12)",
-              border: "1px solid rgba(239,68,68,0.4)",
-              padding: "3px 8px",
-              borderRadius: 4,
-              fontWeight: 700,
+              ...secondaryBtn,
+              fontSize: 12,
+              padding: "4px 10px",
+              opacity: retrying ? 0.7 : 1,
+              cursor: retrying ? "default" : "pointer",
             }}
+            title={`Re-run trace for ${trace.chain} only`}
           >
-            ⚠ {trace.sanctionsHits.length} OFAC HIT
-          </span>
-        )}
+            {retrying ? (
+              <>
+                <Spinner /> &nbsp;Retrying…
+              </>
+            ) : (
+              "↻ Retry chain"
+            )}
+          </button>
+        </div>
       </div>
 
       {trace.sanctionsHits.length > 0 && (
@@ -1336,7 +1394,9 @@ function ChainTraceCard({
 
       {noActivity ? (
         <div style={{ ...mutedBlock, textAlign: "left", marginTop: 12 }}>
-          No priced inflows detected on this chain.
+          {retrying
+            ? "Retrying…"
+            : "No priced inflows detected on this chain. Try Retry chain — sometimes Etherscan rate-limits one chain while the others succeed."}
         </div>
       ) : (
         <>
