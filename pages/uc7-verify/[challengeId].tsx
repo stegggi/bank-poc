@@ -18,6 +18,7 @@ export default function VerifyPage() {
   const { challengeId } = router.query;
   const [challenge, setChallenge] = useState<Challenge | null>(null);
   const [error, setError] = useState<string>("");
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     if (!challengeId || typeof challengeId !== "string") return;
@@ -150,6 +151,53 @@ export default function VerifyPage() {
           </p>
         ) : null}
 
+        {challenge.chainFamily === "evm" && challenge.signature && (() => {
+          const payload = JSON.stringify(
+            {
+              address: challenge.address,
+              msg: challenge.message,
+              sig: challenge.signature,
+              version: "2",
+            },
+            null,
+            2,
+          );
+          return (
+            <>
+              <div style={{ ...fieldLabel, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <span>Verify payload (paste into MyCrypto&rsquo;s Signature field)</span>
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(payload);
+                      setCopied(true);
+                      setTimeout(() => setCopied(false), 1500);
+                    } catch {
+                      /* clipboard unavailable */
+                    }
+                  }}
+                  style={{
+                    fontSize: 10,
+                    fontWeight: 700,
+                    letterSpacing: "0.05em",
+                    color: copied ? "#6ee7b7" : "#93c5fd",
+                    background: "transparent",
+                    border: `1px solid ${copied ? "rgba(16,185,129,0.5)" : "rgba(147,197,253,0.5)"}`,
+                    padding: "2px 8px",
+                    borderRadius: 4,
+                    cursor: "pointer",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {copied ? "✓ Copied" : "Copy"}
+                </button>
+              </div>
+              <div style={valueBox}>{payload}</div>
+            </>
+          );
+        })()}
+
         {challenge.verifiedAt && (
           <>
             <div style={fieldLabel}>Verified at</div>
@@ -184,8 +232,9 @@ export default function VerifyPage() {
                 or any EIP-191 verifier.
               </li>
               <li>
-                Paste the message, signature, and signing address shown above. The recovered
-                address must match the signing address.
+                Copy the <em>Verify payload</em> JSON above and paste it into MyCrypto&rsquo;s
+                Signature field, then click <strong>Verify Message</strong>. The recovered
+                address must match the signing address shown here.
               </li>
               <li>
                 In code:{" "}
