@@ -123,6 +123,19 @@ export type TracedSource = {
   unpriced?: boolean;
 };
 
+/** A single incoming token transfer, rendered in the per-tx hop list. */
+export type TraceTx = {
+  txHash: string;
+  timestamp: number; // ms since epoch
+  fromAddress: string;
+  fromLabel: AddressLabel | null;
+  amount: number;
+  token: string;
+  valueChf: number;
+  valueUsd: number;
+  unpriced: boolean;
+};
+
 export type TraceResult = {
   walletAddress: string;
   chain: string;
@@ -137,6 +150,13 @@ export type TraceResult = {
   sanctionsHits: SanctionsHit[];
   nodes: FundFlowNode[];
   edges: FundFlowEdge[];
+  /**
+   * Per-parent map of incoming transactions used by the hop-by-hop tx list.
+   * `inflowsByParent[walletAddress]` are the hop-1 incoming transfers.
+   * For an unidentified hop-1 source X, `inflowsByParent[X]` are the hop-2
+   * incoming transfers into X. Same recursion for hop-3.
+   */
+  inflowsByParent?: Record<string, TraceTx[]>;
   tracedAt: string;
 };
 

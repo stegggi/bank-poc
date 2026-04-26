@@ -4,6 +4,7 @@ import type {
   FundFlowNode,
   SanctionsHit,
   TraceResult,
+  TraceTx,
   TracedSource,
 } from "./types";
 import { lookupAddress } from "./labelDatabase";
@@ -212,6 +213,36 @@ type SourceAgg = {
   pricedChf: number; // sum of priced inflows only — used for the "unpriced" badge
 };
 
+async function inflowsToTraceTxs(
+  inflows: EvmInflow[],
+  chain: string,
+  labelCache: Map<string, AddressLabel>
+): Promise<TraceTx[]> {
+  const out: TraceTx[] = [];
+  for (const inf of inflows) {
+    let label = labelCache.get(inf.from);
+    if (!label) {
+      label = await lookupAddress(inf.from, chain);
+      labelCache.set(inf.from, label);
+    }
+    const amount = Number(inf.valueWei) / Math.pow(10, inf.tokenDecimals);
+    out.push({
+      txHash: inf.txHash,
+      timestamp: inf.timestamp,
+      fromAddress: inf.from,
+      fromLabel: label,
+      amount,
+      token: inf.token,
+      valueChf: inf.valueChf,
+      valueUsd: inf.valueUsd,
+      unpriced: inf.unpriced,
+    });
+  }
+  // Most recent first
+  out.sort((a, b) => b.timestamp - a.timestamp);
+  return out;
+}
+
 function aggregateBySource(inflows: EvmInflow[]): {
   values: Map<string, SourceAgg>;
   // A source is "fully unpriced" only if NONE of its inflows had a real price.
@@ -417,6 +448,15 @@ export async function traceBackward(
   const aggHop1 = aggregateBySource(initialInflows);
   const { sources: hop1, totalChf, totalUsd } = topSources(aggHop1.values);
 
+  // Per-parent transaction map for the hop-by-hop tx UI. Keyed lowercase.
+  const inflowsByParent: Record<string, TraceTx[]> = {};
+  const labelCache = new Map<string, AddressLabel>();
+  inflowsByParent[address.toLowerCase()] = await inflowsToTraceTxs(
+    initialInflows,
+    chain,
+    labelCache
+  );
+
   const tracedSources: TracedSource[] = [];
   const sanctionsHits: SanctionsHit[] = [];
   const nodes: FundFlowNode[] = [
@@ -513,6 +553,12 @@ export async function traceBackward(
       item.depth < maxHopDepth
     ) {
       const deeper = await loadIncomingEvm(item.src, chain);
+      // Stash the per-tx list for the hop drill-down UI
+      inflowsByParent[item.src.toLowerCase()] = await inflowsToTraceTxs(
+        deeper,
+        chain,
+        labelCache
+      );
       const agg = aggregateBySource(deeper);
       const top = topSources(agg.values);
       for (const s of top.sources.slice(0, 5)) {
@@ -535,6 +581,11 @@ export async function traceBackward(
         pushTraced(item, label);
         continue;
       }
+      inflowsByParent[item.src.toLowerCase()] = await inflowsToTraceTxs(
+        deeper,
+        chain,
+        labelCache
+      );
       const agg = aggregateBySource(deeper);
       const top = topSources(agg.values);
       for (const s of top.sources.slice(0, 5)) {
@@ -575,6 +626,7 @@ export async function traceBackward(
     sanctionsHits,
     nodes,
     edges,
+    inflowsByParent,
     tracedAt,
   };
 }

@@ -17,6 +17,7 @@ import type {
   ChainActivity,
   RiskTier,
   TraceResult,
+  TraceTx,
   WalletRecord,
   WalletScanResult,
 } from "../use-cases/uc7-sow-verification/lib/types";
@@ -1323,248 +1324,196 @@ function ChainTraceCard({
               <FundFlowDiagram trace={trace} height={320} currency={currency} />
             </details>
           </div>
-          <h5 style={{ ...h4, fontSize: 12 }}>Hop-by-hop attribution</h5>
-          <HopTree trace={trace} currency={currency} />
+          <h5 style={{ ...h4, fontSize: 12 }}>Hop 1 incoming transactions</h5>
+          <TxList
+            trace={trace}
+            currency={currency}
+            parentAddress={trace.walletAddress}
+            depth={1}
+          />
         </>
       )}
     </div>
   );
 }
 
-/* ── Recursive hop tree ── */
-type HopChild = {
-  address: string;
-  valueChf: number;
-  valueUsd: number;
-  label: TraceResult["nodes"][number]["label"];
-};
+/* ── Per-transaction hop list (Etherscan-style) ── */
+type TxStatus = "identified" | "sanctioned" | "infrastructure" | "unknown";
 
-function buildChildrenIndex(trace: TraceResult): Map<string, HopChild[]> {
-  const nodeById = new Map(trace.nodes.map((n) => [n.id, n]));
-  const out = new Map<string, HopChild[]>();
-  for (const e of trace.edges) {
-    const child = nodeById.get(e.from);
-    if (!child) continue;
-    const list = out.get(e.to) || [];
-    list.push({
-      address: child.address,
-      valueChf: e.valueChf,
-      valueUsd: e.valueUsd ?? 0,
-      label: child.label,
-    });
-    out.set(e.to, list);
-  }
-  // Largest first per parent
-  for (const list of out.values()) list.sort((a, b) => b.valueChf - a.valueChf);
-  return out;
-}
-
-function classifyAttribution(label: HopChild["label"]): "identified" | "infrastructure" | "unknown" {
-  if (!label) return "unknown";
-  if (label.sanctioned) return "identified";
-  if (label.entityType === "exchange") return "identified";
-  if (label.entityType === "mixer") return "identified";
-  if (label.entityType === "mining_pool") return "identified";
-  if (label.entityType === "staking") return "infrastructure";
-  if (label.entityType === "dex" || label.entityType === "bridge" || label.entityType === "contract") {
+function txStatus(tx: TraceTx): TxStatus {
+  const l = tx.fromLabel;
+  if (!l) return "unknown";
+  if (l.sanctioned) return "sanctioned";
+  if (l.entityType === "exchange") return "identified";
+  if (l.entityType === "mixer") return "sanctioned"; // treat as red
+  if (l.entityType === "mining_pool" || l.entityType === "staking") return "identified";
+  if (l.entityType === "dex" || l.entityType === "bridge" || l.entityType === "contract") {
     return "infrastructure";
   }
   return "unknown";
 }
 
-function HopTree({ trace, currency }: { trace: TraceResult; currency: Currency }) {
-  const children = useMemo(() => buildChildrenIndex(trace), [trace]);
-  const wallet = trace.walletAddress;
-  const hop1 = children.get(wallet) || [];
-  const total = trace.totalIncomingValueChf || 1;
-
-  // Group hop-1 children by attribution status
-  const identified = hop1.filter((c) => classifyAttribution(c.label) === "identified");
-  const infrastructure = hop1.filter(
-    (c) => classifyAttribution(c.label) === "infrastructure"
-  );
-  const unknown = hop1.filter((c) => classifyAttribution(c.label) === "unknown");
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-      <HopGroup
-        title="Identified at hop 1"
-        kind="identified"
-        items={identified}
-        total={total}
-        children={children}
-        currency={currency}
-        depth={1}
-        maxDepth={trace.maxHopsConfigured}
-      />
-      <HopGroup
-        title="Neutral infrastructure (DEX / bridge / contract — drilled deeper)"
-        kind="infrastructure"
-        items={infrastructure}
-        total={total}
-        children={children}
-        currency={currency}
-        depth={1}
-        maxDepth={trace.maxHopsConfigured}
-      />
-      <HopGroup
-        title="Unidentified at hop 1 — drilling deeper"
-        kind="unknown"
-        items={unknown}
-        total={total}
-        children={children}
-        currency={currency}
-        depth={1}
-        maxDepth={trace.maxHopsConfigured}
-      />
-    </div>
-  );
+function shortHex(s: string, head = 6, tail = 4): string {
+  if (s.length <= head + tail + 1) return s;
+  return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
-function HopGroup({
-  title,
-  kind,
-  items,
-  total,
-  children,
+function timeAgo(ms: number): string {
+  const days = Math.floor((Date.now() - ms) / (1000 * 60 * 60 * 24));
+  if (days < 1) return "today";
+  if (days === 1) return "1 day ago";
+  if (days < 60) return `${days} days ago`;
+  const months = Math.floor(days / 30);
+  if (months < 24) return `${months}mo ago`;
+  return `${Math.floor(days / 365)}y ago`;
+}
+
+function TxList({
+  trace,
   currency,
+  parentAddress,
   depth,
-  maxDepth,
 }: {
-  title: string;
-  kind: "identified" | "infrastructure" | "unknown";
-  items: HopChild[];
-  total: number;
-  children: Map<string, HopChild[]>;
+  trace: TraceResult;
   currency: Currency;
+  parentAddress: string;
   depth: number;
-  maxDepth: number;
 }) {
-  if (items.length === 0) return null;
-  const headerColor =
-    kind === "identified" ? "#6ee7b7" : kind === "infrastructure" ? "#cbd5f5" : "#fbbf24";
-  return (
-    <div>
+  const txs = trace.inflowsByParent?.[parentAddress.toLowerCase()] ?? [];
+
+  if (txs.length === 0) {
+    return (
       <div
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: 8,
-          marginBottom: 6,
-          fontSize: 11,
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-          fontWeight: 700,
-          color: headerColor,
+          fontSize: 12,
+          color: "rgba(255,255,255,0.45)",
+          padding: "8px 10px",
         }}
       >
-        <span>{title}</span>
-        <span style={{ color: "rgba(255,255,255,0.4)", fontWeight: 500 }}>
-          · {items.length} source{items.length === 1 ? "" : "s"}
-        </span>
+        No incoming transactions found at this hop
+        {depth >= trace.maxHopsConfigured ? " (max hop depth reached)" : ""}.
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        {items.map((c) => (
-          <HopRow
-            key={c.address}
-            child={c}
-            total={total}
-            children={children}
-            currency={currency}
-            depth={depth}
-            maxDepth={maxDepth}
-          />
-        ))}
-      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+      {txs.map((tx, i) => (
+        <TxRow
+          key={`${tx.txHash}-${i}`}
+          tx={tx}
+          currency={currency}
+          trace={trace}
+          depth={depth}
+          chain={trace.chain}
+        />
+      ))}
     </div>
   );
 }
 
-function HopRow({
-  child,
-  total,
-  children,
+function TxRow({
+  tx,
   currency,
+  trace,
   depth,
-  maxDepth,
+  chain,
 }: {
-  child: HopChild;
-  total: number;
-  children: Map<string, HopChild[]>;
+  tx: TraceTx;
   currency: Currency;
+  trace: TraceResult;
   depth: number;
-  maxDepth: number;
+  chain: string;
 }) {
-  const status = classifyAttribution(child.label);
-  const subChildren = children.get(child.address) || [];
-  const canExpand = subChildren.length > 0;
-  const [expanded, setExpanded] = useState(status === "infrastructure" || status === "unknown");
+  const status = txStatus(tx);
+  const canExpand =
+    (status === "unknown" || status === "infrastructure") &&
+    depth < trace.maxHopsConfigured &&
+    !!trace.inflowsByParent?.[tx.fromAddress.toLowerCase()]?.length;
+  const [expanded, setExpanded] = useState(false);
 
-  const pct = total > 0 ? (child.valueChf / total) * 100 : 0;
-  const value = pickValue(child.valueChf, child.valueUsd, currency);
   const dotColor =
-    child.label?.sanctioned
+    status === "sanctioned"
       ? "#ef4444"
       : status === "identified"
       ? "#10b981"
       : status === "infrastructure"
-      ? "#9ca3af"
+      ? "#fbbf24"
       : "#fbbf24";
+
+  const tier = tx.fromLabel?.exchangeTier;
+  const dotBg =
+    status === "sanctioned"
+      ? "rgba(239,68,68,0.08)"
+      : status === "identified" && (tier === "A" || !tier)
+      ? "rgba(16,185,129,0.05)"
+      : status === "identified" && tier === "B"
+      ? "rgba(245,158,11,0.05)"
+      : status === "identified" && tier === "C"
+      ? "rgba(239,68,68,0.06)"
+      : "rgba(255,255,255,0.02)";
+
+  const value = pickValue(tx.valueChf, tx.valueUsd, currency);
+  const explorerUrl = etherscanTxUrl(chain, tx.txHash);
 
   return (
     <div
       style={{
-        border: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.02)",
+        border: `1px solid ${
+          status === "sanctioned"
+            ? "rgba(239,68,68,0.4)"
+            : "rgba(255,255,255,0.06)"
+        }`,
+        background: dotBg,
         borderRadius: 6,
         padding: "8px 10px",
       }}
     >
       <div
         style={{
-          display: "flex",
+          display: "grid",
+          gridTemplateColumns:
+            "10px 1fr auto auto auto",
           alignItems: "center",
-          gap: 10,
+          gap: 12,
           cursor: canExpand ? "pointer" : "default",
         }}
         onClick={() => canExpand && setExpanded((e) => !e)}
       >
         <span
           style={{
-            display: "inline-block",
             width: 8,
             height: 8,
             borderRadius: 4,
             background: dotColor,
-            flexShrink: 0,
+            display: "inline-block",
           }}
         />
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
             <span
               style={{
                 fontSize: 13,
-                fontWeight: status === "identified" ? 700 : 500,
-                color: status === "identified" ? "#fff" : "rgba(255,255,255,0.85)",
+                fontWeight: status === "identified" || status === "sanctioned" ? 700 : 500,
+                color: "#fff",
               }}
             >
-              {child.label?.name || "Unknown"}
+              {tx.fromLabel?.name || "Unknown sender"}
             </span>
-            {child.label?.exchangeTier && (
-              <ExchangeTierBadge tier={child.label.exchangeTier} size="sm" />
-            )}
-            {child.label?.sanctioned && (
+            {tier && <ExchangeTierBadge tier={tier} size="sm" />}
+            {status === "sanctioned" && (
               <span
                 style={{
                   fontSize: 10,
                   color: "#fca5a5",
-                  border: "1px solid rgba(239,68,68,0.4)",
-                  padding: "0 4px",
+                  border: "1px solid rgba(239,68,68,0.5)",
+                  padding: "0 5px",
                   borderRadius: 3,
-                  fontWeight: 700,
+                  fontWeight: 800,
+                  letterSpacing: "0.04em",
                 }}
               >
-                OFAC SDN
+                OFAC SDN — STOP
               </span>
             )}
           </div>
@@ -1575,23 +1524,54 @@ function HopRow({
               fontFamily: "monospace",
               marginTop: 2,
             }}
+            title={tx.fromAddress}
           >
-            {child.address}
+            {shortHex(tx.fromAddress, 10, 6)}
           </div>
         </div>
-        <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
-            {formatMoney(value, currency)}
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 13, color: "#fff" }}>
+            {tx.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}{" "}
+            <span style={{ color: "rgba(255,255,255,0.6)" }}>{tx.token}</span>
           </div>
           <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-            {pct.toFixed(1)}% of inflow
+            {tx.unpriced ? "unpriced" : formatMoney(value, currency)}
           </div>
         </div>
-        {canExpand && (
-          <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginLeft: 6 }}>
-            {expanded ? "▾" : "▸"}
-          </span>
-        )}
+        <div
+          style={{
+            textAlign: "right",
+            fontSize: 11,
+            color: "rgba(255,255,255,0.45)",
+            minWidth: 70,
+          }}
+        >
+          {timeAgo(tx.timestamp)}
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          {explorerUrl && (
+            <a
+              href={explorerUrl}
+              target="_blank"
+              rel="noreferrer"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                fontSize: 11,
+                color: "rgba(255,255,255,0.45)",
+                textDecoration: "none",
+                fontFamily: "monospace",
+              }}
+              title="View on Etherscan"
+            >
+              {shortHex(tx.txHash, 4, 4)} ↗
+            </a>
+          )}
+          {canExpand && (
+            <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>
+              {expanded ? "▾" : "▸"}
+            </span>
+          )}
+        </div>
       </div>
 
       {expanded && canExpand && (
@@ -1599,51 +1579,50 @@ function HopRow({
           style={{
             marginTop: 10,
             paddingLeft: 18,
-            borderLeft: "2px solid rgba(255,255,255,0.08)",
-            display: "flex",
-            flexDirection: "column",
-            gap: 6,
+            borderLeft: `2px solid ${
+              status === "infrastructure"
+                ? "rgba(245,158,11,0.3)"
+                : "rgba(255,255,255,0.1)"
+            }`,
           }}
         >
           <div
             style={{
               fontSize: 10,
-              color: "rgba(255,255,255,0.4)",
+              color: "rgba(255,255,255,0.45)",
               letterSpacing: "0.05em",
               textTransform: "uppercase",
-              marginBottom: 4,
+              marginBottom: 6,
+              fontWeight: 700,
             }}
           >
-            Hop {depth + 1} sources via this address
+            Hop {depth + 1} — incoming transactions to this {status === "infrastructure" ? "contract" : "address"}
           </div>
-          {subChildren.map((sub) => (
-            <HopRow
-              key={sub.address}
-              child={sub}
-              total={total}
-              children={children}
-              currency={currency}
-              depth={depth + 1}
-              maxDepth={maxDepth}
-            />
-          ))}
-        </div>
-      )}
-
-      {!canExpand && status === "unknown" && depth >= maxDepth && (
-        <div
-          style={{
-            marginTop: 8,
-            fontSize: 11,
-            color: "rgba(255,255,255,0.4)",
-            paddingLeft: 18,
-          }}
-        >
-          Max hop depth reached — could not attribute further.
+          <TxList
+            trace={trace}
+            currency={currency}
+            parentAddress={tx.fromAddress}
+            depth={depth + 1}
+          />
         </div>
       )}
     </div>
   );
+}
+
+function etherscanTxUrl(chain: string, txHash: string): string | null {
+  const map: Record<string, string> = {
+    ethereum: "https://etherscan.io",
+    arbitrum: "https://arbiscan.io",
+    base: "https://basescan.org",
+    polygon: "https://polygonscan.com",
+    bsc: "https://bscscan.com",
+    optimism: "https://optimistic.etherscan.io",
+    avalanche: "https://snowtrace.io",
+    monad: "https://monadexplorer.com",
+  };
+  const base = map[chain];
+  return base ? `${base}/tx/${txHash}` : null;
 }
 
 /* ── Step 4: classify ── */
