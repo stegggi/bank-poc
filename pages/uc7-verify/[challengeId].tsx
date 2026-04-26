@@ -178,8 +178,8 @@ export default function VerifyPage() {
             <>
               <li>
                 Use{" "}
-                <a href="https://etherscan.io/verifiedSignatures" target="_blank" rel="noreferrer" style={linkStyle}>
-                  Etherscan&rsquo;s Verify Signature tool
+                <a href="https://app.mycrypto.com/verify-message" target="_blank" rel="noreferrer" style={linkStyle}>
+                  MyCrypto&rsquo;s Verify Message tool
                 </a>{" "}
                 or any EIP-191 verifier.
               </li>
