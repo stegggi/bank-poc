@@ -59,10 +59,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     // Trace each chain in parallel — the Etherscan rate-limiter naturally
     // serializes the API calls underneath, so this won't blow the rate limit
     // and total wall-clock time is roughly the same as sequential.
+    // Hop 1 only for now — the UI is a flat per-chain inflow list à la Etherscan.
+    const hopDepth = Math.min(caseFile.settings.maxHopDepth ?? 1, 1);
     const results = await Promise.all(
       chains.map((ch) =>
         traceBackward(address, ch, {
-          maxHopDepth: caseFile.settings.maxHopDepth,
+          maxHopDepth: hopDepth,
         })
       )
     );

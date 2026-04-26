@@ -7,7 +7,9 @@ import {
 import type { CaseFile, CaseSettings } from "../../../use-cases/uc7-sow-verification/lib/types";
 
 const DEFAULT_SETTINGS: CaseSettings = {
-  maxHopDepth: Number(process.env.MAX_HOP_DEPTH || 3),
+  // Hop 1 only by default — Etherscan-style flat list of incoming transfers.
+  // Override with MAX_HOP_DEPTH if you want recursive drill-down later.
+  maxHopDepth: Number(process.env.MAX_HOP_DEPTH || 1),
   greenThreshold: 0.9,
   amberThreshold: 0.6,
   ttpProvider: (process.env.TTP_PROVIDER as CaseSettings["ttpProvider"]) || "mock",

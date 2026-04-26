@@ -126,6 +126,7 @@ export type TracedSource = {
 /** A single incoming token transfer, rendered in the per-tx hop list. */
 export type TraceTx = {
   txHash: string;
+  blockNumber: number | null;
   timestamp: number; // ms since epoch
   fromAddress: string;
   fromLabel: AddressLabel | null;

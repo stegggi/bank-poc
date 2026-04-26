@@ -1325,27 +1325,21 @@ function ChainTraceCard({
             </details>
           </div>
           <h5 style={{ ...h4, fontSize: 12 }}>Hop 1 incoming transactions</h5>
-          <TxList
-            trace={trace}
-            currency={currency}
-            parentAddress={trace.walletAddress}
-            depth={1}
-          />
+          <Hop1InflowTable trace={trace} currency={currency} />
         </>
       )}
     </div>
   );
 }
 
-/* ── Per-transaction hop list (Etherscan-style) ── */
+/* ── Hop-1 inflow table (Etherscan-style, one per chain) ── */
 type TxStatus = "identified" | "sanctioned" | "infrastructure" | "unknown";
 
 function txStatus(tx: TraceTx): TxStatus {
   const l = tx.fromLabel;
   if (!l) return "unknown";
-  if (l.sanctioned) return "sanctioned";
+  if (l.sanctioned || l.entityType === "mixer") return "sanctioned";
   if (l.entityType === "exchange") return "identified";
-  if (l.entityType === "mixer") return "sanctioned"; // treat as red
   if (l.entityType === "mining_pool" || l.entityType === "staking") return "identified";
   if (l.entityType === "dex" || l.entityType === "bridge" || l.entityType === "contract") {
     return "infrastructure";
@@ -1364,253 +1358,11 @@ function timeAgo(ms: number): string {
   if (days === 1) return "1 day ago";
   if (days < 60) return `${days} days ago`;
   const months = Math.floor(days / 30);
-  if (months < 24) return `${months}mo ago`;
-  return `${Math.floor(days / 365)}y ago`;
+  if (months < 24) return `${months} mo ago`;
+  return `${Math.floor(days / 365)} y ago`;
 }
 
-function TxList({
-  trace,
-  currency,
-  parentAddress,
-  depth,
-}: {
-  trace: TraceResult;
-  currency: Currency;
-  parentAddress: string;
-  depth: number;
-}) {
-  const txs = trace.inflowsByParent?.[parentAddress.toLowerCase()] ?? [];
-
-  if (txs.length === 0) {
-    return (
-      <div
-        style={{
-          fontSize: 12,
-          color: "rgba(255,255,255,0.45)",
-          padding: "8px 10px",
-        }}
-      >
-        No incoming transactions found at this hop
-        {depth >= trace.maxHopsConfigured ? " (max hop depth reached)" : ""}.
-      </div>
-    );
-  }
-
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      {txs.map((tx, i) => (
-        <TxRow
-          key={`${tx.txHash}-${i}`}
-          tx={tx}
-          currency={currency}
-          trace={trace}
-          depth={depth}
-          chain={trace.chain}
-        />
-      ))}
-    </div>
-  );
-}
-
-function TxRow({
-  tx,
-  currency,
-  trace,
-  depth,
-  chain,
-}: {
-  tx: TraceTx;
-  currency: Currency;
-  trace: TraceResult;
-  depth: number;
-  chain: string;
-}) {
-  const status = txStatus(tx);
-  const canExpand =
-    (status === "unknown" || status === "infrastructure") &&
-    depth < trace.maxHopsConfigured &&
-    !!trace.inflowsByParent?.[tx.fromAddress.toLowerCase()]?.length;
-  const [expanded, setExpanded] = useState(false);
-
-  const dotColor =
-    status === "sanctioned"
-      ? "#ef4444"
-      : status === "identified"
-      ? "#10b981"
-      : status === "infrastructure"
-      ? "#fbbf24"
-      : "#fbbf24";
-
-  const tier = tx.fromLabel?.exchangeTier;
-  const dotBg =
-    status === "sanctioned"
-      ? "rgba(239,68,68,0.08)"
-      : status === "identified" && (tier === "A" || !tier)
-      ? "rgba(16,185,129,0.05)"
-      : status === "identified" && tier === "B"
-      ? "rgba(245,158,11,0.05)"
-      : status === "identified" && tier === "C"
-      ? "rgba(239,68,68,0.06)"
-      : "rgba(255,255,255,0.02)";
-
-  const value = pickValue(tx.valueChf, tx.valueUsd, currency);
-  const explorerUrl = etherscanTxUrl(chain, tx.txHash);
-
-  return (
-    <div
-      style={{
-        border: `1px solid ${
-          status === "sanctioned"
-            ? "rgba(239,68,68,0.4)"
-            : "rgba(255,255,255,0.06)"
-        }`,
-        background: dotBg,
-        borderRadius: 6,
-        padding: "8px 10px",
-      }}
-    >
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns:
-            "10px 1fr auto auto auto",
-          alignItems: "center",
-          gap: 12,
-          cursor: canExpand ? "pointer" : "default",
-        }}
-        onClick={() => canExpand && setExpanded((e) => !e)}
-      >
-        <span
-          style={{
-            width: 8,
-            height: 8,
-            borderRadius: 4,
-            background: dotColor,
-            display: "inline-block",
-          }}
-        />
-        <div style={{ minWidth: 0 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-            <span
-              style={{
-                fontSize: 13,
-                fontWeight: status === "identified" || status === "sanctioned" ? 700 : 500,
-                color: "#fff",
-              }}
-            >
-              {tx.fromLabel?.name || "Unknown sender"}
-            </span>
-            {tier && <ExchangeTierBadge tier={tier} size="sm" />}
-            {status === "sanctioned" && (
-              <span
-                style={{
-                  fontSize: 10,
-                  color: "#fca5a5",
-                  border: "1px solid rgba(239,68,68,0.5)",
-                  padding: "0 5px",
-                  borderRadius: 3,
-                  fontWeight: 800,
-                  letterSpacing: "0.04em",
-                }}
-              >
-                OFAC SDN — STOP
-              </span>
-            )}
-          </div>
-          <div
-            style={{
-              fontSize: 11,
-              color: "rgba(255,255,255,0.5)",
-              fontFamily: "monospace",
-              marginTop: 2,
-            }}
-            title={tx.fromAddress}
-          >
-            {shortHex(tx.fromAddress, 10, 6)}
-          </div>
-        </div>
-        <div style={{ textAlign: "right" }}>
-          <div style={{ fontSize: 13, color: "#fff" }}>
-            {tx.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}{" "}
-            <span style={{ color: "rgba(255,255,255,0.6)" }}>{tx.token}</span>
-          </div>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
-            {tx.unpriced ? "unpriced" : formatMoney(value, currency)}
-          </div>
-        </div>
-        <div
-          style={{
-            textAlign: "right",
-            fontSize: 11,
-            color: "rgba(255,255,255,0.45)",
-            minWidth: 70,
-          }}
-        >
-          {timeAgo(tx.timestamp)}
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          {explorerUrl && (
-            <a
-              href={explorerUrl}
-              target="_blank"
-              rel="noreferrer"
-              onClick={(e) => e.stopPropagation()}
-              style={{
-                fontSize: 11,
-                color: "rgba(255,255,255,0.45)",
-                textDecoration: "none",
-                fontFamily: "monospace",
-              }}
-              title="View on Etherscan"
-            >
-              {shortHex(tx.txHash, 4, 4)} ↗
-            </a>
-          )}
-          {canExpand && (
-            <span style={{ color: "rgba(255,255,255,0.45)", fontSize: 12 }}>
-              {expanded ? "▾" : "▸"}
-            </span>
-          )}
-        </div>
-      </div>
-
-      {expanded && canExpand && (
-        <div
-          style={{
-            marginTop: 10,
-            paddingLeft: 18,
-            borderLeft: `2px solid ${
-              status === "infrastructure"
-                ? "rgba(245,158,11,0.3)"
-                : "rgba(255,255,255,0.1)"
-            }`,
-          }}
-        >
-          <div
-            style={{
-              fontSize: 10,
-              color: "rgba(255,255,255,0.45)",
-              letterSpacing: "0.05em",
-              textTransform: "uppercase",
-              marginBottom: 6,
-              fontWeight: 700,
-            }}
-          >
-            Hop {depth + 1} — incoming transactions to this {status === "infrastructure" ? "contract" : "address"}
-          </div>
-          <TxList
-            trace={trace}
-            currency={currency}
-            parentAddress={tx.fromAddress}
-            depth={depth + 1}
-          />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function etherscanTxUrl(chain: string, txHash: string): string | null {
+function explorerBase(chain: string): string | null {
   const map: Record<string, string> = {
     ethereum: "https://etherscan.io",
     arbitrum: "https://arbiscan.io",
@@ -1621,8 +1373,242 @@ function etherscanTxUrl(chain: string, txHash: string): string | null {
     avalanche: "https://snowtrace.io",
     monad: "https://monadexplorer.com",
   };
-  const base = map[chain];
-  return base ? `${base}/tx/${txHash}` : null;
+  return map[chain] ?? null;
+}
+
+function Hop1InflowTable({
+  trace,
+  currency,
+}: {
+  trace: TraceResult;
+  currency: Currency;
+}) {
+  const txs = trace.inflowsByParent?.[trace.walletAddress.toLowerCase()] ?? [];
+
+  if (txs.length === 0) {
+    return (
+      <div
+        style={{
+          fontSize: 12,
+          color: "rgba(255,255,255,0.45)",
+          padding: 14,
+          background: "rgba(255,255,255,0.02)",
+          border: "1px solid rgba(255,255,255,0.06)",
+          borderRadius: 6,
+          textAlign: "center",
+        }}
+      >
+        No incoming transactions detected on this chain.
+      </div>
+    );
+  }
+
+  const explorer = explorerBase(trace.chain);
+  const labeledCount = txs.filter((t) => txStatus(t) === "identified" || txStatus(t) === "sanctioned").length;
+
+  const colHeader: CSSProperties = {
+    fontSize: 10,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    color: "rgba(255,255,255,0.55)",
+    fontWeight: 700,
+    padding: "6px 8px",
+    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    textAlign: "left",
+    whiteSpace: "nowrap",
+  };
+  const cell: CSSProperties = {
+    padding: "8px 8px",
+    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    fontSize: 12,
+    verticalAlign: "middle",
+    color: "rgba(255,255,255,0.85)",
+  };
+
+  return (
+    <div>
+      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
+        Latest {txs.length} ERC-20 + native incoming transfer{txs.length === 1 ? "" : "s"} ·{" "}
+        <span style={{ color: "#6ee7b7" }}>{labeledCount} labeled</span>{" "}
+        / <span style={{ color: "#fbbf24" }}>{txs.length - labeledCount} unknown</span>
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
+          <thead>
+            <tr>
+              <th style={{ ...colHeader, width: 10 }}></th>
+              <th style={colHeader}>Tx Hash</th>
+              <th style={colHeader}>Block</th>
+              <th style={colHeader}>Age</th>
+              <th style={colHeader}>From</th>
+              <th style={{ ...colHeader, textAlign: "center" }}>Dir</th>
+              <th style={{ ...colHeader, textAlign: "right" }}>Amount</th>
+              <th style={colHeader}>Token</th>
+              <th style={{ ...colHeader, textAlign: "right" }}>Value</th>
+            </tr>
+          </thead>
+          <tbody>
+            {txs.map((tx, i) => {
+              const status = txStatus(tx);
+              const tier = tx.fromLabel?.exchangeTier;
+              const dotColor =
+                status === "sanctioned"
+                  ? "#ef4444"
+                  : status === "identified"
+                  ? "#10b981"
+                  : status === "infrastructure"
+                  ? "#cbd5f5"
+                  : "#fbbf24";
+              const rowBg =
+                status === "sanctioned" ? "rgba(239,68,68,0.06)" : "transparent";
+              const value = pickValue(tx.valueChf, tx.valueUsd, currency);
+              const fromExplorerUrl = explorer ? `${explorer}/address/${tx.fromAddress}` : null;
+              const txExplorerUrl = explorer ? `${explorer}/tx/${tx.txHash}` : null;
+
+              return (
+                <tr key={`${tx.txHash}-${i}`} style={{ background: rowBg }}>
+                  <td style={cell}>
+                    <span
+                      title={
+                        status === "sanctioned"
+                          ? "Sanctioned (OFAC SDN)"
+                          : status === "identified"
+                          ? "Identified entity"
+                          : status === "infrastructure"
+                          ? "Infrastructure (DEX / bridge / contract)"
+                          : "Unknown sender"
+                      }
+                      style={{
+                        display: "inline-block",
+                        width: 8,
+                        height: 8,
+                        borderRadius: 4,
+                        background: dotColor,
+                      }}
+                    />
+                  </td>
+                  <td style={{ ...cell, fontFamily: "monospace", fontSize: 11 }}>
+                    {txExplorerUrl ? (
+                      <a
+                        href={txExplorerUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={{ color: "#93c5fd", textDecoration: "none" }}
+                        title={tx.txHash}
+                      >
+                        {shortHex(tx.txHash, 8, 4)}
+                      </a>
+                    ) : (
+                      <span title={tx.txHash}>{shortHex(tx.txHash, 8, 4)}</span>
+                    )}
+                  </td>
+                  <td style={{ ...cell, fontFamily: "monospace", color: "rgba(255,255,255,0.6)" }}>
+                    {tx.blockNumber ?? "—"}
+                  </td>
+                  <td style={{ ...cell, color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap" }}>
+                    {timeAgo(tx.timestamp)}
+                  </td>
+                  <td style={cell}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                      {tx.fromLabel?.name ? (
+                        <>
+                          {fromExplorerUrl ? (
+                            <a
+                              href={fromExplorerUrl}
+                              target="_blank"
+                              rel="noreferrer"
+                              style={{
+                                color: "#fff",
+                                fontWeight: 600,
+                                textDecoration: "none",
+                              }}
+                            >
+                              {tx.fromLabel.name}
+                            </a>
+                          ) : (
+                            <span style={{ color: "#fff", fontWeight: 600 }}>
+                              {tx.fromLabel.name}
+                            </span>
+                          )}
+                          {tier && <ExchangeTierBadge tier={tier} size="sm" />}
+                          {status === "sanctioned" && (
+                            <span
+                              style={{
+                                fontSize: 9,
+                                color: "#fca5a5",
+                                border: "1px solid rgba(239,68,68,0.5)",
+                                padding: "0 4px",
+                                borderRadius: 3,
+                                fontWeight: 800,
+                                letterSpacing: "0.04em",
+                              }}
+                            >
+                              OFAC
+                            </span>
+                          )}
+                        </>
+                      ) : (
+                        <span style={{ color: "rgba(255,255,255,0.5)" }}>Unknown</span>
+                      )}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 10,
+                        color: "rgba(255,255,255,0.45)",
+                        fontFamily: "monospace",
+                        marginTop: 2,
+                      }}
+                    >
+                      {fromExplorerUrl ? (
+                        <a
+                          href={fromExplorerUrl}
+                          target="_blank"
+                          rel="noreferrer"
+                          style={{ color: "rgba(255,255,255,0.45)", textDecoration: "none" }}
+                          title={tx.fromAddress}
+                        >
+                          {shortHex(tx.fromAddress, 10, 6)}
+                        </a>
+                      ) : (
+                        <span title={tx.fromAddress}>{shortHex(tx.fromAddress, 10, 6)}</span>
+                      )}
+                    </div>
+                  </td>
+                  <td style={{ ...cell, textAlign: "center" }}>
+                    <span
+                      style={{
+                        fontSize: 9,
+                        fontWeight: 800,
+                        letterSpacing: "0.05em",
+                        color: "#6ee7b7",
+                        background: "rgba(16,185,129,0.1)",
+                        border: "1px solid rgba(16,185,129,0.4)",
+                        padding: "1px 6px",
+                        borderRadius: 4,
+                      }}
+                    >
+                      IN
+                    </span>
+                  </td>
+                  <td style={{ ...cell, textAlign: "right", fontFamily: "monospace" }}>
+                    {tx.amount.toLocaleString("de-CH", { maximumFractionDigits: 6 })}
+                  </td>
+                  <td style={{ ...cell, fontWeight: 600 }}>{tx.token}</td>
+                  <td style={{ ...cell, textAlign: "right" }}>
+                    {tx.unpriced ? (
+                      <span style={{ color: "rgba(255,255,255,0.4)" }}>unpriced</span>
+                    ) : (
+                      formatMoney(value, currency)
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 }
 
 /* ── Step 4: classify ── */

@@ -23,6 +23,7 @@ type EvmInflow = {
   unpriced: boolean;
   timestamp: number;
   txHash: string;
+  blockNumber: number | null;
 };
 
 const CHAIN_ID_MAP: Record<string, number> = {
@@ -83,6 +84,7 @@ type RawTx = {
   to: string;
   value: string;
   timeStamp: string;
+  blockNumber?: string;
 };
 
 type RawTokenTx = RawTx & {
@@ -173,6 +175,7 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
       unpriced: false,
       timestamp: Number(tx.timeStamp) * 1000,
       txHash: tx.hash,
+      blockNumber: tx.blockNumber ? Number(tx.blockNumber) : null,
     });
   };
 
@@ -200,6 +203,7 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
         unpriced,
         timestamp: Number(tx.timeStamp) * 1000,
         txHash: tx.hash,
+        blockNumber: tx.blockNumber ? Number(tx.blockNumber) : null,
       });
     }
   }
@@ -228,6 +232,7 @@ async function inflowsToTraceTxs(
     const amount = Number(inf.valueWei) / Math.pow(10, inf.tokenDecimals);
     out.push({
       txHash: inf.txHash,
+      blockNumber: inf.blockNumber,
       timestamp: inf.timestamp,
       fromAddress: inf.from,
       fromLabel: label,
