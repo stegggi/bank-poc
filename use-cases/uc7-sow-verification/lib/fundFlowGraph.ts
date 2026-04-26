@@ -91,14 +91,16 @@ export function layoutFundFlow(
 
 /**
  * Render the fund flow as SVG string — usable in PDF report.
+ * `currency` defaults to "CHF" since the PDF is FINMA-denominated in CHF.
  */
 export function renderFundFlowSvg(
   trace: TraceResult,
-  opts: LayoutOptions = {}
+  opts: LayoutOptions & { currency?: "CHF" | "USD" } = {}
 ): string {
   const layout = layoutFundFlow(trace, opts);
   const nodeWidth = opts.nodeWidth ?? 180;
   const nodeHeight = opts.nodeHeight ?? 58;
+  const currency = opts.currency ?? "CHF";
 
   const esc = (s: string): string =>
     s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -137,9 +139,11 @@ export function renderFundFlowSvg(
       }
 
       const title = n.label?.name || (n.kind === "wallet" ? "Client wallet" : "Unknown");
-      const valLabel = `CHF ${n.valueChf.toLocaleString("de-CH", {
-        maximumFractionDigits: 0,
-      })}`;
+      const value = currency === "USD" ? n.valueUsd : n.valueChf;
+      const valLabel =
+        currency === "USD"
+          ? `$${value.toLocaleString("en-US", { maximumFractionDigits: 0 })}`
+          : `CHF ${value.toLocaleString("de-CH", { maximumFractionDigits: 0 })}`;
 
       return `
 <g>

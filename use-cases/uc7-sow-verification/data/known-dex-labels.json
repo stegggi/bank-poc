@@ -93,6 +93,69 @@
     "0xf2b067e6d3aac7a3f6fba95e4cd7a8f6aec1d9a6": {
       "name": "F2Pool Mining Pool",
       "entityType": "mining_pool"
+    },
+
+    "0xa51afafe0263b40edaef0df8781ea9aa03e381a3": {
+      "name": "Uniswap V4: Universal Router",
+      "entityType": "dex"
+    },
+    "0x360e68faccca8ca495c1b759fd9eee466db9fb32": {
+      "name": "Uniswap V4: Pool Manager",
+      "entityType": "dex"
+    },
+
+    "0xa3a7b6f88361f48403514059f1f16c8e78d60eec": {
+      "name": "Arbitrum One: L1 ERC20 Gateway",
+      "entityType": "bridge"
+    },
+    "0xcee284f754e854890e311e3280b767f80797180d": {
+      "name": "Arbitrum One: L1 Bridge",
+      "entityType": "bridge"
+    },
+    "0x99c9fc46f92e8a1c0dec1b1747d010903e884be1": {
+      "name": "Optimism: L1 Standard Bridge",
+      "entityType": "bridge"
+    },
+    "0x2df1c51e09aecf9cacb7bc98cb1742757f163df7": {
+      "name": "Hyperliquid: Deposit Bridge 2",
+      "entityType": "bridge"
+    },
+
+    "0x888888888889758f76e7103c6cbf23abbf58f946": {
+      "name": "Pendle: RouterV4",
+      "entityType": "contract"
+    },
+    "0x4f30a9d41b80ecc5b94306ab4364951ae3170210": {
+      "name": "Pendle: vePendle",
+      "entityType": "staking"
+    },
+    "0x999999999991e178d52cd95afd4b00d066664144": {
+      "name": "Pendle: sPENDLE Token",
+      "entityType": "staking"
+    },
+    "0x30ccf4bbee313fcd19f3e295b3ba2920a24e2f62": {
+      "name": "Pendle: SY-sUSDai Token",
+      "entityType": "contract"
+    },
+    "0x214d1950027863f5e1ec6369797d9a51ef1bb66f": {
+      "name": "Pendle: YT-sUSDai-19FEB2026 Token",
+      "entityType": "contract"
+    },
+    "0x2092fa5d02276b3136a50f3c2c3a6ed45413183e": {
+      "name": "Pendle: PLP-sUSDai-19FEB2026 Token",
+      "entityType": "contract"
+    },
+    "0x8e101c690390de722163d4dc3f76043bebbbcadd": {
+      "name": "Pendle: PENDLE-LPT Token 61",
+      "entityType": "contract"
+    },
+    "0x5edcbc20cac67adc2e724d4348ff85132b085b82": {
+      "name": "Pendle: SY-USDai Token",
+      "entityType": "contract"
+    },
+    "0xa55e2f0a15295f4f4290d7dfcc3f6ebd2e4edcb8": {
+      "name": "Pendle: YT-USDai-20NOV2025 Token",
+      "entityType": "contract"
     }
   }
 }

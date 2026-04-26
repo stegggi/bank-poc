@@ -556,6 +556,11 @@ async function scanEvmChain(
     const totalChf = nativeBalanceChf + tokenValueChf;
     const totalUsd = nativeBalanceUsd + tokenValueUsd;
 
+    const spamCount = tokenBalances.filter((t) => t.suspicious).length;
+    const legitTokens = tokenBalances.filter((t) => !t.suspicious);
+    const spamOnly =
+      wei === BigInt(0) && legitTokens.length === 0 && tokenBalances.length > 0;
+
     return {
       chain: chain.name,
       chainId: chain.chainId,
@@ -569,6 +574,8 @@ async function scanEvmChain(
       totalUsd,
       txCount,
       hasActivity: wei > BigInt(0) || tokenBalances.length > 0 || txCount > 0,
+      spamOnly,
+      spamTokenCount: spamCount,
     };
   } catch {
     return {
@@ -730,7 +737,16 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
       // eslint-disable-next-line no-await-in-loop
       chains.push(await scanEvmChain(address, c, apiKey));
     }
-    const active = chains.filter((c) => c.hasActivity);
+    const withActivity = chains.filter((c) => c.hasActivity);
+    // Split into legit vs spam-only chains so the UI can hide the latter.
+    const active = withActivity.filter((c) => !c.spamOnly);
+    const spamChains = withActivity
+      .filter((c) => c.spamOnly)
+      .map((c) => ({
+        chain: c.chain,
+        chainId: c.chainId,
+        spamTokenCount: c.spamTokenCount ?? c.tokenBalances.length,
+      }));
     const totalChf = active.reduce((s, c) => s + c.totalChf, 0);
     const totalUsd = active.reduce((s, c) => s + c.totalUsd, 0);
     return {
@@ -740,6 +756,7 @@ export async function scanWallet(address: string): Promise<WalletScanResult> {
       totalValueChf: totalChf,
       totalValueUsd: totalUsd,
       scannedAt,
+      ...(spamChains.length > 0 ? { spamChains } : {}),
     };
   }
 

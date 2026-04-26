@@ -38,6 +38,8 @@ export type ChainActivity = {
   totalUsd: number;
   txCount: number;
   hasActivity: boolean;
+  spamOnly?: boolean;
+  spamTokenCount?: number;
 };
 
 export type WalletScanResult = {
@@ -48,6 +50,7 @@ export type WalletScanResult = {
   totalValueUsd: number;
   scannedAt: string;
   warning?: string;
+  spamChains?: Array<{ chain: string; chainId?: number; spamTokenCount: number }>;
 };
 
 export type EntityType =
@@ -96,6 +99,7 @@ export type FundFlowNode = {
   address: string;
   label: AddressLabel | null;
   valueChf: number;
+  valueUsd: number;
   hopDepth: number;
   kind: "wallet" | "source" | "intermediate";
 };
@@ -104,12 +108,14 @@ export type FundFlowEdge = {
   from: string;
   to: string;
   valueChf: number;
+  valueUsd: number;
   token?: string;
 };
 
 export type TracedSource = {
   address: string;
   valueChf: number;
+  valueUsd: number;
   percentage: number;
   label: AddressLabel | null;
   hopDepth: number;
@@ -121,7 +127,9 @@ export type TraceResult = {
   walletAddress: string;
   chain: string;
   totalIncomingValueChf: number;
+  totalIncomingValueUsd: number;
   attributedValueChf: number;
+  attributedValueUsd: number;
   attributedPercentage: number;
   sources: TracedSource[];
   hopsUsed: number;

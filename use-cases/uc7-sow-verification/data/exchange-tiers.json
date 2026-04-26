@@ -9,9 +9,38 @@
       "0xddfabcdc4d8ffc6d5beaf154f18b778f892a0740",
       "0x3cd751e6b0078be393132286c442345e5dc49699",
       "0xb5d85cbf7cb3ee0d56b3bb207d5fc4b82f43f511",
-      "0x77696bb39917c91a0c3908d577d5e322095425ca"
+      "0x77696bb39917c91a0c3908d577d5e322095425ca",
+      "0xa090e606e30bd747d4e6245a1517ebe430f0057e",
+      "0xeb2629a2734e272bcc07bda959863f316f4bd4cf",
+      "0xd688aea8f7d450909ade10c47faa95707b0682d9",
+      "0xa9d1e08c7793af67e9d92fe308d5697fb81d3e43",
+      "0x85b931a32a0725be14285b66f1a22178c672d69b",
+      "0x6b76f8b1e9e59913bfe758821887311ba1805cab",
+      "0xf6874c88757721a02f47592140905c4336dfbc61",
+      "0xa910f92acdaf488fa6ef02174fb86208ad7722ba",
+      "0x6c7d4b196cb0c66b491ae502b1bee9f57bbb3dd6",
+      "0x46340b20830761efd32832a74d7169b29feb9758",
+      "0x5cf04716ba20127f1e2297addf5c5ed0a8c6a5fc",
+      "0x563537412ad5d49faa7fa442b9193b8238d98c3c",
+      "0x6cc5f688a315f3dc28a7781717a9a798a59fda7b",
+      "0x3a35e4cab85ec1f7afdf6d06b50cb1bbf8df7d31",
+      "0x6b2c0c7be2048daa9b5527982c29f48062b34d58",
+      "0x90e9ddd9d8d5ae4e3763d0cf856c97594dea7325",
+      "0x4d04eb67a2d1e01c71fad0366e0c200207a75487"
     ],
-    "notes": "Fully regulated US exchange; MiCA CASP license in Ireland for EU."
+    "notes": "Fully regulated US exchange; MiCA CASP license in Ireland for EU. Address list covers Coinbase 1-15 and selected high-volume hot wallets (10, 40)."
+  },
+  "robinhood": {
+    "tier": "A",
+    "displayName": "Robinhood Crypto",
+    "licenses": ["FinCEN MSB", "NYDFS BitLicense"],
+    "knownAddresses": [
+      "0xa910f92acdaf488fa6ef02174fb86208ad7722ba",
+      "0x40b38765696e3d5d8d9d834d8aad4bb6e418f489",
+      "0x6081258689a75d253d87ce902a8de3887239fe80",
+      "0x5d3a536e4d6dbd6114cc1ead35777bab948e3643"
+    ],
+    "notes": "US regulated crypto custodian (Robinhood Crypto LLC)."
   },
   "kraken": {
     "tier": "A",

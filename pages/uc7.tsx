@@ -183,6 +183,7 @@ export default function Uc7Page() {
                     caseFile={activeCase}
                     onUpdated={refreshCase}
                     onNext={() => setStep("classify")}
+                    currency={currency}
                   />
                 )}
                 {step === "classify" && (
@@ -680,6 +681,26 @@ function StepSetup({
                   </div>
                 )}
 
+                {hasScan && (w.scan?.spamChains?.length ?? 0) > 0 && (
+                  <div
+                    style={{
+                      marginTop: 10,
+                      padding: "8px 12px",
+                      borderRadius: 6,
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      background: "rgba(255,255,255,0.02)",
+                      color: "rgba(255,255,255,0.55)",
+                      fontSize: 12,
+                    }}
+                  >
+                    Excluded as spam-only:{" "}
+                    {(w.scan?.spamChains ?? [])
+                      .map((sc) => `${sc.chain} (${sc.spamTokenCount} airdrop token${sc.spamTokenCount === 1 ? "" : "s"})`)
+                      .join(", ")}
+                    .
+                  </div>
+                )}
+
                 {!hasScan && isScanning && (
                   <div style={{ marginTop: 10, color: "rgba(255,255,255,0.65)", fontSize: 13 }}>
                     <Spinner /> &nbsp;Scanning {detection.chainFamily === "evm" ? "6 EVM chains" : "on-chain activity"}…
@@ -987,10 +1008,12 @@ function StepScan({
   caseFile,
   onUpdated,
   onNext,
+  currency,
 }: {
   caseFile: CaseFile;
   onUpdated: (ref: string) => void;
   onNext: () => void;
+  currency: Currency;
 }) {
   const [runningSet, setRunningSet] = useState<Set<string>>(new Set());
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
@@ -1053,6 +1076,7 @@ function StepScan({
             wallet={w}
             running={runningSet.has(w.address)}
             onRun={() => runTrace(w.address)}
+            currency={currency}
           />
         ))}
       </div>
@@ -1069,10 +1093,12 @@ function TraceRow({
   wallet,
   running,
   onRun,
+  currency,
 }: {
   wallet: WalletRecord;
   running: boolean;
   onRun: () => void;
+  currency: Currency;
 }) {
   const trace = wallet.trace;
   const [stage, setStage] = useState(0);
@@ -1149,8 +1175,28 @@ function TraceRow({
                   : "#ef4444"
               }
             />
-            <Stat label="Attributed" value={formatChf(trace.attributedValueChf)} />
-            <Stat label="Total inflow" value={formatChf(trace.totalIncomingValueChf)} />
+            <Stat
+              label="Attributed"
+              value={formatMoney(
+                pickValue(
+                  trace.attributedValueChf,
+                  trace.attributedValueUsd ?? 0,
+                  currency
+                ),
+                currency
+              )}
+            />
+            <Stat
+              label="Total inflow"
+              value={formatMoney(
+                pickValue(
+                  trace.totalIncomingValueChf,
+                  trace.totalIncomingValueUsd ?? 0,
+                  currency
+                ),
+                currency
+              )}
+            />
             <Stat label="Hops used" value={`${trace.hopsUsed} / ${trace.maxHopsConfigured}`} />
             <Stat
               label="Sanctions"
@@ -1169,7 +1215,7 @@ function TraceRow({
           {trace.sources.length > 0 ? (
             <>
               <h5 style={{ ...h4, fontSize: 12 }}>Fund flow</h5>
-              <FundFlowDiagram trace={trace} height={360} />
+              <FundFlowDiagram trace={trace} height={360} currency={currency} />
 
               <h5 style={{ ...h4, fontSize: 12, marginTop: 16 }}>Top sources</h5>
               <table style={tableStyle}>
@@ -1200,7 +1246,7 @@ function TraceRow({
                             <ExchangeTierBadge tier={s.label.exchangeTier} size="sm" />
                           </span>
                         )}
-                        {s.unpriced && (
+                        {s.unpriced && (!s.label || s.label.entityType === "unknown") && (
                           <span
                             style={{
                               marginLeft: 6,
@@ -1210,6 +1256,7 @@ function TraceRow({
                               padding: "1px 4px",
                               borderRadius: 3,
                             }}
+                            title="No priced inflow could be matched against this source"
                           >
                             UNPRICED
                           </span>
@@ -1217,7 +1264,12 @@ function TraceRow({
                       </td>
                       <td style={tdStyle}>{s.label?.entityType || "unknown"}</td>
                       <td style={tdStyle}>{(s.percentage * 100).toFixed(1)}%</td>
-                      <td style={tdStyle}>{formatChf(s.valueChf)}</td>
+                      <td style={tdStyle}>
+                        {formatMoney(
+                          pickValue(s.valueChf, s.valueUsd ?? 0, currency),
+                          currency
+                        )}
+                      </td>
                       <td style={tdStyle}>{s.hopDepth}</td>
                     </tr>
                   ))}

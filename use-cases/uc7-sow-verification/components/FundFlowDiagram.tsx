@@ -1,17 +1,20 @@
 import { useMemo } from "react";
 import type { TraceResult } from "../lib/types";
 import { layoutFundFlow } from "../lib/fundFlowGraph";
+import type { Currency } from "../lib/format";
+import { formatMoney } from "../lib/format";
 
 type Props = {
   trace: TraceResult;
   height?: number;
+  currency?: Currency;
 };
 
 function shortAddr(addr: string): string {
   return addr.length > 14 ? `${addr.slice(0, 6)}…${addr.slice(-4)}` : addr;
 }
 
-export default function FundFlowDiagram({ trace, height = 420 }: Props) {
+export default function FundFlowDiagram({ trace, height = 420, currency = "CHF" }: Props) {
   const layout = useMemo(
     () => layoutFundFlow(trace, { width: 880, columnWidth: 240, nodeWidth: 180 }),
     [trace]
@@ -80,12 +83,11 @@ export default function FundFlowDiagram({ trace, height = 420 }: Props) {
           const title =
             n.label?.name ||
             (n.kind === "wallet" ? "Client wallet" : "Unknown");
-          const valLabel = `CHF ${n.valueChf.toLocaleString("de-CH", {
-            maximumFractionDigits: 0,
-          })}`;
+          const value = currency === "USD" ? n.valueUsd : n.valueChf;
+          const valLabel = formatMoney(value, currency);
           return (
             <g key={n.id}>
-              <title>{`${title}\n${n.address}\nCHF ${n.valueChf.toFixed(2)}`}</title>
+              <title>{`${title}\n${n.address}\n${formatMoney(value, currency, { decimals: 2 })}`}</title>
               <rect
                 x={n.x}
                 y={n.y}

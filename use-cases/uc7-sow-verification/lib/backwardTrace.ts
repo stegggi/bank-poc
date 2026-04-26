@@ -7,7 +7,7 @@ import type {
   TracedSource,
 } from "./types";
 import { lookupAddress } from "./labelDatabase";
-import { getPriceChf, etherscanFetch, buildEtherscanUrl } from "./multiChainScan";
+import { getPrice, etherscanFetch, buildEtherscanUrl, type DualPrice } from "./multiChainScan";
 
 type EvmInflow = {
   from: string;
@@ -16,7 +16,9 @@ type EvmInflow = {
   token: string;
   tokenDecimals: number;
   priceChf: number;
+  priceUsd: number;
   valueChf: number;
+  valueUsd: number;
   unpriced: boolean;
   timestamp: number;
   txHash: string;
@@ -88,17 +90,20 @@ type RawTokenTx = RawTx & {
   contractAddress: string;
 };
 
-async function priceForSymbol(sym: string): Promise<{ price: number; unpriced: boolean }> {
+async function priceForSymbol(sym: string): Promise<{ price: DualPrice; unpriced: boolean }> {
   const upper = sym.toUpperCase();
   if (STABLECOIN_SYMBOLS.has(upper)) {
-    const price = await getPriceChf(upper);
-    return { price: price || 0.9, unpriced: false };
+    const price = await getPrice(upper);
+    return {
+      price: { chf: price.chf || 0.9, usd: price.usd || 1 },
+      unpriced: false,
+    };
   }
   if (PRICEABLE_SYMBOLS.has(upper)) {
-    const price = await getPriceChf(upper);
-    return { price, unpriced: price === 0 };
+    const price = await getPrice(upper);
+    return { price, unpriced: price.chf === 0 && price.usd === 0 };
   }
-  return { price: 0, unpriced: true };
+  return { price: { chf: 0, usd: 0 }, unpriced: true };
 }
 
 async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflow[]> {
@@ -145,7 +150,7 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
 
   const addr = address.toLowerCase();
   const nativeSymbol = CHAIN_NATIVE[chain] || "ETH";
-  const nativePrice = await getPriceChf(nativeSymbol);
+  const nativePrice = await getPrice(nativeSymbol);
 
   const inflows: EvmInflow[] = [];
 
@@ -160,8 +165,10 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
       valueWei: wei,
       token: nativeSymbol,
       tokenDecimals: 18,
-      priceChf: nativePrice,
-      valueChf: native * nativePrice,
+      priceChf: nativePrice.chf,
+      priceUsd: nativePrice.usd,
+      valueChf: native * nativePrice.chf,
+      valueUsd: native * nativePrice.usd,
       unpriced: false,
       timestamp: Number(tx.timeStamp) * 1000,
       txHash: tx.hash,
@@ -185,8 +192,10 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
         valueWei: raw,
         token: sym,
         tokenDecimals: dec,
-        priceChf: price,
-        valueChf: amount * price,
+        priceChf: price.chf,
+        priceUsd: price.usd,
+        valueChf: amount * price.chf,
+        valueUsd: amount * price.usd,
         unpriced,
         timestamp: Number(tx.timeStamp) * 1000,
         txHash: tx.hash,
@@ -197,39 +206,54 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
   return inflows;
 }
 
+type SourceAgg = {
+  chf: number;
+  usd: number;
+  pricedChf: number; // sum of priced inflows only — used for the "unpriced" badge
+};
+
 function aggregateBySource(inflows: EvmInflow[]): {
-  values: Map<string, number>;
-  unpricedMask: Map<string, boolean>;
+  values: Map<string, SourceAgg>;
+  // A source is "fully unpriced" only if NONE of its inflows had a real price.
+  fullyUnpriced: Map<string, boolean>;
 } {
-  const values = new Map<string, number>();
-  const unpricedMask = new Map<string, boolean>();
+  const values = new Map<string, SourceAgg>();
   for (const inf of inflows) {
-    const cur = values.get(inf.from) || 0;
-    values.set(inf.from, cur + inf.valueChf);
-    if (inf.unpriced) unpricedMask.set(inf.from, true);
+    const cur = values.get(inf.from) || { chf: 0, usd: 0, pricedChf: 0 };
+    cur.chf += inf.valueChf;
+    cur.usd += inf.valueUsd;
+    if (!inf.unpriced) cur.pricedChf += inf.valueChf;
+    values.set(inf.from, cur);
   }
-  return { values, unpricedMask };
+  const fullyUnpriced = new Map<string, boolean>();
+  for (const [src, agg] of values) {
+    if (agg.pricedChf === 0 && agg.chf === 0) fullyUnpriced.set(src, true);
+  }
+  return { values, fullyUnpriced };
 }
 
+type TopSource = { address: string; chf: number; usd: number };
+
 function topSources(
-  values: Map<string, number>,
+  values: Map<string, SourceAgg>,
   coveragePct = 0.9
-): { sources: Array<{ address: string; valueChf: number }>; total: number } {
+): { sources: TopSource[]; totalChf: number; totalUsd: number } {
   const entries = Array.from(values.entries())
-    .map(([address, valueChf]) => ({ address, valueChf }))
-    .sort((a, b) => b.valueChf - a.valueChf);
+    .map(([address, agg]): TopSource => ({ address, chf: agg.chf, usd: agg.usd }))
+    .sort((a, b) => b.chf - a.chf);
 
-  const total = entries.reduce((s, e) => s + e.valueChf, 0);
-  if (total <= 0) return { sources: [], total };
+  const totalChf = entries.reduce((s, e) => s + e.chf, 0);
+  const totalUsd = entries.reduce((s, e) => s + e.usd, 0);
+  if (totalChf <= 0) return { sources: [], totalChf, totalUsd };
 
-  const out: Array<{ address: string; valueChf: number }> = [];
+  const out: TopSource[] = [];
   let acc = 0;
   for (const e of entries) {
     out.push(e);
-    acc += e.valueChf;
-    if (acc >= total * coveragePct) break;
+    acc += e.chf;
+    if (acc >= totalChf * coveragePct) break;
   }
-  return { sources: out, total };
+  return { sources: out, totalChf, totalUsd };
 }
 
 async function traceBitcoin(address: string): Promise<TraceResult> {
@@ -246,8 +270,8 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
       vin: Array<{ prevout?: { scriptpubkey_address?: string; value?: number } }>;
       vout: Array<{ scriptpubkey_address?: string; value?: number }>;
     }>;
-    const btcPrice = await getPriceChf("BTC");
-    const agg = new Map<string, number>();
+    const btcPrice = await getPrice("BTC");
+    const agg = new Map<string, SourceAgg>();
     for (const tx of txs) {
       for (const vin of tx.vin) {
         const src = vin.prevout?.scriptpubkey_address;
@@ -257,24 +281,35 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
           .reduce((s, v) => s + (v.value ?? 0), 0);
         if (ourOut <= 0) continue;
         const btc = ourOut / 1e8;
-        const chf = btc * btcPrice;
-        const cur = agg.get(src) || 0;
-        agg.set(src, cur + chf);
+        const cur = agg.get(src) || { chf: 0, usd: 0, pricedChf: 0 };
+        cur.chf += btc * btcPrice.chf;
+        cur.usd += btc * btcPrice.usd;
+        cur.pricedChf += btc * btcPrice.chf;
+        agg.set(src, cur);
       }
     }
-    const { sources, total } = topSources(agg);
+    const { sources, totalChf, totalUsd } = topSources(agg);
     const tracedSources: TracedSource[] = [];
     const sanctionsHits: SanctionsHit[] = [];
     const nodes: FundFlowNode[] = [
-      { id: address, address, label: null, valueChf: total, hopDepth: 0, kind: "wallet" },
+      {
+        id: address,
+        address,
+        label: null,
+        valueChf: totalChf,
+        valueUsd: totalUsd,
+        hopDepth: 0,
+        kind: "wallet",
+      },
     ];
     const edges: FundFlowEdge[] = [];
     for (const s of sources) {
       const label = await lookupAddress(s.address, "bitcoin");
       tracedSources.push({
         address: s.address,
-        valueChf: s.valueChf,
-        percentage: total > 0 ? s.valueChf / total : 0,
+        valueChf: s.chf,
+        valueUsd: s.usd,
+        percentage: totalChf > 0 ? s.chf / totalChf : 0,
         label,
         hopDepth: 1,
         path: [address, s.address],
@@ -283,11 +318,18 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
         id: s.address,
         address: s.address,
         label,
-        valueChf: s.valueChf,
+        valueChf: s.chf,
+        valueUsd: s.usd,
         hopDepth: 1,
         kind: "source",
       });
-      edges.push({ from: s.address, to: address, valueChf: s.valueChf, token: "BTC" });
+      edges.push({
+        from: s.address,
+        to: address,
+        valueChf: s.chf,
+        valueUsd: s.usd,
+        token: "BTC",
+      });
       if (label.sanctioned) {
         sanctionsHits.push({
           address: s.address,
@@ -296,16 +338,21 @@ async function traceBitcoin(address: string): Promise<TraceResult> {
         });
       }
     }
-    const attributed = tracedSources
+    const attributedChf = tracedSources
       .filter((s) => s.label && s.label.entityType !== "unknown")
       .reduce((acc, s) => acc + s.valueChf, 0);
+    const attributedUsd = tracedSources
+      .filter((s) => s.label && s.label.entityType !== "unknown")
+      .reduce((acc, s) => acc + s.valueUsd, 0);
 
     return {
       walletAddress: address,
       chain: "bitcoin",
-      totalIncomingValueChf: total,
-      attributedValueChf: attributed,
-      attributedPercentage: total > 0 ? attributed / total : 0,
+      totalIncomingValueChf: totalChf,
+      totalIncomingValueUsd: totalUsd,
+      attributedValueChf: attributedChf,
+      attributedValueUsd: attributedUsd,
+      attributedPercentage: totalChf > 0 ? attributedChf / totalChf : 0,
       sources: tracedSources,
       hopsUsed: 1,
       maxHopsConfigured: 1,
@@ -324,13 +371,25 @@ function emptyTrace(address: string, chain: string, tracedAt: string): TraceResu
     walletAddress: address,
     chain,
     totalIncomingValueChf: 0,
+    totalIncomingValueUsd: 0,
     attributedValueChf: 0,
+    attributedValueUsd: 0,
     attributedPercentage: 0,
     sources: [],
     hopsUsed: 0,
     maxHopsConfigured: 0,
     sanctionsHits: [],
-    nodes: [{ id: address, address, label: null, valueChf: 0, hopDepth: 0, kind: "wallet" }],
+    nodes: [
+      {
+        id: address,
+        address,
+        label: null,
+        valueChf: 0,
+        valueUsd: 0,
+        hopDepth: 0,
+        kind: "wallet",
+      },
+    ],
     edges: [],
     tracedAt,
   };
@@ -356,12 +415,20 @@ export async function traceBackward(
     return emptyTrace(address, chain, tracedAt);
   }
   const aggHop1 = aggregateBySource(initialInflows);
-  const { sources: hop1, total } = topSources(aggHop1.values);
+  const { sources: hop1, totalChf, totalUsd } = topSources(aggHop1.values);
 
   const tracedSources: TracedSource[] = [];
   const sanctionsHits: SanctionsHit[] = [];
   const nodes: FundFlowNode[] = [
-    { id: address, address, label: null, valueChf: total, hopDepth: 0, kind: "wallet" },
+    {
+      id: address,
+      address,
+      label: null,
+      valueChf: totalChf,
+      valueUsd: totalUsd,
+      hopDepth: 0,
+      kind: "wallet",
+    },
   ];
   const edges: FundFlowEdge[] = [];
   const seenNodeIds = new Set<string>([address]);
@@ -370,6 +437,7 @@ export async function traceBackward(
     src: string;
     parent: string;
     valueChf: number;
+    valueUsd: number;
     depth: number;
     path: string[];
     unpriced: boolean;
@@ -377,13 +445,27 @@ export async function traceBackward(
   const queue: Queue = hop1.map((s) => ({
     src: s.address,
     parent: address,
-    valueChf: s.valueChf,
+    valueChf: s.chf,
+    valueUsd: s.usd,
     depth: 1,
     path: [address, s.address],
-    unpriced: !!aggHop1.unpricedMask.get(s.address),
+    unpriced: !!aggHop1.fullyUnpriced.get(s.address),
   }));
 
   let hopsUsed = 0;
+
+  function pushTraced(item: Queue[number], label: AddressLabel) {
+    tracedSources.push({
+      address: item.src,
+      valueChf: item.valueChf,
+      valueUsd: item.valueUsd,
+      percentage: totalChf > 0 ? item.valueChf / totalChf : 0,
+      label,
+      hopDepth: item.depth,
+      path: item.path,
+      unpriced: item.unpriced,
+    });
+  }
 
   while (queue.length > 0) {
     const item = queue.shift()!;
@@ -396,12 +478,18 @@ export async function traceBackward(
         address: item.src,
         label,
         valueChf: item.valueChf,
+        valueUsd: item.valueUsd,
         hopDepth: item.depth,
         kind: "source",
       });
       seenNodeIds.add(item.src);
     }
-    edges.push({ from: item.src, to: item.parent, valueChf: item.valueChf });
+    edges.push({
+      from: item.src,
+      to: item.parent,
+      valueChf: item.valueChf,
+      valueUsd: item.valueUsd,
+    });
 
     if (label.sanctioned) {
       sanctionsHits.push({
@@ -409,28 +497,12 @@ export async function traceBackward(
         listName: "OFAC SDN",
         reason: label.name || "Sanctioned entity",
       });
-      tracedSources.push({
-        address: item.src,
-        valueChf: item.valueChf,
-        percentage: total > 0 ? item.valueChf / total : 0,
-        label,
-        hopDepth: item.depth,
-        path: item.path,
-        unpriced: item.unpriced,
-      });
+      pushTraced(item, label);
       continue;
     }
 
     if (label.entityType === "exchange") {
-      tracedSources.push({
-        address: item.src,
-        valueChf: item.valueChf,
-        percentage: total > 0 ? item.valueChf / total : 0,
-        label,
-        hopDepth: item.depth,
-        path: item.path,
-        unpriced: item.unpriced,
-      });
+      pushTraced(item, label);
       continue;
     }
 
@@ -447,10 +519,11 @@ export async function traceBackward(
         queue.push({
           src: s.address,
           parent: item.src,
-          valueChf: s.valueChf,
+          valueChf: s.chf,
+          valueUsd: s.usd,
           depth: item.depth + 1,
           path: [...item.path, s.address],
-          unpriced: !!agg.unpricedMask.get(s.address),
+          unpriced: !!agg.fullyUnpriced.get(s.address),
         });
       }
       continue;
@@ -459,15 +532,7 @@ export async function traceBackward(
     if (label.entityType === "unknown" && item.depth < maxHopDepth) {
       const deeper = await loadIncomingEvm(item.src, chain);
       if (deeper.length === 0) {
-        tracedSources.push({
-          address: item.src,
-          valueChf: item.valueChf,
-          percentage: total > 0 ? item.valueChf / total : 0,
-          label,
-          hopDepth: item.depth,
-          path: item.path,
-          unpriced: item.unpriced,
-        });
+        pushTraced(item, label);
         continue;
       }
       const agg = aggregateBySource(deeper);
@@ -476,36 +541,34 @@ export async function traceBackward(
         queue.push({
           src: s.address,
           parent: item.src,
-          valueChf: Math.min(s.valueChf, item.valueChf),
+          valueChf: Math.min(s.chf, item.valueChf),
+          valueUsd: Math.min(s.usd, item.valueUsd),
           depth: item.depth + 1,
           path: [...item.path, s.address],
-          unpriced: !!agg.unpricedMask.get(s.address),
+          unpriced: !!agg.fullyUnpriced.get(s.address),
         });
       }
       continue;
     }
 
-    tracedSources.push({
-      address: item.src,
-      valueChf: item.valueChf,
-      percentage: total > 0 ? item.valueChf / total : 0,
-      label,
-      hopDepth: item.depth,
-      path: item.path,
-      unpriced: item.unpriced,
-    });
+    pushTraced(item, label);
   }
 
-  const attributed = tracedSources
+  const attributedChf = tracedSources
     .filter((s) => s.label && s.label.entityType !== "unknown" && !s.label.sanctioned)
     .reduce((acc, s) => acc + s.valueChf, 0);
+  const attributedUsd = tracedSources
+    .filter((s) => s.label && s.label.entityType !== "unknown" && !s.label.sanctioned)
+    .reduce((acc, s) => acc + s.valueUsd, 0);
 
   return {
     walletAddress: address,
     chain,
-    totalIncomingValueChf: total,
-    attributedValueChf: attributed,
-    attributedPercentage: total > 0 ? attributed / total : 0,
+    totalIncomingValueChf: totalChf,
+    totalIncomingValueUsd: totalUsd,
+    attributedValueChf: attributedChf,
+    attributedValueUsd: attributedUsd,
+    attributedPercentage: totalChf > 0 ? attributedChf / totalChf : 0,
     sources: tracedSources,
     hopsUsed,
     maxHopsConfigured: maxHopDepth,
