@@ -1,5 +1,6 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
+import { verifyMessage } from "ethers";
 import type { Challenge } from "../../use-cases/uc7-sow-verification/lib/types";
 
 /**
@@ -32,6 +33,21 @@ export default function VerifyPage() {
       setChallenge(json.challenge);
     })();
   }, [challengeId]);
+
+  // In-browser cryptographic recovery for EVM signatures. We recompute the
+  // signing address from (message, signature) using ethers — if the result
+  // matches the claimed address, the signature is genuine. Tampering with a
+  // single byte of the signature flips this check to FAIL, so the user can
+  // see verification happen on this page without trusting any UI label.
+  const evmRecovery = useMemo<{ recovered: string; match: boolean } | { error: string } | null>(() => {
+    if (!challenge || challenge.chainFamily !== "evm" || !challenge.signature) return null;
+    try {
+      const recovered = verifyMessage(challenge.message, challenge.signature);
+      return { recovered, match: recovered.toLowerCase() === challenge.address.toLowerCase() };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : "Recovery failed" };
+    }
+  }, [challenge]);
 
   const wrap: CSSProperties = {
     minHeight: "100vh",
@@ -150,6 +166,52 @@ export default function VerifyPage() {
             Awaiting client signature.
           </p>
         ) : null}
+
+        {evmRecovery && (() => {
+          const ok = "match" in evmRecovery && evmRecovery.match;
+          const failed = "match" in evmRecovery && !evmRecovery.match;
+          const errored = "error" in evmRecovery;
+          const color = ok ? "#6ee7b7" : "#fca5a5";
+          const bg = ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)";
+          const border = ok ? "rgba(16,185,129,0.35)" : "rgba(239,68,68,0.35)";
+          return (
+            <div
+              style={{
+                marginTop: 18,
+                padding: 12,
+                background: bg,
+                border: `1px solid ${border}`,
+                borderRadius: 8,
+              }}
+            >
+              <div style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.05em", color, textTransform: "uppercase", marginBottom: 6 }}>
+                {ok && "✓ Cryptographic check passed (recomputed in your browser)"}
+                {failed && "✗ Cryptographic check failed — recovered address does not match"}
+                {errored && "✗ Cryptographic check failed — signature could not be parsed"}
+              </div>
+              {!errored && (
+                <>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>Address recovered from signature</div>
+                  <div style={{ ...valueBox, fontSize: 12 }}>{(evmRecovery as { recovered: string }).recovered}</div>
+                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>Claimed address</div>
+                  <div style={{ ...valueBox, fontSize: 12 }}>{challenge.address}</div>
+                </>
+              )}
+              {errored && (
+                <div style={{ ...valueBox, fontSize: 12, color: "#fca5a5" }}>
+                  {(evmRecovery as { error: string }).error}
+                </div>
+              )}
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 8, lineHeight: 1.5 }}>
+                This check runs locally via{" "}
+                <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+                  ethers.verifyMessage(message, signature)
+                </code>
+                . Open DevTools, edit one byte of the signature in memory, and watch this badge flip to FAIL.
+              </div>
+            </div>
+          );
+        })()}
 
         {challenge.chainFamily === "evm" && challenge.signature && (() => {
           const payload = JSON.stringify(
