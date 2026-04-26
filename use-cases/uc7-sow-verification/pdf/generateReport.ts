@@ -1,4 +1,4 @@
-import type { CaseFile, WalletRecord } from "../lib/types";
+import type { CaseFile, TraceResult, WalletRecord } from "../lib/types";
 import { renderFundFlowSvg } from "../lib/fundFlowGraph";
 import { tierDescription } from "../lib/exchangeTiers";
 
@@ -19,9 +19,77 @@ function short(addr: string): string {
   return addr.length > 14 ? `${addr.slice(0, 8)}…${addr.slice(-6)}` : addr;
 }
 
+function chainTraceBlock(trace: TraceResult): string {
+  const sourcesRows = trace.sources
+    .map((s) => {
+      const tier = s.label?.exchangeTier
+        ? `<span class="tier tier-${s.label.exchangeTier}">Tier ${s.label.exchangeTier}</span>`
+        : "";
+      const entity = s.label?.name || "Unknown";
+      const type = s.label?.entityType || "unknown";
+      return `<tr>
+        <td><code>${esc(short(s.address))}</code></td>
+        <td>${esc(entity)} ${tier}</td>
+        <td>${esc(type)}</td>
+        <td>${(s.percentage * 100).toFixed(1)}%</td>
+        <td>${chf(s.valueChf)}</td>
+        <td>${s.hopDepth}</td>
+      </tr>`;
+    })
+    .join("\n");
+
+  const sanctionsBlock = trace.sanctionsHits.length > 0
+    ? `<div class="sanctions">
+         <strong>⚠ Sanctions screening hit:</strong>
+         <ul>${trace.sanctionsHits
+           .map(
+             (h) =>
+               `<li><code>${esc(h.address)}</code> — ${esc(h.listName)}: ${esc(h.reason)}</li>`
+           )
+           .join("")}</ul>
+       </div>`
+    : "";
+
+  const tierRows: Array<[string, number]> = [];
+  for (const t of ["A", "B", "C"] as const) {
+    const v = trace.sources
+      .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === t)
+      .reduce((sum, s) => sum + s.valueChf, 0);
+    if (v > 0) tierRows.push([`Tier ${t}`, v]);
+  }
+  const tierBreakdown = tierRows.length > 0
+    ? `<div class="tier-breakdown">
+        <h5>Exchange tier breakdown</h5>
+        <ul>${tierRows.map(([t, v]) => `<li>${t}: ${chf(v)}</li>`).join("")}</ul>
+      </div>`
+    : "";
+
+  const svg = renderFundFlowSvg(trace, { width: 760 });
+
+  return `<div class="chain-trace">
+    <h4 style="text-transform:capitalize;">${esc(trace.chain)} — ${(trace.attributedPercentage * 100).toFixed(1)}% attributed</h4>
+    <p class="muted">${chf(trace.attributedValueChf)} of ${chf(trace.totalIncomingValueChf)} inflow · hops ${trace.hopsUsed}/${trace.maxHopsConfigured}</p>
+    ${sanctionsBlock}
+    ${tierBreakdown}
+    ${trace.sources.length > 0
+      ? `<table class="sources">
+          <thead><tr><th>Address</th><th>Entity</th><th>Type</th><th>Share</th><th>Value (CHF)</th><th>Hop</th></tr></thead>
+          <tbody>${sourcesRows}</tbody>
+         </table>
+         <div class="svg-wrap">${svg}</div>`
+      : `<p class="muted">No priced inflows on this chain.</p>`}
+  </div>`;
+}
+
 function walletSection(wallet: WalletRecord, index: number): string {
   const chainTotal = wallet.scan?.totalValueChf ?? 0;
-  const trace = wallet.trace;
+  // Prefer multi-chain traces; fall back to legacy single trace.
+  const traces: TraceResult[] =
+    wallet.traces && wallet.traces.length > 0
+      ? wallet.traces
+      : wallet.trace
+        ? [wallet.trace]
+        : [];
   const classification = wallet.classification;
   const ttp = wallet.ttp;
 
@@ -32,56 +100,9 @@ function walletSection(wallet: WalletRecord, index: number): string {
     ? `<span class="fail">Failed — ${esc(ownership.failReason || "")}</span>`
     : `<span class="pending">Pending</span>`;
 
-  const svg = trace ? renderFundFlowSvg(trace, { width: 760 }) : "";
-
-  const sourcesRows = trace
-    ? trace.sources
-        .map((s) => {
-          const tier = s.label?.exchangeTier
-            ? `<span class="tier tier-${s.label.exchangeTier}">Tier ${s.label.exchangeTier}</span>`
-            : "";
-          const entity = s.label?.name || "Unknown";
-          const type = s.label?.entityType || "unknown";
-          return `<tr>
-            <td><code>${esc(short(s.address))}</code></td>
-            <td>${esc(entity)} ${tier}</td>
-            <td>${esc(type)}</td>
-            <td>${(s.percentage * 100).toFixed(1)}%</td>
-            <td>${chf(s.valueChf)}</td>
-            <td>${s.hopDepth}</td>
-          </tr>`;
-        })
-        .join("\n")
-    : "";
-
-  const sanctionsBlock = trace && trace.sanctionsHits.length > 0
-    ? `<div class="sanctions">
-         <strong>⚠ Sanctions screening hit:</strong>
-         <ul>${trace.sanctionsHits
-           .map(
-             (h) =>
-               `<li><code>${esc(h.address)}</code> — ${esc(h.listName)}: ${esc(h.reason)}</li>`
-           )
-           .join("")}</ul>
-       </div>`
-    : `<p class="muted">No sanctions hits in OFAC SDN screening.</p>`;
-
-  const tierBreakdown = trace
-    ? (() => {
-        const rows: Array<[string, number]> = [];
-        for (const t of ["A", "B", "C"] as const) {
-          const v = trace.sources
-            .filter((s) => s.label?.entityType === "exchange" && s.label.exchangeTier === t)
-            .reduce((sum, s) => sum + s.valueChf, 0);
-          if (v > 0) rows.push([`Tier ${t}`, v]);
-        }
-        if (rows.length === 0) return "";
-        return `<div class="tier-breakdown">
-          <h4>Exchange Tier Breakdown</h4>
-          <ul>${rows.map(([t, v]) => `<li>${t}: ${chf(v)}</li>`).join("")}</ul>
-        </div>`;
-      })()
-    : "";
+  const totalIncoming = traces.reduce((s, t) => s + t.totalIncomingValueChf, 0);
+  const totalAttributed = traces.reduce((s, t) => s + t.attributedValueChf, 0);
+  const overallPct = totalIncoming > 0 ? totalAttributed / totalIncoming : 0;
 
   const tierColor =
     classification?.tier === "GREEN" ? "#10b981" :
@@ -116,33 +137,25 @@ function walletSection(wallet: WalletRecord, index: number): string {
        </div>`
     : "";
 
+  const chainsList = traces.map((t) => t.chain).join(", ") || "—";
+
   return `<section class="wallet">
     <h3>Wallet ${index + 1} — <code>${esc(short(wallet.address))}</code></h3>
     <table class="meta">
       <tr><th>Full address</th><td><code>${esc(wallet.address)}</code></td></tr>
       <tr><th>Chain family</th><td>${esc(wallet.chainFamily)}</td></tr>
-      <tr><th>Primary chain</th><td>${esc(wallet.primaryChain || "—")}</td></tr>
+      <tr><th>Chains traced</th><td>${esc(chainsList)}</td></tr>
       <tr><th>Portfolio value (scan time)</th><td>${chf(chainTotal)}</td></tr>
       <tr><th>Ownership</th><td>${ownStatus}</td></tr>
     </table>
     <h4>Source of Wealth Coverage</h4>
     <p>Attributable coverage:
-      <strong>${trace ? (trace.attributedPercentage * 100).toFixed(1) : "—"}%</strong>
-      (${trace ? chf(trace.attributedValueChf) : "—"}
-      of ${trace ? chf(trace.totalIncomingValueChf) : "—"} inflow)
+      <strong>${traces.length > 0 ? (overallPct * 100).toFixed(1) : "—"}%</strong>
+      (${chf(totalAttributed)} of ${chf(totalIncoming)} inflow across ${traces.length} chain${traces.length === 1 ? "" : "s"})
     </p>
-    <p class="muted">Hops traced: ${trace?.hopsUsed ?? 0} / ${trace?.maxHopsConfigured ?? 0}</p>
-    ${sanctionsBlock}
-    ${tierBreakdown}
-    <h4>Traced Sources</h4>
-    ${trace && trace.sources.length > 0
-      ? `<table class="sources">
-          <thead><tr><th>Address</th><th>Entity</th><th>Type</th><th>Share</th><th>Value (CHF)</th><th>Hop</th></tr></thead>
-          <tbody>${sourcesRows}</tbody>
-         </table>`
-      : `<p class="muted">No traced sources available.</p>`}
-    <h4>Fund Flow Diagram</h4>
-    <div class="svg-wrap">${svg}</div>
+    ${traces.length > 0
+      ? traces.map((t) => chainTraceBlock(t)).join("\n")
+      : `<p class="muted">No trace data available.</p>`}
     <h4>Risk Classification</h4>
     ${classificationBlock}
     ${ttpBlock}

@@ -1,5 +1,5 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { classifyTrace, aggregateRisk } from "../../../use-cases/uc7-sow-verification/lib/riskClassifier";
+import { classifyTraces, aggregateRisk } from "../../../use-cases/uc7-sow-verification/lib/riskClassifier";
 import { readCase, writeCase } from "../../../use-cases/uc7-sow-verification/lib/caseStore";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -24,8 +24,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     : caseFile.wallets;
 
   for (const w of wallets) {
-    if (!w.trace) continue;
-    w.classification = classifyTrace(w.trace, {
+    // Prefer the new multi-chain `traces` array; fall back to legacy `trace`.
+    const traces = w.traces && w.traces.length > 0 ? w.traces : w.trace ? [w.trace] : [];
+    if (traces.length === 0) continue;
+    w.classification = classifyTraces(traces, {
       greenThreshold: caseFile.settings.greenThreshold,
       amberThreshold: caseFile.settings.amberThreshold,
     });

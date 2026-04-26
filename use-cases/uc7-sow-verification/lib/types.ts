@@ -176,7 +176,10 @@ export type WalletRecord = {
   primaryChain?: string;
   scan?: WalletScanResult;
   challenge?: Challenge;
+  /** @deprecated single-chain legacy field; use `traces` for multi-chain. */
   trace?: TraceResult;
+  /** Backward trace results, one per active chain. */
+  traces?: TraceResult[];
   classification?: RiskClassification;
   ttp?: TTPReport;
 };

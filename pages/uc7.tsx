@@ -16,6 +16,7 @@ import type {
   CaseSummary,
   ChainActivity,
   RiskTier,
+  TraceResult,
   WalletRecord,
   WalletScanResult,
 } from "../use-cases/uc7-sow-verification/lib/types";
@@ -1049,7 +1050,9 @@ function StepScan({
     setProgress(null);
   }, [caseFile.wallets, runTrace]);
 
-  const allTraced = caseFile.wallets.every((w) => w.trace);
+  const allTraced = caseFile.wallets.every(
+    (w) => (w.traces && w.traces.length > 0) || w.trace
+  );
   const anyRunning = runningSet.size > 0;
 
   return (
@@ -1100,7 +1103,15 @@ function TraceRow({
   onRun: () => void;
   currency: Currency;
 }) {
-  const trace = wallet.trace;
+  // Prefer the new multi-chain `traces` array; fall back to the legacy single
+  // `trace` field for cases that haven't been re-traced since the rewrite.
+  const traces: TraceResult[] =
+    (wallet.traces && wallet.traces.length > 0
+      ? wallet.traces
+      : wallet.trace
+        ? [wallet.trace]
+        : []) as TraceResult[];
+
   const [stage, setStage] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1119,6 +1130,17 @@ function TraceRow({
     };
   }, [running]);
 
+  // Wallet-level aggregates across all traced chains.
+  const walletTotalChf = traces.reduce((s, t) => s + t.totalIncomingValueChf, 0);
+  const walletTotalUsd = traces.reduce((s, t) => s + (t.totalIncomingValueUsd ?? 0), 0);
+  const walletAttributedChf = traces.reduce((s, t) => s + t.attributedValueChf, 0);
+  const walletAttributedUsd = traces.reduce(
+    (s, t) => s + (t.attributedValueUsd ?? 0),
+    0
+  );
+  const walletAttributedPct = walletTotalChf > 0 ? walletAttributedChf / walletTotalChf : 0;
+  const walletSanctionsCount = traces.reduce((s, t) => s + t.sanctionsHits.length, 0);
+
   return (
     <div style={walletCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -1126,7 +1148,7 @@ function TraceRow({
           <code style={{ fontSize: 13, color: "#fff" }}>{wallet.address}</code>
           <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
             {chainFamilyLabel(wallet.chainFamily)}
-            {wallet.primaryChain && ` · ${wallet.primaryChain}`}
+            {traces.length > 0 && ` · traced on ${traces.map((t) => t.chain).join(", ")}`}
           </div>
         </div>
         <button style={primaryBtn} onClick={onRun} disabled={running}>
@@ -1134,7 +1156,7 @@ function TraceRow({
             <>
               <Spinner /> &nbsp;Tracing…
             </>
-          ) : trace ? (
+          ) : traces.length > 0 ? (
             "Re-run trace"
           ) : (
             "Run trace"
@@ -1161,16 +1183,17 @@ function TraceRow({
         </div>
       )}
 
-      {trace && !running && (
+      {!running && traces.length > 0 && (
         <div style={{ marginTop: 14 }}>
-          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 14 }}>
+          {/* Wallet-level aggregate header */}
+          <div style={{ display: "flex", gap: 24, flexWrap: "wrap", marginBottom: 16 }}>
             <Stat
-              label="Coverage"
-              value={`${(trace.attributedPercentage * 100).toFixed(1)}%`}
+              label="Total coverage"
+              value={`${(walletAttributedPct * 100).toFixed(1)}%`}
               color={
-                trace.attributedPercentage >= 0.9
+                walletAttributedPct >= 0.9
                   ? "#10b981"
-                  : trace.attributedPercentage >= 0.6
+                  : walletAttributedPct >= 0.6
                   ? "#f59e0b"
                   : "#ef4444"
               }
@@ -1178,110 +1201,445 @@ function TraceRow({
             <Stat
               label="Attributed"
               value={formatMoney(
-                pickValue(
-                  trace.attributedValueChf,
-                  trace.attributedValueUsd ?? 0,
-                  currency
-                ),
+                pickValue(walletAttributedChf, walletAttributedUsd, currency),
                 currency
               )}
             />
             <Stat
               label="Total inflow"
               value={formatMoney(
-                pickValue(
-                  trace.totalIncomingValueChf,
-                  trace.totalIncomingValueUsd ?? 0,
-                  currency
-                ),
+                pickValue(walletTotalChf, walletTotalUsd, currency),
                 currency
               )}
             />
-            <Stat label="Hops used" value={`${trace.hopsUsed} / ${trace.maxHopsConfigured}`} />
+            <Stat label="Chains traced" value={`${traces.length}`} />
             <Stat
               label="Sanctions"
-              value={trace.sanctionsHits.length > 0 ? `${trace.sanctionsHits.length} hit` : "Clean"}
-              color={trace.sanctionsHits.length > 0 ? "#ef4444" : "#10b981"}
+              value={walletSanctionsCount > 0 ? `${walletSanctionsCount} hit` : "Clean"}
+              color={walletSanctionsCount > 0 ? "#ef4444" : "#10b981"}
             />
           </div>
 
-          {trace.sanctionsHits.length > 0 && (
-            <div style={{ ...errorBox, marginBottom: 12 }}>
-              <strong>OFAC SDN match:</strong>{" "}
-              {trace.sanctionsHits.map((h) => h.reason).join(", ")}
-            </div>
-          )}
+          {/* One card per chain with its own hop tree */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {traces.map((trace) => (
+              <ChainTraceCard key={trace.chain} trace={trace} currency={currency} />
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
-          {trace.sources.length > 0 ? (
-            <>
-              <h5 style={{ ...h4, fontSize: 12 }}>Fund flow</h5>
-              <FundFlowDiagram trace={trace} height={360} currency={currency} />
+/* ── Per-chain trace card with hop tree ── */
+function ChainTraceCard({
+  trace,
+  currency,
+}: {
+  trace: TraceResult;
+  currency: Currency;
+}) {
+  const noActivity = trace.sources.length === 0 && trace.totalIncomingValueChf === 0;
 
-              <h5 style={{ ...h4, fontSize: 12, marginTop: 16 }}>Top sources</h5>
-              <table style={tableStyle}>
-                <thead>
-                  <tr>
-                    <th style={thStyle}>Address</th>
-                    <th style={thStyle}>Entity</th>
-                    <th style={thStyle}>Type</th>
-                    <th style={thStyle}>Share</th>
-                    <th style={thStyle}>Value</th>
-                    <th style={thStyle}>Hop</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {trace.sources.map((s) => (
-                    <tr key={s.address} style={trStyle}>
-                      <td style={tdStyle}>
-                        <code style={{ fontSize: 11 }}>
-                          {s.address.slice(0, 10)}…{s.address.slice(-6)}
-                        </code>
-                      </td>
-                      <td style={tdStyle}>
-                        {s.label?.name || (
-                          <span style={{ color: "rgba(255,255,255,0.5)" }}>Unknown</span>
-                        )}
-                        {s.label?.exchangeTier && (
-                          <span style={{ marginLeft: 6 }}>
-                            <ExchangeTierBadge tier={s.label.exchangeTier} size="sm" />
-                          </span>
-                        )}
-                        {s.unpriced && (!s.label || s.label.entityType === "unknown") && (
-                          <span
-                            style={{
-                              marginLeft: 6,
-                              fontSize: 10,
-                              color: "#fbbf24",
-                              border: "1px solid rgba(245,158,11,0.3)",
-                              padding: "1px 4px",
-                              borderRadius: 3,
-                            }}
-                            title="No priced inflow could be matched against this source"
-                          >
-                            UNPRICED
-                          </span>
-                        )}
-                      </td>
-                      <td style={tdStyle}>{s.label?.entityType || "unknown"}</td>
-                      <td style={tdStyle}>{(s.percentage * 100).toFixed(1)}%</td>
-                      <td style={tdStyle}>
-                        {formatMoney(
-                          pickValue(s.valueChf, s.valueUsd ?? 0, currency),
-                          currency
-                        )}
-                      </td>
-                      <td style={tdStyle}>{s.hopDepth}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </>
-          ) : (
-            <div style={mutedBlock}>
-              No incoming value detected. The wallet has no priced inflows on this chain — try re-running the
-              trace after setting <code>ETHERSCAN_API_KEY</code>, or confirm the wallet has activity on the expected chain.
-            </div>
-          )}
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(255,255,255,0.08)",
+        background: "rgba(255,255,255,0.02)",
+        borderRadius: 10,
+        padding: 16,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          justifyContent: "space-between",
+          alignItems: "flex-start",
+          gap: 12,
+          flexWrap: "wrap",
+        }}
+      >
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", textTransform: "capitalize" }}>
+            {trace.chain}
+          </div>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+            {(trace.attributedPercentage * 100).toFixed(1)}% attributed ·{" "}
+            {formatMoney(
+              pickValue(trace.attributedValueChf, trace.attributedValueUsd ?? 0, currency),
+              currency
+            )}{" "}
+            of{" "}
+            {formatMoney(
+              pickValue(trace.totalIncomingValueChf, trace.totalIncomingValueUsd ?? 0, currency),
+              currency
+            )}{" "}
+            inflow · hops {trace.hopsUsed}/{trace.maxHopsConfigured}
+          </div>
+        </div>
+        {trace.sanctionsHits.length > 0 && (
+          <span
+            style={{
+              fontSize: 11,
+              color: "#fca5a5",
+              background: "rgba(239,68,68,0.12)",
+              border: "1px solid rgba(239,68,68,0.4)",
+              padding: "3px 8px",
+              borderRadius: 4,
+              fontWeight: 700,
+            }}
+          >
+            ⚠ {trace.sanctionsHits.length} OFAC HIT
+          </span>
+        )}
+      </div>
+
+      {trace.sanctionsHits.length > 0 && (
+        <div style={{ ...errorBox, marginTop: 10 }}>
+          <strong>OFAC SDN match:</strong>{" "}
+          {trace.sanctionsHits.map((h) => h.reason).join(", ")}
+        </div>
+      )}
+
+      {noActivity ? (
+        <div style={{ ...mutedBlock, textAlign: "left", marginTop: 12 }}>
+          No priced inflows detected on this chain.
+        </div>
+      ) : (
+        <>
+          <div style={{ marginTop: 14 }}>
+            <details open style={{ marginBottom: 8 }}>
+              <summary
+                style={{
+                  cursor: "pointer",
+                  fontSize: 12,
+                  color: "rgba(255,255,255,0.65)",
+                  marginBottom: 8,
+                }}
+              >
+                Fund flow diagram
+              </summary>
+              <FundFlowDiagram trace={trace} height={320} currency={currency} />
+            </details>
+          </div>
+          <h5 style={{ ...h4, fontSize: 12 }}>Hop-by-hop attribution</h5>
+          <HopTree trace={trace} currency={currency} />
+        </>
+      )}
+    </div>
+  );
+}
+
+/* ── Recursive hop tree ── */
+type HopChild = {
+  address: string;
+  valueChf: number;
+  valueUsd: number;
+  label: TraceResult["nodes"][number]["label"];
+};
+
+function buildChildrenIndex(trace: TraceResult): Map<string, HopChild[]> {
+  const nodeById = new Map(trace.nodes.map((n) => [n.id, n]));
+  const out = new Map<string, HopChild[]>();
+  for (const e of trace.edges) {
+    const child = nodeById.get(e.from);
+    if (!child) continue;
+    const list = out.get(e.to) || [];
+    list.push({
+      address: child.address,
+      valueChf: e.valueChf,
+      valueUsd: e.valueUsd ?? 0,
+      label: child.label,
+    });
+    out.set(e.to, list);
+  }
+  // Largest first per parent
+  for (const list of out.values()) list.sort((a, b) => b.valueChf - a.valueChf);
+  return out;
+}
+
+function classifyAttribution(label: HopChild["label"]): "identified" | "infrastructure" | "unknown" {
+  if (!label) return "unknown";
+  if (label.sanctioned) return "identified";
+  if (label.entityType === "exchange") return "identified";
+  if (label.entityType === "mixer") return "identified";
+  if (label.entityType === "mining_pool") return "identified";
+  if (label.entityType === "staking") return "infrastructure";
+  if (label.entityType === "dex" || label.entityType === "bridge" || label.entityType === "contract") {
+    return "infrastructure";
+  }
+  return "unknown";
+}
+
+function HopTree({ trace, currency }: { trace: TraceResult; currency: Currency }) {
+  const children = useMemo(() => buildChildrenIndex(trace), [trace]);
+  const wallet = trace.walletAddress;
+  const hop1 = children.get(wallet) || [];
+  const total = trace.totalIncomingValueChf || 1;
+
+  // Group hop-1 children by attribution status
+  const identified = hop1.filter((c) => classifyAttribution(c.label) === "identified");
+  const infrastructure = hop1.filter(
+    (c) => classifyAttribution(c.label) === "infrastructure"
+  );
+  const unknown = hop1.filter((c) => classifyAttribution(c.label) === "unknown");
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <HopGroup
+        title="Identified at hop 1"
+        kind="identified"
+        items={identified}
+        total={total}
+        children={children}
+        currency={currency}
+        depth={1}
+        maxDepth={trace.maxHopsConfigured}
+      />
+      <HopGroup
+        title="Neutral infrastructure (DEX / bridge / contract — drilled deeper)"
+        kind="infrastructure"
+        items={infrastructure}
+        total={total}
+        children={children}
+        currency={currency}
+        depth={1}
+        maxDepth={trace.maxHopsConfigured}
+      />
+      <HopGroup
+        title="Unidentified at hop 1 — drilling deeper"
+        kind="unknown"
+        items={unknown}
+        total={total}
+        children={children}
+        currency={currency}
+        depth={1}
+        maxDepth={trace.maxHopsConfigured}
+      />
+    </div>
+  );
+}
+
+function HopGroup({
+  title,
+  kind,
+  items,
+  total,
+  children,
+  currency,
+  depth,
+  maxDepth,
+}: {
+  title: string;
+  kind: "identified" | "infrastructure" | "unknown";
+  items: HopChild[];
+  total: number;
+  children: Map<string, HopChild[]>;
+  currency: Currency;
+  depth: number;
+  maxDepth: number;
+}) {
+  if (items.length === 0) return null;
+  const headerColor =
+    kind === "identified" ? "#6ee7b7" : kind === "infrastructure" ? "#cbd5f5" : "#fbbf24";
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          marginBottom: 6,
+          fontSize: 11,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          fontWeight: 700,
+          color: headerColor,
+        }}
+      >
+        <span>{title}</span>
+        <span style={{ color: "rgba(255,255,255,0.4)", fontWeight: 500 }}>
+          · {items.length} source{items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+        {items.map((c) => (
+          <HopRow
+            key={c.address}
+            child={c}
+            total={total}
+            children={children}
+            currency={currency}
+            depth={depth}
+            maxDepth={maxDepth}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function HopRow({
+  child,
+  total,
+  children,
+  currency,
+  depth,
+  maxDepth,
+}: {
+  child: HopChild;
+  total: number;
+  children: Map<string, HopChild[]>;
+  currency: Currency;
+  depth: number;
+  maxDepth: number;
+}) {
+  const status = classifyAttribution(child.label);
+  const subChildren = children.get(child.address) || [];
+  const canExpand = subChildren.length > 0;
+  const [expanded, setExpanded] = useState(status === "infrastructure" || status === "unknown");
+
+  const pct = total > 0 ? (child.valueChf / total) * 100 : 0;
+  const value = pickValue(child.valueChf, child.valueUsd, currency);
+  const dotColor =
+    child.label?.sanctioned
+      ? "#ef4444"
+      : status === "identified"
+      ? "#10b981"
+      : status === "infrastructure"
+      ? "#9ca3af"
+      : "#fbbf24";
+
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(255,255,255,0.06)",
+        background: "rgba(255,255,255,0.02)",
+        borderRadius: 6,
+        padding: "8px 10px",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          cursor: canExpand ? "pointer" : "default",
+        }}
+        onClick={() => canExpand && setExpanded((e) => !e)}
+      >
+        <span
+          style={{
+            display: "inline-block",
+            width: 8,
+            height: 8,
+            borderRadius: 4,
+            background: dotColor,
+            flexShrink: 0,
+          }}
+        />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 13,
+                fontWeight: status === "identified" ? 700 : 500,
+                color: status === "identified" ? "#fff" : "rgba(255,255,255,0.85)",
+              }}
+            >
+              {child.label?.name || "Unknown"}
+            </span>
+            {child.label?.exchangeTier && (
+              <ExchangeTierBadge tier={child.label.exchangeTier} size="sm" />
+            )}
+            {child.label?.sanctioned && (
+              <span
+                style={{
+                  fontSize: 10,
+                  color: "#fca5a5",
+                  border: "1px solid rgba(239,68,68,0.4)",
+                  padding: "0 4px",
+                  borderRadius: 3,
+                  fontWeight: 700,
+                }}
+              >
+                OFAC SDN
+              </span>
+            )}
+          </div>
+          <div
+            style={{
+              fontSize: 11,
+              color: "rgba(255,255,255,0.5)",
+              fontFamily: "monospace",
+              marginTop: 2,
+            }}
+          >
+            {child.address}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>
+            {formatMoney(value, currency)}
+          </div>
+          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)" }}>
+            {pct.toFixed(1)}% of inflow
+          </div>
+        </div>
+        {canExpand && (
+          <span style={{ color: "rgba(255,255,255,0.4)", fontSize: 12, marginLeft: 6 }}>
+            {expanded ? "▾" : "▸"}
+          </span>
+        )}
+      </div>
+
+      {expanded && canExpand && (
+        <div
+          style={{
+            marginTop: 10,
+            paddingLeft: 18,
+            borderLeft: "2px solid rgba(255,255,255,0.08)",
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+          }}
+        >
+          <div
+            style={{
+              fontSize: 10,
+              color: "rgba(255,255,255,0.4)",
+              letterSpacing: "0.05em",
+              textTransform: "uppercase",
+              marginBottom: 4,
+            }}
+          >
+            Hop {depth + 1} sources via this address
+          </div>
+          {subChildren.map((sub) => (
+            <HopRow
+              key={sub.address}
+              child={sub}
+              total={total}
+              children={children}
+              currency={currency}
+              depth={depth + 1}
+              maxDepth={maxDepth}
+            />
+          ))}
+        </div>
+      )}
+
+      {!canExpand && status === "unknown" && depth >= maxDepth && (
+        <div
+          style={{
+            marginTop: 8,
+            fontSize: 11,
+            color: "rgba(255,255,255,0.4)",
+            paddingLeft: 18,
+          }}
+        >
+          Max hop depth reached — could not attribute further.
         </div>
       )}
     </div>

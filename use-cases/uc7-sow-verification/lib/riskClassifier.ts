@@ -149,3 +149,43 @@ export function aggregateRisk(tiers: Array<RiskClassification | undefined>): "GR
   if (hasAmber) return "AMBER";
   return "GREEN";
 }
+
+/**
+ * Classify a wallet that has been traced across multiple chains.
+ * Each chain's trace is classified independently and the wallet's overall
+ * tier is the worst of any chain. Reasons are concatenated, prefixed with
+ * the chain name so the compliance officer knows which chain triggered what.
+ */
+export function classifyTraces(
+  traces: TraceResult[],
+  opts: ClassifyOptions = {}
+): RiskClassification {
+  if (traces.length === 0) {
+    return {
+      tier: "AMBER",
+      reasons: ["No trace data available"],
+      thresholds: { green: opts.greenThreshold ?? 0.9, amber: opts.amberThreshold ?? 0.6 },
+      requiresTTP: false,
+      requiresDocs: true,
+    };
+  }
+
+  const perChain = traces.map((t) => ({ chain: t.chain, cls: classifyTrace(t, opts) }));
+  const tierRank: Record<"GREEN" | "AMBER" | "RED", number> = {
+    GREEN: 0,
+    AMBER: 1,
+    RED: 2,
+  };
+  const worst = perChain.reduce((acc, c) => (tierRank[c.cls.tier] > tierRank[acc.cls.tier] ? c : acc));
+  const reasons: string[] = [];
+  for (const { chain, cls } of perChain) {
+    for (const r of cls.reasons) reasons.push(`[${chain}] ${r}`);
+  }
+  return {
+    tier: worst.cls.tier,
+    reasons,
+    thresholds: worst.cls.thresholds,
+    requiresTTP: perChain.some((c) => c.cls.requiresTTP),
+    requiresDocs: perChain.some((c) => c.cls.requiresDocs),
+  };
+}
