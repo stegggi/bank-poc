@@ -1113,6 +1113,17 @@ function TraceRow({
         ? [wallet.trace]
         : []) as TraceResult[];
 
+  // Hint for cases where the on-disk data is the old single-chain shape but
+  // the wallet's scan reports more active chains than the trace covers.
+  const scanChains =
+    wallet.scan?.chains.filter((c) => c.hasActivity).map((c) => c.chain) ?? [];
+  const tracedChains = new Set(traces.map((t) => t.chain));
+  const missingChains = scanChains.filter((c) => !tracedChains.has(c));
+  const showStaleHint =
+    traces.length > 0 && !wallet.traces && missingChains.length > 0;
+  const showMissingHint =
+    !!wallet.traces && missingChains.length > 0;
+
   const [stage, setStage] = useState(0);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -1220,6 +1231,26 @@ function TraceRow({
               color={walletSanctionsCount > 0 ? "#ef4444" : "#10b981"}
             />
           </div>
+
+          {(showStaleHint || showMissingHint) && (
+            <div
+              style={{
+                marginBottom: 12,
+                padding: "10px 14px",
+                borderRadius: 8,
+                background: "rgba(245,158,11,0.08)",
+                border: "1px solid rgba(245,158,11,0.35)",
+                color: "#fbbf24",
+                fontSize: 13,
+              }}
+            >
+              {showStaleHint
+                ? `This trace was run before multi-chain support. The wallet has activity on ${missingChains.join(", ")} which haven't been traced yet — click `
+                : `${missingChains.join(", ")} ${missingChains.length === 1 ? "is" : "are"} active per the scan but missing from the trace results. Click `}
+              <strong>Re-run trace</strong>
+              {" "}above to scan {missingChains.length === 1 ? "it" : "them"} too.
+            </div>
+          )}
 
           {/* One card per chain with its own hop tree */}
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>

@@ -55,35 +55,46 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         ? fromScan
         : [fallback];
 
-  try {
-    // Trace each chain in parallel — the Etherscan rate-limiter naturally
-    // serializes the API calls underneath, so this won't blow the rate limit
-    // and total wall-clock time is roughly the same as sequential.
-    // Hop 1 only for now — the UI is a flat per-chain inflow list à la Etherscan.
-    const hopDepth = Math.min(caseFile.settings.maxHopDepth ?? 1, 1);
-    const results = await Promise.all(
-      chains.map((ch) =>
-        traceBackward(address, ch, {
-          maxHopDepth: hopDepth,
-        })
-      )
-    );
+  // Trace each chain in parallel — the Etherscan rate-limiter naturally
+  // serializes the API calls underneath, so this won't blow the rate limit
+  // and total wall-clock time is roughly the same as sequential.
+  // Hop 1 only — the UI is a flat per-chain inflow list à la Etherscan.
+  const hopDepth = Math.min(caseFile.settings.maxHopDepth ?? 1, 1);
 
-    // Keep only chains where the trace had at least one source — empty
-    // chains add noise.
-    const traces: TraceResult[] = results.filter(
-      (t) => t.totalIncomingValueChf > 0 || t.sources.length > 0
-    );
+  // Per-chain try/catch so a single chain failing (e.g. Etherscan returning
+  // garbage) doesn't kill the entire trace. Empty traces are also retained
+  // so the user sees "no incoming transactions on this chain" rather than
+  // the chain disappearing silently.
+  const results: TraceResult[] = await Promise.all(
+    chains.map(async (ch) => {
+      try {
+        return await traceBackward(address, ch, { maxHopDepth: hopDepth });
+      } catch {
+        return {
+          walletAddress: address,
+          chain: ch,
+          totalIncomingValueChf: 0,
+          totalIncomingValueUsd: 0,
+          attributedValueChf: 0,
+          attributedValueUsd: 0,
+          attributedPercentage: 0,
+          sources: [],
+          hopsUsed: 0,
+          maxHopsConfigured: hopDepth,
+          sanctionsHits: [],
+          nodes: [],
+          edges: [],
+          inflowsByParent: {},
+          tracedAt: new Date().toISOString(),
+        } as TraceResult;
+      }
+    })
+  );
 
-    wallet.traces = traces.length > 0 ? traces : results;
-    // Drop the legacy single-chain field once we've populated `traces`.
-    delete wallet.trace;
-    if (!wallet.primaryChain) wallet.primaryChain = chains[0];
-    await writeCase(caseFile);
-    return res.status(200).json({ traces: wallet.traces });
-  } catch (err) {
-    return res.status(500).json({
-      error: err instanceof Error ? err.message : "Trace failed",
-    });
-  }
+  wallet.traces = results;
+  // Drop the legacy single-chain field once we've populated `traces`.
+  delete wallet.trace;
+  if (!wallet.primaryChain) wallet.primaryChain = chains[0];
+  await writeCase(caseFile);
+  return res.status(200).json({ traces: wallet.traces });
 }
