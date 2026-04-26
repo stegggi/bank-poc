@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { useRouter } from "next/router";
-import { BrowserProvider } from "ethers";
+import { BrowserProvider, type Eip1193Provider } from "ethers";
 import type { Challenge } from "../../use-cases/uc7-sow-verification/lib/types";
+
+const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
 type EthereumWindow = typeof window & {
   ethereum?: {
@@ -65,18 +67,10 @@ export default function SignPage() {
     })();
   }, [challengeId]);
 
-  const signEvm = useCallback(async () => {
-    if (!challenge) return;
-    setStatus("signing");
-    setError("");
-    const w = window as EthereumWindow;
-    if (!w.ethereum) {
-      setError("No EVM wallet detected. Open this page in a wallet app (MetaMask, Rabby) or use WalletConnect.");
-      setStatus("error");
-      return;
-    }
-    try {
-      const provider = new BrowserProvider(w.ethereum as unknown as ConstructorParameters<typeof BrowserProvider>[0]);
+  const signWithEvmProvider = useCallback(
+    async (eip1193: Eip1193Provider) => {
+      if (!challenge) return;
+      const provider = new BrowserProvider(eip1193);
       await provider.send("eth_requestAccounts", []);
       const signer = await provider.getSigner();
       const connected = (await signer.getAddress()).toLowerCase();
@@ -100,11 +94,63 @@ export default function SignPage() {
         setError(json.result?.error || "Signature verification failed");
         setStatus("error");
       }
+    },
+    [challenge],
+  );
+
+  const signEvm = useCallback(async () => {
+    if (!challenge) return;
+    setStatus("signing");
+    setError("");
+    const w = window as EthereumWindow;
+    if (!w.ethereum) {
+      setError("No browser wallet detected. Use the WalletConnect button below for mobile or hardware wallets, or open this page in a wallet app's built-in browser (MetaMask, Rabby, Coinbase).");
+      setStatus("error");
+      return;
+    }
+    try {
+      await signWithEvmProvider(w.ethereum as unknown as Eip1193Provider);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Signing failed");
       setStatus("error");
     }
-  }, [challenge]);
+  }, [challenge, signWithEvmProvider]);
+
+  const signEvmWalletConnect = useCallback(async () => {
+    if (!challenge) return;
+    if (!WC_PROJECT_ID) {
+      setError("WalletConnect is not configured on this server (missing NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID).");
+      setStatus("error");
+      return;
+    }
+    setStatus("signing");
+    setError("");
+    try {
+      const { EthereumProvider } = await import("@walletconnect/ethereum-provider");
+      const wc = await EthereumProvider.init({
+        projectId: WC_PROJECT_ID,
+        chains: [1],
+        optionalChains: [10, 56, 137, 8453, 42161, 43114],
+        showQrModal: true,
+        metadata: {
+          name: "Wallet Ownership Verification",
+          description: "Sign a challenge to prove ownership of your wallet.",
+          url: typeof window !== "undefined" ? window.location.origin : "",
+          icons: [],
+        },
+      });
+      await wc.connect();
+      await signWithEvmProvider(wc as unknown as Eip1193Provider);
+      try {
+        await wc.disconnect();
+      } catch {
+        /* ignore disconnect errors after a successful sign */
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "WalletConnect signing failed");
+      setStatus("error");
+    }
+  }, [challenge, signWithEvmProvider]);
 
   const signSolana = useCallback(async () => {
     if (!challenge) return;
@@ -253,7 +299,13 @@ export default function SignPage() {
                 {status === "signing" ? "Please sign the message in your wallet…" : "Verifying signature…"}
               </div>
             ) : (
-              <SignButtons challenge={challenge} onEvm={signEvm} onSol={signSolana} />
+              <SignButtons
+                challenge={challenge}
+                onEvm={signEvm}
+                onEvmWalletConnect={signEvmWalletConnect}
+                onSol={signSolana}
+                walletConnectAvailable={Boolean(WC_PROJECT_ID)}
+              />
             )}
 
             {/* Manual signature paste — works for any wallet (Ledger Live,
@@ -371,11 +423,15 @@ export default function SignPage() {
 function SignButtons({
   challenge,
   onEvm,
+  onEvmWalletConnect,
   onSol,
+  walletConnectAvailable,
 }: {
   challenge: Challenge;
   onEvm: () => void;
+  onEvmWalletConnect: () => void;
   onSol: () => void;
+  walletConnectAvailable: boolean;
 }) {
   const btn: CSSProperties = {
     width: "100%",
@@ -389,15 +445,29 @@ function SignButtons({
     cursor: "pointer",
     marginTop: 8,
   };
+  const btnSecondary: CSSProperties = {
+    ...btn,
+    border: "1px solid rgba(255,255,255,0.15)",
+    background: "rgba(255,255,255,0.06)",
+  };
   if (challenge.chainFamily === "evm") {
     return (
       <>
         <button style={btn} onClick={onEvm}>
-          Connect wallet and sign
+          Browser / extension wallet
+        </button>
+        <button
+          style={{ ...btnSecondary, opacity: walletConnectAvailable ? 1 : 0.5, cursor: walletConnectAvailable ? "pointer" : "not-allowed" }}
+          onClick={onEvmWalletConnect}
+          disabled={!walletConnectAvailable}
+          title={walletConnectAvailable ? "Scan a QR code with any WalletConnect-compatible wallet" : "WalletConnect project id not configured"}
+        >
+          WalletConnect (mobile / hardware wallet)
         </button>
         <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-          Detects MetaMask / Rabby / Brave Wallet / Coinbase Wallet automatically. On mobile,
-          open this link in your wallet app's built-in browser.
+          The first option detects MetaMask / Rabby / Brave / Coinbase automatically.
+          WalletConnect opens a QR code so you can sign with Trust, Rainbow, Ledger Live,
+          Argent, Safe, OKX or any other WalletConnect-compatible wallet on a different device.
         </p>
       </>
     );
