@@ -941,6 +941,16 @@ function OwnershipRow({
   const challenge = wallet.challenge;
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const signUrl = challenge ? `${origin}/uc7-sign/${challenge.challengeId}` : "";
+  // The QR encodes a MetaMask universal link so that scanning on a phone
+  // opens MetaMask's in-app dApp browser directly (where window.ethereum is
+  // injected and the existing personal_sign flow runs natively). When the
+  // user does not have MetaMask installed, metamask.app.link redirects to
+  // the bare URL in the regular browser, so the QR still works for any
+  // wallet via the displayed copy-link.
+  const qrTarget =
+    challenge && origin
+      ? `https://metamask.app.link/dapp/${origin.replace(/^https?:\/\//, "")}/uc7-sign/${challenge.challengeId}`
+      : "";
 
   return (
     <div style={walletCardStyle}>
@@ -971,13 +981,17 @@ function OwnershipRow({
         <div style={{ marginTop: 14, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
-              QR code — scan on client's phone
+              QR code — scan with MetaMask Mobile to sign directly
             </div>
             <img
               alt="Sign challenge"
-              src={`/api/uc7/qr?data=${encodeURIComponent(signUrl)}`}
+              src={`/api/uc7/qr?data=${encodeURIComponent(qrTarget)}`}
               style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 6 }}
             />
+            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.4, maxWidth: 180 }}>
+              Opens the challenge inside MetaMask&rsquo;s in-app browser. Other
+              wallets: use the link below.
+            </div>
           </div>
           <div style={{ flex: 1, minWidth: 240 }}>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>Challenge message</div>
