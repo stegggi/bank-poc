@@ -505,12 +505,18 @@ function StepSetup({
       };
       setActiveCase(updated);
 
-      await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+      // Use the PUT response as the new state of truth — re-fetching via
+      // refreshCase here can hit Vercel Blob's eventual-consistency window
+      // and return a stale snapshot (without the wallet we just wrote),
+      // which then overwrites the freshly-scanned data and makes the row
+      // appear to vanish a moment after it shows up.
+      const putRes = await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wallets: updated.wallets }),
       });
-      onUpdated(caseFile.caseReference);
+      const putJson = (await putRes.json().catch(() => ({}))) as { case?: CaseFile };
+      if (putJson.case) setActiveCase(putJson.case);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to add wallet");
       // Rollback on failure
@@ -518,21 +524,22 @@ function StepSetup({
     } finally {
       setScanning(false);
     }
-  }, [addr, caseFile, onUpdated, setActiveCase]);
+  }, [addr, caseFile, setActiveCase]);
 
   const removeWallet = useCallback(
     async (address: string) => {
       const wallets = caseFile.wallets.filter((w) => w.address !== address);
       const updated = { ...caseFile, wallets };
       setActiveCase(updated);
-      await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+      const putRes = await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
         method: "PUT",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wallets }),
       });
-      onUpdated(caseFile.caseReference);
+      const putJson = (await putRes.json().catch(() => ({}))) as { case?: CaseFile };
+      if (putJson.case) setActiveCase(putJson.case);
     },
-    [caseFile, onUpdated, setActiveCase]
+    [caseFile, setActiveCase]
   );
 
   const rescan = useCallback(
@@ -557,17 +564,18 @@ function StepSetup({
         );
         const updated = { ...caseFile, wallets };
         setActiveCase(updated);
-        await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+        const putRes = await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
           method: "PUT",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({ wallets }),
         });
-        onUpdated(caseFile.caseReference);
+        const putJson = (await putRes.json().catch(() => ({}))) as { case?: CaseFile };
+        if (putJson.case) setActiveCase(putJson.case);
       } finally {
         setRescanning(null);
       }
     },
-    [caseFile, onUpdated, setActiveCase]
+    [caseFile, setActiveCase]
   );
 
   return (

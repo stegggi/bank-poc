@@ -5,6 +5,13 @@ import { list, put, del } from "@vercel/blob";
 // Local FS fallback when BLOB_READ_WRITE_TOKEN is not set (dev).
 const USE_BLOB = !!process.env.BLOB_READ_WRITE_TOKEN;
 
+// Vercel Blob's `list` is eventually consistent — for a few seconds after a
+// write, list+fetch can hand back a stale snapshot. To make read-after-write
+// from the same warm Lambda deterministic, we keep a tiny per-process cache
+// of the last body we wrote per pathname.
+const recentWrites = new Map<string, { body: string; ts: number }>();
+const RECENT_TTL_MS = 30_000;
+
 const LOCAL_ROOT = path.join(
   process.cwd(),
   "use-cases",
@@ -29,6 +36,16 @@ export async function readJson<T>(pathname: string): Promise<T | null> {
       return JSON.parse(raw) as T;
     } catch {
       return null;
+    }
+  }
+  // If this Lambda just wrote to this pathname, return the in-memory copy —
+  // bypasses Vercel Blob's eventual-consistency window for `list`.
+  const recent = recentWrites.get(pathname);
+  if (recent && Date.now() - recent.ts < RECENT_TTL_MS) {
+    try {
+      return JSON.parse(recent.body) as T;
+    } catch {
+      /* fall through to network read */
     }
   }
   try {
@@ -56,6 +73,9 @@ export async function writeJson(pathname: string, data: unknown): Promise<void> 
     addRandomSuffix: false,
     allowOverwrite: true,
   });
+  // Remember what we just wrote so a follow-up read on this Lambda doesn't
+  // race the eventually-consistent list API.
+  recentWrites.set(pathname, { body, ts: Date.now() });
 }
 
 export async function listJson<T>(prefix: string): Promise<T[]> {
@@ -95,6 +115,7 @@ export async function listJson<T>(prefix: string): Promise<T[]> {
 }
 
 export async function deleteJson(pathname: string): Promise<void> {
+  recentWrites.delete(pathname);
   if (!USE_BLOB) {
     try {
       await fs.promises.unlink(localPathFor(pathname));
