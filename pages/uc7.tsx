@@ -2156,18 +2156,41 @@ function StepReport({
 }) {
   const [signOff, setSignOff] = useState(caseFile.signOffName || "");
   const [determination, setDetermination] = useState(caseFile.determination || "");
+  const [signoffStatus, setSignoffStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
+  const [signoffError, setSignoffError] = useState<string>("");
 
   const saveSignoff = useCallback(async () => {
-    await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        signOffName: signOff,
-        determination,
-        signOffDate: new Date().toISOString().slice(0, 10),
-      }),
-    });
-    onUpdated(caseFile.caseReference);
+    if (!signOff.trim() && !determination.trim()) {
+      setSignoffStatus("error");
+      setSignoffError("Enter at least a name or a determination before saving.");
+      return false;
+    }
+    setSignoffStatus("saving");
+    setSignoffError("");
+    try {
+      const res = await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          signOffName: signOff,
+          determination,
+          signOffDate: new Date().toISOString().slice(0, 10),
+        }),
+      });
+      if (!res.ok) {
+        const body = (await res.json().catch(() => ({}))) as { error?: string };
+        setSignoffStatus("error");
+        setSignoffError(body.error || `Save failed (HTTP ${res.status})`);
+        return false;
+      }
+      await onUpdated(caseFile.caseReference);
+      setSignoffStatus("saved");
+      return true;
+    } catch (err) {
+      setSignoffStatus("error");
+      setSignoffError(err instanceof Error ? err.message : "Save failed");
+      return false;
+    }
   }, [caseFile.caseReference, signOff, determination, onUpdated]);
 
   const reportUrl = `/api/uc7/report/${caseFile.caseReference}`;
@@ -2187,7 +2210,10 @@ function StepReport({
             <label style={labelStyle}>Compliance officer name</label>
             <input
               value={signOff}
-              onChange={(e) => setSignOff(e.target.value)}
+              onChange={(e) => {
+                setSignOff(e.target.value);
+                if (signoffStatus !== "idle") setSignoffStatus("idle");
+              }}
               placeholder="Name"
               style={inputStyle}
             />
@@ -2196,16 +2222,29 @@ function StepReport({
             <label style={labelStyle}>Determination</label>
             <input
               value={determination}
-              onChange={(e) => setDetermination(e.target.value)}
+              onChange={(e) => {
+                setDetermination(e.target.value);
+                if (signoffStatus !== "idle") setSignoffStatus("idle");
+              }}
               placeholder="e.g. Onboard with enhanced monitoring"
               style={inputStyle}
             />
           </div>
         </div>
-        <div style={{ marginTop: 10 }}>
-          <button style={secondaryBtn} onClick={saveSignoff}>
-            Save sign-off
+        <div style={{ marginTop: 10, display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <button
+            style={{ ...secondaryBtn, opacity: signoffStatus === "saving" ? 0.6 : 1, cursor: signoffStatus === "saving" ? "wait" : "pointer" }}
+            onClick={() => { void saveSignoff(); }}
+            disabled={signoffStatus === "saving"}
+          >
+            {signoffStatus === "saving" ? "Saving…" : "Save sign-off"}
           </button>
+          {signoffStatus === "saved" && (
+            <span style={{ color: "#6ee7b7", fontSize: 12, fontWeight: 600 }}>✓ Saved</span>
+          )}
+          {signoffStatus === "error" && (
+            <span style={{ color: "#fca5a5", fontSize: 12 }}>{signoffError}</span>
+          )}
         </div>
       </div>
 
@@ -2216,8 +2255,15 @@ function StepReport({
         <button
           style={secondaryBtn}
           onClick={async () => {
+            // Always persist the latest sign-off values before generating the
+            // PDF — otherwise the report would reflect whatever was last on
+            // the server, not what the officer just typed.
+            if (signOff.trim() || determination.trim()) {
+              const ok = await saveSignoff();
+              if (!ok) return;
+            }
             await fetch(`/api/uc7/report/${caseFile.caseReference}`, { method: "POST" });
-            onUpdated(caseFile.caseReference);
+            await onUpdated(caseFile.caseReference);
             window.open(reportUrl, "_blank");
           }}
         >
