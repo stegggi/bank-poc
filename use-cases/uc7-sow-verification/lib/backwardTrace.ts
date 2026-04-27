@@ -120,9 +120,12 @@ async function priceForToken(
   return { price, unpriced };
 }
 
-async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflow[]> {
+async function loadIncomingEvm(
+  address: string,
+  chain: string
+): Promise<{ inflows: EvmInflow[]; failedSources: string[] }> {
   const chainId = CHAIN_ID_MAP[chain];
-  if (!chainId) return [];
+  if (!chainId) return { inflows: [], failedSources: [] };
 
   const [normal, tokens, internal] = await Promise.all([
     fetchEtherscan<RawTx[]>(
@@ -161,6 +164,15 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
       chainId
     ),
   ]);
+
+  // Track which of the three sources came back null (after the retry budget
+  // in etherscanFetch was exhausted). A null return means we genuinely lost
+  // those rows — silently treating null as [] is what was producing run-to-
+  // run differences in identical wallets.
+  const failedSources: string[] = [];
+  if (normal == null) failedSources.push("native transfers");
+  if (tokens == null) failedSources.push("token transfers");
+  if (internal == null) failedSources.push("internal transfers");
 
   const addr = address.toLowerCase();
   const nativeSymbol = CHAIN_NATIVE[chain] || "ETH";
@@ -237,7 +249,7 @@ async function loadIncomingEvm(address: string, chain: string): Promise<EvmInflo
     }
   }
 
-  return inflows;
+  return { inflows, failedSources };
 }
 
 type SourceAgg = {
@@ -475,9 +487,19 @@ export async function traceBackward(
     return emptyTrace(address, "solana", tracedAt);
   }
 
-  const initialInflows = await loadIncomingEvm(address, chain);
+  // Track every Etherscan source that returned null (after retries) across
+  // all hops so we can warn the operator when the trace is incomplete.
+  const partialCalls = new Set<string>();
+  const { inflows: initialInflows, failedSources } = await loadIncomingEvm(address, chain);
+  for (const f of failedSources) partialCalls.add(f);
+
   if (initialInflows.length === 0) {
-    return emptyTrace(address, chain, tracedAt);
+    const empty = emptyTrace(address, chain, tracedAt);
+    if (partialCalls.size > 0) {
+      const list = Array.from(partialCalls);
+      empty.warning = `Trace incomplete on ${chain}: Etherscan ${list.join(", ")} request${list.length === 1 ? "" : "s"} failed (rate-limited or timed out). Click Retry chain for full data — totals below may be lower than reality.`;
+    }
+    return empty;
   }
   const aggHop1 = aggregateBySource(initialInflows);
   const { sources: hop1, totalChf, totalUsd } = topSources(aggHop1.values);
@@ -586,7 +608,9 @@ export async function traceBackward(
         label.entityType === "contract") &&
       item.depth < maxHopDepth
     ) {
-      const deeper = await loadIncomingEvm(item.src, chain);
+      const { inflows: deeper, failedSources: deeperFailed } =
+        await loadIncomingEvm(item.src, chain);
+      for (const f of deeperFailed) partialCalls.add(f);
       // Stash the per-tx list for the hop drill-down UI
       inflowsByParent[item.src.toLowerCase()] = await inflowsToTraceTxs(
         deeper,
@@ -610,7 +634,9 @@ export async function traceBackward(
     }
 
     if (label.entityType === "unknown" && item.depth < maxHopDepth) {
-      const deeper = await loadIncomingEvm(item.src, chain);
+      const { inflows: deeper, failedSources: deeperFailed } =
+        await loadIncomingEvm(item.src, chain);
+      for (const f of deeperFailed) partialCalls.add(f);
       if (deeper.length === 0) {
         pushTraced(item, label);
         continue;
@@ -646,6 +672,14 @@ export async function traceBackward(
     .filter((s) => s.label && s.label.entityType !== "unknown" && !s.label.sanctioned)
     .reduce((acc, s) => acc + s.valueUsd, 0);
 
+  const warning =
+    partialCalls.size > 0
+      ? (() => {
+          const list = Array.from(partialCalls);
+          return `Trace incomplete on ${chain}: Etherscan ${list.join(", ")} request${list.length === 1 ? "" : "s"} failed (rate-limited or timed out). Click Retry chain for full data — totals below may be lower than reality.`;
+        })()
+      : undefined;
+
   return {
     walletAddress: address,
     chain,
@@ -662,6 +696,7 @@ export async function traceBackward(
     edges,
     inflowsByParent,
     tracedAt,
+    ...(warning ? { warning } : {}),
   };
 }
 

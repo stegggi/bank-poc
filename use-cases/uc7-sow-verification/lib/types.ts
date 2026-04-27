@@ -159,6 +159,12 @@ export type TraceResult = {
    */
   inflowsByParent?: Record<string, TraceTx[]>;
   tracedAt: string;
+  /**
+   * Set when one or more upstream API calls failed (rate-limited, network
+   * blip) and the trace returned with partial data. Run-to-run differences
+   * on the same wallet usually mean this got set.
+   */
+  warning?: string;
 };
 
 export type RiskTier = "GREEN" | "AMBER" | "RED";

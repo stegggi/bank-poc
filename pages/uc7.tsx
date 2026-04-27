@@ -1757,6 +1757,23 @@ function ChainTraceCard({
         </div>
       )}
 
+      {trace.warning && (
+        <div
+          style={{
+            marginTop: 10,
+            padding: 10,
+            background: "rgba(245,158,11,0.08)",
+            border: "1px solid rgba(245,158,11,0.4)",
+            borderRadius: 6,
+            color: "#fbbf24",
+            fontSize: 12,
+            lineHeight: 1.5,
+          }}
+        >
+          ⚠ {trace.warning}
+        </div>
+      )}
+
       {noActivity ? (
         <div style={{ ...mutedBlock, textAlign: "left", marginTop: 12 }}>
           {retrying
