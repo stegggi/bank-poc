@@ -23,5 +23,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   res.setHeader("content-type", "text/html; charset=utf-8");
   res.setHeader("content-disposition", `inline; filename="${caseFile.caseReference}.html"`);
+  res.setHeader("cache-control", "no-store, max-age=0, must-revalidate");
   return res.status(200).send(html);
 }

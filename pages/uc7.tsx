@@ -2249,7 +2249,12 @@ function StepReport({
       </div>
 
       <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
-        <a href={reportUrl} target="_blank" rel="noreferrer" style={{ ...primaryBtn, textDecoration: "none", display: "inline-block" }}>
+        <a
+          href={`${reportUrl}?t=${Date.now()}`}
+          target="_blank"
+          rel="noreferrer"
+          style={{ ...primaryBtn, textDecoration: "none", display: "inline-block" }}
+        >
           Open report
         </a>
         <button
@@ -2264,7 +2269,10 @@ function StepReport({
             }
             await fetch(`/api/uc7/report/${caseFile.caseReference}`, { method: "POST" });
             await onUpdated(caseFile.caseReference);
-            window.open(reportUrl, "_blank");
+            // Cache-buster suffix forces the browser to re-fetch the freshly
+            // generated HTML instead of replaying an earlier "Open report"
+            // response from disk cache.
+            window.open(`${reportUrl}?t=${Date.now()}`, "_blank");
           }}
         >
           Finalize & download
