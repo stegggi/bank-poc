@@ -22,6 +22,8 @@ import type {
   WalletScanResult,
 } from "../use-cases/uc7-sow-verification/lib/types";
 
+const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
+
 type Step = "setup" | "ownership" | "scan" | "classify" | "ttp" | "report";
 
 const STEP_ORDER: Step[] = ["setup", "ownership", "scan", "classify", "ttp", "report"];
@@ -912,6 +914,8 @@ function StepOwnership({
             wallet={w}
             loading={loadingAddr === w.address}
             onGenerate={() => generateChallenge(w.address)}
+            caseReference={caseFile.caseReference}
+            onUpdated={onUpdated}
           />
         ))}
       </div>
@@ -933,24 +937,169 @@ function OwnershipRow({
   wallet,
   loading,
   onGenerate,
+  caseReference,
+  onUpdated,
 }: {
   wallet: WalletRecord;
   loading: boolean;
   onGenerate: () => void;
+  caseReference: string;
+  onUpdated: (ref: string) => void;
 }) {
   const challenge = wallet.challenge;
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const signUrl = challenge ? `${origin}/uc7-sign/${challenge.challengeId}` : "";
-  // The QR encodes a MetaMask universal link so that scanning on a phone
-  // opens MetaMask's in-app dApp browser directly (where window.ethereum is
-  // injected and the existing personal_sign flow runs natively). When the
-  // user does not have MetaMask installed, metamask.app.link redirects to
-  // the bare URL in the regular browser, so the QR still works for any
-  // wallet via the displayed copy-link.
-  const qrTarget =
-    challenge && origin
-      ? `https://metamask.app.link/dapp/${origin.replace(/^https?:\/\//, "")}/uc7-sign/${challenge.challengeId}`
-      : "";
+  // Per-EVM-challenge WalletConnect session. When the user scans the WC QR
+  // with any compatible mobile wallet (MetaMask, Trust, Rainbow, Argent,
+  // Safe, OKX, Zerion, Ledger Live, Coinbase, …) the wallet pairs with
+  // this page, we push a personal_sign request, the user signs in their
+  // app, and the signature flows back to /api/uc7/verify-signature — no
+  // browser hop required.
+  const [wcUri, setWcUri] = useState<string | null>(null);
+  const [wcPhase, setWcPhase] = useState<
+    "idle" | "init" | "awaiting-scan" | "signing" | "verifying" | "error"
+  >("idle");
+  const [wcError, setWcError] = useState("");
+  const [wcRetryKey, setWcRetryKey] = useState(0);
+
+  const isEvmPending =
+    !!challenge && challenge.status === "pending" && wallet.chainFamily === "evm";
+
+  useEffect(() => {
+    if (!isEvmPending || !challenge) return;
+    if (!WC_PROJECT_ID) return;
+
+    let cancelled = false;
+    type WcProvider = {
+      accounts?: string[];
+      on: (event: string, cb: (...args: unknown[]) => void) => void;
+      connect: () => Promise<void>;
+      disconnect: () => Promise<void>;
+      request: (args: { method: string; params: unknown[] }) => Promise<unknown>;
+    };
+    let provider: WcProvider | null = null;
+
+    setWcPhase("init");
+    setWcError("");
+    setWcUri(null);
+
+    (async () => {
+      try {
+        const mod = await import("@walletconnect/ethereum-provider");
+        const inited = await mod.EthereumProvider.init({
+          projectId: WC_PROJECT_ID,
+          chains: [1],
+          optionalChains: [10, 56, 137, 8453, 42161, 43114],
+          showQrModal: false,
+          metadata: {
+            name: "Wallet Ownership Verification",
+            description: "Sign a challenge to prove control of your wallet.",
+            url: typeof window !== "undefined" ? window.location.origin : "",
+            icons: [],
+          },
+        });
+        provider = inited as unknown as WcProvider;
+
+        provider.on("display_uri", (...args: unknown[]) => {
+          if (cancelled) return;
+          const uri = typeof args[0] === "string" ? args[0] : "";
+          if (uri) {
+            setWcUri(uri);
+            setWcPhase("awaiting-scan");
+          }
+        });
+
+        await provider.connect();
+        if (cancelled) {
+          await provider.disconnect().catch(() => {});
+          return;
+        }
+
+        const accounts = provider.accounts || [];
+        const signingAddr = (accounts[0] || "").toLowerCase();
+        if (!signingAddr) {
+          throw new Error("Wallet did not return a signing account");
+        }
+        if (signingAddr !== wallet.address.toLowerCase()) {
+          setWcError(
+            `The wallet you connected (${signingAddr}) does not match the expected address. Reconnect with the correct account in your wallet app.`,
+          );
+          setWcPhase("error");
+          await provider.disconnect().catch(() => {});
+          return;
+        }
+
+        setWcPhase("signing");
+        const sig = await provider.request({
+          method: "personal_sign",
+          params: [challenge.message, signingAddr],
+        });
+        const signature = typeof sig === "string" ? sig : "";
+        if (cancelled) {
+          await provider.disconnect().catch(() => {});
+          return;
+        }
+
+        setWcPhase("verifying");
+        const res = await fetch("/api/uc7/verify-signature", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ challengeId: challenge.challengeId, signature }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          result?: { ok?: boolean; error?: string };
+        };
+        if (cancelled) {
+          await provider.disconnect().catch(() => {});
+          return;
+        }
+        if (json.result?.ok) {
+          onUpdated(caseReference);
+        } else {
+          setWcError(json.result?.error || "Signature verification failed");
+          setWcPhase("error");
+        }
+        await provider.disconnect().catch(() => {});
+      } catch (err) {
+        if (cancelled) return;
+        setWcError(err instanceof Error ? err.message : "WalletConnect failed");
+        setWcPhase("error");
+        if (provider) {
+          await provider.disconnect().catch(() => {});
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      if (provider) provider.disconnect().catch(() => {});
+    };
+  }, [
+    isEvmPending,
+    challenge,
+    wallet.address,
+    caseReference,
+    onUpdated,
+    wcRetryKey,
+  ]);
+
+  // What goes into the QR. For EVM with a live WC session, that's the wc:
+  // URI the wallet apps know how to handle. Otherwise we fall back to a
+  // chain-appropriate URL: MetaMask universal link for EVM, bare sign URL
+  // for Solana/Bitcoin (Phantom etc. won't follow metamask.app.link).
+  const qrData =
+    wallet.chainFamily === "evm" && wcUri
+      ? wcUri
+      : wallet.chainFamily === "evm" && challenge && origin
+        ? `https://metamask.app.link/dapp/${origin.replace(/^https?:\/\//, "")}/uc7-sign/${challenge.challengeId}`
+        : signUrl;
+
+  const qrUsesWc = wallet.chainFamily === "evm" && !!wcUri;
+  const qrCaption = qrUsesWc
+    ? "Scan with any mobile wallet — MetaMask, Trust, Rainbow, Argent, Safe, Coinbase, …"
+    : wallet.chainFamily === "evm"
+      ? "Opens inside MetaMask's in-app browser. Other wallets: use the link below."
+      : "Scan to open the signing page on your phone.";
 
   return (
     <div style={walletCardStyle}>
@@ -965,7 +1114,13 @@ function OwnershipRow({
             {challenge?.status === "failed" && (
               <span style={{ marginLeft: 10, color: "#fca5a5", fontWeight: 700 }}>✗ Failed</span>
             )}
-            {challenge?.status === "pending" && (
+            {challenge?.status === "pending" && wcPhase === "signing" && (
+              <span style={{ marginLeft: 10, color: "#fbbf24" }}>✍️ Awaiting wallet signature…</span>
+            )}
+            {challenge?.status === "pending" && wcPhase === "verifying" && (
+              <span style={{ marginLeft: 10, color: "#fbbf24" }}>⏳ Verifying signature…</span>
+            )}
+            {challenge?.status === "pending" && wcPhase !== "signing" && wcPhase !== "verifying" && (
               <span style={{ marginLeft: 10, color: "#fbbf24" }}>⏳ Waiting for signature</span>
             )}
           </div>
@@ -981,17 +1136,45 @@ function OwnershipRow({
         <div style={{ marginTop: 14, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
-              QR code — scan with MetaMask Mobile to sign directly
+              {qrUsesWc ? "WalletConnect QR — sign in any mobile wallet" : "QR code"}
             </div>
-            <img
-              alt="Sign challenge"
-              src={`/api/uc7/qr?data=${encodeURIComponent(qrTarget)}`}
-              style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 6 }}
-            />
+            {wallet.chainFamily === "evm" && wcPhase === "init" && !wcUri ? (
+              <div
+                style={{
+                  width: 180,
+                  height: 180,
+                  background: "rgba(255,255,255,0.03)",
+                  borderRadius: 8,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "rgba(255,255,255,0.55)",
+                  fontSize: 12,
+                }}
+              >
+                <Spinner /> &nbsp;Opening session…
+              </div>
+            ) : (
+              <img
+                alt="Sign challenge"
+                src={`/api/uc7/qr?data=${encodeURIComponent(qrData)}`}
+                style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 6 }}
+              />
+            )}
             <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.4, maxWidth: 180 }}>
-              Opens the challenge inside MetaMask&rsquo;s in-app browser. Other
-              wallets: use the link below.
+              {qrCaption}
             </div>
+            {wallet.chainFamily === "evm" && wcPhase === "error" && wcError && (
+              <div style={{ ...errorBox, marginTop: 8, maxWidth: 180, fontSize: 11 }}>
+                {wcError}
+                <button
+                  style={{ ...secondaryBtn, marginTop: 6, padding: "4px 10px", fontSize: 11 }}
+                  onClick={() => setWcRetryKey((k) => k + 1)}
+                >
+                  Retry connection
+                </button>
+              </div>
+            )}
           </div>
           <div style={{ flex: 1, minWidth: 240 }}>
             <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>Challenge message</div>
