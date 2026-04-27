@@ -962,11 +962,21 @@ function OwnershipRow({
   const [wcError, setWcError] = useState("");
   const [wcRetryKey, setWcRetryKey] = useState(0);
 
-  const isEvmPending =
-    !!challenge && challenge.status === "pending" && wallet.chainFamily === "evm";
+  // Pull stable primitives off the challenge so the effect below doesn't
+  // re-run (and tear down the live WalletConnect session) every 4 seconds
+  // when the parent polls /api/uc7/case and produces a new challenge object
+  // reference. Effect dependencies must be primitives that only change when
+  // the challenge identity or content actually changes.
+  const challengeId = challenge?.challengeId;
+  const challengeMessage = challenge?.message;
+  const challengeStatus = challenge?.status;
+  const walletAddress = wallet.address;
+  const walletChainFamily = wallet.chainFamily;
 
   useEffect(() => {
-    if (!isEvmPending || !challenge) return;
+    if (challengeStatus !== "pending") return;
+    if (walletChainFamily !== "evm") return;
+    if (!challengeId || !challengeMessage) return;
     if (!WC_PROJECT_ID) return;
 
     let cancelled = false;
@@ -1020,7 +1030,7 @@ function OwnershipRow({
         if (!signingAddr) {
           throw new Error("Wallet did not return a signing account");
         }
-        if (signingAddr !== wallet.address.toLowerCase()) {
+        if (signingAddr !== walletAddress.toLowerCase()) {
           setWcError(
             `The wallet you connected (${signingAddr}) does not match the expected address. Reconnect with the correct account in your wallet app.`,
           );
@@ -1030,9 +1040,19 @@ function OwnershipRow({
         }
 
         setWcPhase("signing");
+        // personal_sign requires the message as a 0x-prefixed hex string in
+        // many wallets (Rabby, certain Trust builds, hardware-wallet flows
+        // routed via WC). Plain strings work for some MetaMask paths but not
+        // universally — hex-encoding is the safe choice and is what the
+        // EIP-191 spec describes anyway.
+        const messageHex =
+          "0x" +
+          Array.from(new TextEncoder().encode(challengeMessage))
+            .map((b) => b.toString(16).padStart(2, "0"))
+            .join("");
         const sig = await provider.request({
           method: "personal_sign",
-          params: [challenge.message, signingAddr],
+          params: [messageHex, signingAddr],
         });
         const signature = typeof sig === "string" ? sig : "";
         if (cancelled) {
@@ -1044,7 +1064,7 @@ function OwnershipRow({
         const res = await fetch("/api/uc7/verify-signature", {
           method: "POST",
           headers: { "content-type": "application/json" },
-          body: JSON.stringify({ challengeId: challenge.challengeId, signature }),
+          body: JSON.stringify({ challengeId, signature }),
         });
         const json = (await res.json().catch(() => ({}))) as {
           result?: { ok?: boolean; error?: string };
@@ -1075,9 +1095,11 @@ function OwnershipRow({
       if (provider) provider.disconnect().catch(() => {});
     };
   }, [
-    isEvmPending,
-    challenge,
-    wallet.address,
+    challengeId,
+    challengeMessage,
+    challengeStatus,
+    walletAddress,
+    walletChainFamily,
     caseReference,
     onUpdated,
     wcRetryKey,
