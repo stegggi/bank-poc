@@ -451,24 +451,53 @@ function SignButtons({
     background: "rgba(255,255,255,0.06)",
   };
   if (challenge.chainFamily === "evm") {
+    if (!walletConnectAvailable) {
+      // No WalletConnect project id on the server — fall back to the injected
+      // browser wallet so the page still functions, with a clear note that
+      // the agnostic picker isn't available.
+      return (
+        <>
+          <button style={btn} onClick={onEvm}>
+            Connect browser wallet and sign
+          </button>
+          <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+            WalletConnect is not configured on this server, so this page
+            falls back to the wallet your browser injects (MetaMask, Rabby,
+            Brave Wallet, Coinbase Wallet, …). On mobile, open this link
+            from inside your wallet app&rsquo;s built-in browser.
+          </p>
+        </>
+      );
+    }
     return (
       <>
-        <button style={btn} onClick={onEvm}>
-          Browser / extension wallet
-        </button>
         <button
-          style={{ ...btnSecondary, opacity: walletConnectAvailable ? 1 : 0.5, cursor: walletConnectAvailable ? "pointer" : "not-allowed" }}
+          style={btn}
           onClick={onEvmWalletConnect}
-          disabled={!walletConnectAvailable}
-          title={walletConnectAvailable ? "Scan a QR code with any WalletConnect-compatible wallet" : "WalletConnect project id not configured"}
+          title="Pick any wallet — MetaMask, Trust, Rainbow, Argent, Safe, Coinbase, Ledger Live, …"
         >
-          WalletConnect (mobile / hardware wallet)
+          Connect any wallet
         </button>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-          The first option detects MetaMask / Rabby / Brave / Coinbase automatically.
-          WalletConnect opens a QR code so you can sign with Trust, Rainbow, Ledger Live,
-          Argent, Safe, OKX or any other WalletConnect-compatible wallet on a different device.
+        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+          Opens a wallet picker that supports 300+ wallets — MetaMask, Trust,
+          Rainbow, Argent, Safe, Coinbase, OKX, Zerion, Ledger Live, Rabby, … —
+          plus a QR code fallback for any WalletConnect-compatible mobile app.
         </p>
+        <details style={{ marginTop: 10 }}>
+          <summary style={{ cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
+            Power users: use the wallet already injected in this browser
+          </summary>
+          <button style={{ ...btnSecondary, marginTop: 8 }} onClick={onEvm}>
+            Use injected wallet (window.ethereum)
+          </button>
+          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+            Skips the picker and uses whatever extension is bound to{" "}
+            <code>window.ethereum</code> right now (whichever wallet your
+            browser injected last). On Brave or with the Coinbase extension
+            installed, this can lock you into one specific wallet — prefer{" "}
+            <em>Connect any wallet</em> above.
+          </p>
+        </details>
       </>
     );
   }
