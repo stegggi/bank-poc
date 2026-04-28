@@ -5,6 +5,41 @@ import type { Challenge } from "../../use-cases/uc7-sow-verification/lib/types";
 
 const WC_PROJECT_ID = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID || "";
 
+// EIP-6963 — Multi Injected Provider Discovery. Wallets that follow it
+// announce themselves via a custom event so the dApp can list every
+// installed extension instead of using whichever one happened to win the
+// `window.ethereum` slot. MetaMask, Coinbase, Rabby, Brave, Trust, OKX,
+// Phantom, Frame, etc. all support it.
+type Eip6963ProviderInfo = {
+  uuid: string;
+  name: string;
+  icon: string;
+  rdns: string;
+};
+type Eip6963Detail = {
+  info: Eip6963ProviderInfo;
+  provider: Eip1193Provider;
+};
+
+function useDetectedWallets(): Eip6963Detail[] {
+  const [wallets, setWallets] = useState<Eip6963Detail[]>([]);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<Eip6963Detail>).detail;
+      if (!detail?.info?.uuid) return;
+      setWallets((prev) =>
+        prev.some((w) => w.info.uuid === detail.info.uuid)
+          ? prev
+          : [...prev, detail],
+      );
+    };
+    window.addEventListener("eip6963:announceProvider", handler);
+    window.dispatchEvent(new Event("eip6963:requestProvider"));
+    return () => window.removeEventListener("eip6963:announceProvider", handler);
+  }, []);
+  return wallets;
+}
+
 type EthereumWindow = typeof window & {
   ethereum?: {
     request: (args: { method: string; params?: unknown[] }) => Promise<unknown>;
@@ -48,6 +83,7 @@ export default function SignPage() {
   const [result, setResult] = useState<string>("");
   const [manualSig, setManualSig] = useState<string>("");
   const [manualPubKey, setManualPubKey] = useState<string>("");
+  const detectedWallets = useDetectedWallets();
 
   useEffect(() => {
     if (!challengeId || typeof challengeId !== "string") return;
@@ -98,23 +134,33 @@ export default function SignPage() {
     [challenge],
   );
 
-  const signEvm = useCallback(async () => {
-    if (!challenge) return;
-    setStatus("signing");
-    setError("");
-    const w = window as EthereumWindow;
-    if (!w.ethereum) {
-      setError("No browser wallet detected. Use the WalletConnect button below for mobile or hardware wallets, or open this page in a wallet app's built-in browser (MetaMask, Rabby, Coinbase).");
-      setStatus("error");
-      return;
-    }
-    try {
-      await signWithEvmProvider(w.ethereum as unknown as Eip1193Provider);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Signing failed");
-      setStatus("error");
-    }
-  }, [challenge, signWithEvmProvider]);
+  const signEvm = useCallback(
+    async (provider?: Eip1193Provider) => {
+      if (!challenge) return;
+      setStatus("signing");
+      setError("");
+      // Prefer the provider the user explicitly picked (via EIP-6963). If
+      // none was passed, fall back to whatever holds window.ethereum — this
+      // keeps the page working for older wallets that don't support 6963.
+      const w = window as EthereumWindow;
+      const target =
+        provider ?? (w.ethereum as unknown as Eip1193Provider | undefined);
+      if (!target) {
+        setError(
+          "No browser wallet detected. Install MetaMask, Rabby, Trust, Coinbase, or any other EIP-1193 wallet — or use the QR option to sign with a mobile wallet.",
+        );
+        setStatus("error");
+        return;
+      }
+      try {
+        await signWithEvmProvider(target);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Signing failed");
+        setStatus("error");
+      }
+    },
+    [challenge, signWithEvmProvider],
+  );
 
   const signEvmWalletConnect = useCallback(async () => {
     if (!challenge) return;
@@ -305,6 +351,7 @@ export default function SignPage() {
                 onEvmWalletConnect={signEvmWalletConnect}
                 onSol={signSolana}
                 walletConnectAvailable={Boolean(WC_PROJECT_ID)}
+                detectedWallets={detectedWallets}
               />
             )}
 
@@ -426,12 +473,14 @@ function SignButtons({
   onEvmWalletConnect,
   onSol,
   walletConnectAvailable,
+  detectedWallets,
 }: {
   challenge: Challenge;
-  onEvm: () => void;
+  onEvm: (provider?: Eip1193Provider) => void;
   onEvmWalletConnect: () => void;
   onSol: () => void;
   walletConnectAvailable: boolean;
+  detectedWallets: Eip6963Detail[];
 }) {
   const btn: CSSProperties = {
     width: "100%",
@@ -451,45 +500,122 @@ function SignButtons({
     background: "rgba(255,255,255,0.06)",
   };
   if (challenge.chainFamily === "evm") {
+    const sectionLabel: CSSProperties = {
+      fontSize: 11,
+      color: "rgba(255,255,255,0.45)",
+      letterSpacing: "0.05em",
+      textTransform: "uppercase",
+      fontWeight: 700,
+      marginTop: 4,
+      marginBottom: 6,
+    };
+    const walletBtn: CSSProperties = {
+      ...btn,
+      display: "flex",
+      alignItems: "center",
+      justifyContent: "center",
+      gap: 10,
+      marginTop: 6,
+    };
+    const hasInjected =
+      typeof window !== "undefined" && !!(window as EthereumWindow).ethereum;
     return (
       <>
-        <div
-          style={{
-            fontSize: 11,
-            color: "rgba(255,255,255,0.45)",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            fontWeight: 700,
-            marginTop: 4,
-            marginBottom: 4,
-          }}
-        >
-          Sign on this device
-        </div>
-        <button style={btn} onClick={onEvm}>
-          Connect browser wallet
-        </button>
-        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
-          Uses whatever wallet extension is installed in this browser —
-          MetaMask, Rabby, Brave Wallet, Coinbase, OKX, Trust, … — and pops
-          its native sign prompt. Best when you&rsquo;re on a desktop with
-          one or more extensions, or already inside a wallet app&rsquo;s
-          in-app browser on mobile.
-        </p>
+        <div style={sectionLabel}>Sign on this device</div>
 
-        <div
-          style={{
-            fontSize: 11,
-            color: "rgba(255,255,255,0.45)",
-            letterSpacing: "0.05em",
-            textTransform: "uppercase",
-            fontWeight: 700,
-            marginTop: 18,
-            marginBottom: 4,
-          }}
-        >
-          Sign on a different device
-        </div>
+        {detectedWallets.length > 0 ? (
+          <>
+            {detectedWallets.map((w) => (
+              <button
+                key={w.info.uuid}
+                style={walletBtn}
+                onClick={() => onEvm(w.provider)}
+                title={`Sign with ${w.info.name}`}
+              >
+                {w.info.icon && (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={w.info.icon}
+                    alt=""
+                    width={20}
+                    height={20}
+                    style={{ borderRadius: 4 }}
+                  />
+                )}
+                <span>Sign with {w.info.name}</span>
+              </button>
+            ))}
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+              {detectedWallets.length === 1
+                ? "Detected one wallet extension in this browser. Click to sign."
+                : `Detected ${detectedWallets.length} wallet extensions in this browser — pick the one that holds the address you registered.`}
+            </p>
+          </>
+        ) : hasInjected ? (
+          <>
+            <button style={walletBtn} onClick={() => onEvm()}>
+              Connect browser wallet
+            </button>
+            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+              A wallet is injected in this browser but it doesn&rsquo;t advertise
+              itself via EIP-6963 — we&rsquo;ll use whichever one currently holds{" "}
+              <code>window.ethereum</code>. If that turns out to be the wrong
+              wallet (e.g. a Coinbase extension when you wanted MetaMask),
+              disable the unwanted extension or switch to the QR option below.
+            </p>
+          </>
+        ) : (
+          <div
+            style={{
+              padding: 12,
+              background: "rgba(245,158,11,0.08)",
+              border: "1px solid rgba(245,158,11,0.3)",
+              borderRadius: 8,
+              color: "#fbbf24",
+              fontSize: 12,
+              lineHeight: 1.5,
+            }}
+          >
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>
+              No wallet extension detected in this browser.
+            </div>
+            Install one of these (any will work — pick whichever you already
+            use, or trust):
+            <ul style={{ paddingLeft: 18, marginTop: 6, marginBottom: 0 }}>
+              <li>
+                <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                  MetaMask
+                </a>
+              </li>
+              <li>
+                <a href="https://rabby.io/" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                  Rabby
+                </a>
+              </li>
+              <li>
+                <a href="https://www.coinbase.com/wallet/downloads" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                  Coinbase Wallet
+                </a>
+              </li>
+              <li>
+                <a href="https://trustwallet.com/download" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                  Trust Wallet
+                </a>
+              </li>
+              <li>
+                <a href="https://www.okx.com/web3" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                  OKX Wallet
+                </a>
+              </li>
+            </ul>
+            <div style={{ marginTop: 8 }}>
+              Or use the QR option below to sign with a wallet on your phone
+              instead.
+            </div>
+          </div>
+        )}
+
+        <div style={{ ...sectionLabel, marginTop: 18 }}>Sign on a different device</div>
         <button
           style={{
             ...btn,
@@ -509,7 +635,7 @@ function SignButtons({
         <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           {walletConnectAvailable
             ? "Opens a QR code that any WalletConnect-compatible app can scan — MetaMask Mobile, Trust, Rainbow, Argent, Safe, Coinbase, OKX, Zerion, Ledger Live, Rabby, …"
-            : "WalletConnect isn't configured on this server. Use the browser-wallet button above instead."}
+            : "WalletConnect isn't configured on this server. Install a browser wallet above to sign instead."}
         </p>
       </>
     );
