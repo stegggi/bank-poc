@@ -1,7 +1,8 @@
 import type { CaseFile, CaseSummary } from "./types";
-import { readJson, writeJson, listJson } from "./blobStore";
+import { readJson, writeJson, listJson, deleteJson } from "./blobStore";
 
 const CASES_PREFIX = "cases/";
+const CHALLENGE_PREFIX = "challenges/";
 
 function casePath(ref: string): string {
   return `${CASES_PREFIX}${ref}.json`;
@@ -45,6 +46,28 @@ export async function writeCase(file: CaseFile): Promise<CaseFile> {
   file.updatedAt = new Date().toISOString();
   await writeJson(casePath(file.caseReference), file);
   return file;
+}
+
+export async function deleteCase(ref: string): Promise<boolean> {
+  if (!isValidRef(ref)) return false;
+  const existing = await readCase(ref);
+  if (!existing) {
+    // Still try to delete the case file in case it exists but didn't parse.
+    await deleteJson(casePath(ref));
+    return false;
+  }
+  // Delete every per-wallet ownership challenge that lived under this case.
+  // Challenge ids are stored on the wallet record, so we walk the wallets.
+  const challengeIds = (existing.wallets ?? [])
+    .map((w) => w.challenge?.challengeId)
+    .filter((id): id is string => !!id);
+  await Promise.all(
+    challengeIds.map((id) =>
+      deleteJson(`${CHALLENGE_PREFIX}${id}.json`).catch(() => {}),
+    ),
+  );
+  await deleteJson(casePath(ref));
+  return true;
 }
 
 export async function listCases(): Promise<CaseSummary[]> {

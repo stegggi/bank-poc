@@ -1,5 +1,9 @@
 import type { NextApiRequest, NextApiResponse } from "next";
-import { readCase, writeCase } from "../../../../use-cases/uc7-sow-verification/lib/caseStore";
+import {
+  deleteCase,
+  readCase,
+  writeCase,
+} from "../../../../use-cases/uc7-sow-verification/lib/caseStore";
 import type { CaseFile } from "../../../../use-cases/uc7-sow-verification/lib/types";
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
@@ -27,6 +31,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     return res.status(200).json({ case: saved });
   }
 
-  res.setHeader("allow", "GET, PUT");
+  if (req.method === "DELETE") {
+    const ok = await deleteCase(id);
+    return res.status(200).json({ deleted: ok });
+  }
+
+  res.setHeader("allow", "GET, PUT, DELETE");
   return res.status(405).json({ error: "Method not allowed" });
 }

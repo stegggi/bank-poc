@@ -151,6 +151,26 @@ export default function Uc7Page() {
                   const ok = await refreshCase(ref);
                   if (ok) setStep("setup");
                 }}
+                onDelete={async (ref, clientName) => {
+                  if (
+                    !confirm(
+                      `Delete case ${ref} (${clientName}) and all its data — wallets, ownership challenges, scans, traces, classifications? This cannot be undone.`,
+                    )
+                  ) {
+                    return;
+                  }
+                  setError("");
+                  try {
+                    const res = await fetch(`/api/uc7/case/${ref}`, { method: "DELETE" });
+                    if (!res.ok) {
+                      const body = (await res.json().catch(() => ({}))) as { error?: string };
+                      throw new Error(body.error || `Delete failed (HTTP ${res.status})`);
+                    }
+                    await loadCases();
+                  } catch (err) {
+                    setError(err instanceof Error ? err.message : `Failed to delete ${ref}`);
+                  }
+                }}
                 loading={loading}
                 error={error}
               />
@@ -298,15 +318,18 @@ function CaseListView({
   cases,
   onCreate,
   onOpen,
+  onDelete,
   loading,
   error,
 }: {
   cases: CaseSummary[];
   onCreate: (name: string) => void;
   onOpen: (ref: string) => void;
+  onDelete: (ref: string, clientName: string) => void;
   loading: boolean;
   error: string;
 }) {
+  const [deletingRef, setDeletingRef] = useState<string | null>(null);
   const [name, setName] = useState("");
   return (
     <div>
@@ -357,9 +380,36 @@ function CaseListView({
                 <td style={tdStyle}>{c.walletCount}</td>
                 <td style={tdStyle}>{new Date(c.updatedAt).toLocaleDateString()}</td>
                 <td style={tdStyle}>
-                  <button style={linkBtn} onClick={() => onOpen(c.caseReference)}>
-                    Open
-                  </button>
+                  <div style={{ display: "flex", gap: 12, alignItems: "center" }}>
+                    <button style={linkBtn} onClick={() => onOpen(c.caseReference)}>
+                      Open
+                    </button>
+                    <button
+                      onClick={async () => {
+                        setDeletingRef(c.caseReference);
+                        try {
+                          await onDelete(c.caseReference, c.clientName);
+                        } finally {
+                          setDeletingRef(null);
+                        }
+                      }}
+                      disabled={deletingRef === c.caseReference}
+                      title={`Delete case ${c.caseReference} and all its data`}
+                      aria-label={`Delete case ${c.caseReference}`}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid rgba(239,68,68,0.4)",
+                        color: "#fca5a5",
+                        borderRadius: 4,
+                        padding: "2px 8px",
+                        fontSize: 12,
+                        cursor: deletingRef === c.caseReference ? "wait" : "pointer",
+                        opacity: deletingRef === c.caseReference ? 0.6 : 1,
+                      }}
+                    >
+                      {deletingRef === c.caseReference ? "…" : "🗑 Delete"}
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
