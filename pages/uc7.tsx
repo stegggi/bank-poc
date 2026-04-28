@@ -482,13 +482,52 @@ function StepSetup({
     setActiveCase(optimisticCase);
     setAddr("");
 
+    // Persist the wallet (without scan data) FIRST so it survives a scan
+    // failure. The scan is the slow part — if Vercel times out the function
+    // and returns an HTML error page, the user shouldn't lose the address
+    // they just typed. They can hit Re-scan to retry.
+    try {
+      const persistRes = await fetch(`/api/uc7/case/${caseFile.caseReference}`, {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ wallets: optimisticCase.wallets }),
+      });
+      const persistJson = (await persistRes.json().catch(() => ({}))) as { case?: CaseFile };
+      if (persistJson.case) setActiveCase(persistJson.case);
+    } catch {
+      // Persisting failed — fall through to scan attempt; we'll try again
+      // after the scan finishes.
+    }
+
+    // Helper: read response as text first, then JSON-parse. If the body
+    // isn't JSON (e.g. Vercel's HTML "An error occurred" gateway page when
+    // a function times out), surface a clean message instead of crashing
+    // on `Unexpected token 'A', "An error o"…`.
+    async function readJson(res: Response): Promise<{ json: unknown | null; text: string }> {
+      const text = await res.text();
+      try {
+        return { json: JSON.parse(text), text };
+      } catch {
+        return { json: null, text };
+      }
+    }
+
     try {
       const scanRes = await fetch("/api/uc7/scan", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ address: trimmed }),
       });
-      const scanJson = await scanRes.json();
+      const { json: scanJsonRaw, text: scanText } = await readJson(scanRes);
+      if (!scanRes.ok || scanJsonRaw == null) {
+        const snippet = scanText.slice(0, 120).replace(/\s+/g, " ").trim();
+        throw new Error(
+          scanRes.status === 504 || /timeout|time.*out|gateway/i.test(snippet)
+            ? "Wallet scan timed out before all chains responded. The wallet has been saved — click Re-scan to try again."
+            : `Scan failed (HTTP ${scanRes.status}). ${snippet || "No response body."}`,
+        );
+      }
+      const scanJson = scanJsonRaw as { scan?: WalletScanResult };
 
       const scan: WalletScanResult | undefined = scanJson.scan ?? undefined;
       const newWallet: WalletRecord = {
@@ -517,12 +556,13 @@ function StepSetup({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ wallets: updated.wallets }),
       });
-      const putJson = (await putRes.json().catch(() => ({}))) as { case?: CaseFile };
+      const { json: putJsonRaw } = await readJson(putRes);
+      const putJson = (putJsonRaw ?? {}) as { case?: CaseFile };
       if (putJson.case) setActiveCase(putJson.case);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to add wallet");
-      // Rollback on failure
-      setActiveCase(caseFile);
+      // Wallet is already persisted — leave it on screen so the user can
+      // hit Re-scan from the row instead of having to retype the address.
+      setError(err instanceof Error ? err.message : "Wallet scan failed");
     } finally {
       setScanning(false);
     }
