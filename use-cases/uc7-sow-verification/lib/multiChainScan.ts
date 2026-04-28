@@ -279,6 +279,15 @@ export function isLikelyLegitSymbol(rawSymbol: string): boolean {
   if (!/^[A-Za-z0-9._\- ]+$/.test(trimmed)) return false;
   // No URL-ish or "claim" markers.
   if (/(https?:|t\.me|claim|visit|airdrop|reward|🎁|💰)/i.test(trimmed)) return false;
+  // Domain-style names like "centreusd.org", "claim-arb.io", "rewards.fi"
+  // are phishing airdrop tokens. A real ERC-20 ticker never embeds a TLD.
+  if (
+    /\.(?:com|org|net|io|app|xyz|gg|fi|finance|exchange|to|me|info|biz|cc|claim|win|live|site|online|cloud|so|sh|co|ai|tech|pro|today|world|store|trade|club|lol|monster|dev)\b/i.test(
+      trimmed,
+    )
+  ) {
+    return false;
+  }
   // Reasonable length — long Pendle PT/YT/PLP symbols (e.g. PT-sUSDai-19FEB2026)
   // can hit ~25 chars, so allow up to 30. Scam tokens typically blow well past
   // this once their telegram-bait gets stripped by the URL filter above.
