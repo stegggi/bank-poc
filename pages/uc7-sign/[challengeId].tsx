@@ -451,53 +451,66 @@ function SignButtons({
     background: "rgba(255,255,255,0.06)",
   };
   if (challenge.chainFamily === "evm") {
-    if (!walletConnectAvailable) {
-      // No WalletConnect project id on the server — fall back to the injected
-      // browser wallet so the page still functions, with a clear note that
-      // the agnostic picker isn't available.
-      return (
-        <>
-          <button style={btn} onClick={onEvm}>
-            Connect browser wallet and sign
-          </button>
-          <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-            WalletConnect is not configured on this server, so this page
-            falls back to the wallet your browser injects (MetaMask, Rabby,
-            Brave Wallet, Coinbase Wallet, …). On mobile, open this link
-            from inside your wallet app&rsquo;s built-in browser.
-          </p>
-        </>
-      );
-    }
     return (
       <>
-        <button
-          style={btn}
-          onClick={onEvmWalletConnect}
-          title="Pick any wallet — MetaMask, Trust, Rainbow, Argent, Safe, Coinbase, Ledger Live, …"
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.45)",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            marginTop: 4,
+            marginBottom: 4,
+          }}
         >
-          Connect any wallet
+          Sign on this device
+        </div>
+        <button style={btn} onClick={onEvm}>
+          Connect browser wallet
         </button>
-        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
-          Opens a wallet picker that supports 300+ wallets — MetaMask, Trust,
-          Rainbow, Argent, Safe, Coinbase, OKX, Zerion, Ledger Live, Rabby, … —
-          plus a QR code fallback for any WalletConnect-compatible mobile app.
+        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+          Uses whatever wallet extension is installed in this browser —
+          MetaMask, Rabby, Brave Wallet, Coinbase, OKX, Trust, … — and pops
+          its native sign prompt. Best when you&rsquo;re on a desktop with
+          one or more extensions, or already inside a wallet app&rsquo;s
+          in-app browser on mobile.
         </p>
-        <details style={{ marginTop: 10 }}>
-          <summary style={{ cursor: "pointer", color: "rgba(255,255,255,0.5)", fontSize: 12 }}>
-            Power users: use the wallet already injected in this browser
-          </summary>
-          <button style={{ ...btnSecondary, marginTop: 8 }} onClick={onEvm}>
-            Use injected wallet (window.ethereum)
-          </button>
-          <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
-            Skips the picker and uses whatever extension is bound to{" "}
-            <code>window.ethereum</code> right now (whichever wallet your
-            browser injected last). On Brave or with the Coinbase extension
-            installed, this can lock you into one specific wallet — prefer{" "}
-            <em>Connect any wallet</em> above.
-          </p>
-        </details>
+
+        <div
+          style={{
+            fontSize: 11,
+            color: "rgba(255,255,255,0.45)",
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            fontWeight: 700,
+            marginTop: 18,
+            marginBottom: 4,
+          }}
+        >
+          Sign on a different device
+        </div>
+        <button
+          style={{
+            ...btn,
+            opacity: walletConnectAvailable ? 1 : 0.5,
+            cursor: walletConnectAvailable ? "pointer" : "not-allowed",
+          }}
+          onClick={onEvmWalletConnect}
+          disabled={!walletConnectAvailable}
+          title={
+            walletConnectAvailable
+              ? "Open a QR you can scan from any WalletConnect-compatible mobile wallet"
+              : "WalletConnect project id not configured on this server"
+          }
+        >
+          Scan QR with mobile wallet
+        </button>
+        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+          {walletConnectAvailable
+            ? "Opens a QR code that any WalletConnect-compatible app can scan — MetaMask Mobile, Trust, Rainbow, Argent, Safe, Coinbase, OKX, Zerion, Ledger Live, Rabby, …"
+            : "WalletConnect isn't configured on this server. Use the browser-wallet button above instead."}
+        </p>
       </>
     );
   }
