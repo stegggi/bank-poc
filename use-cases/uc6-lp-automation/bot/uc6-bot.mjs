@@ -750,7 +750,7 @@ const DEFAULT_SETTINGS = {
     rangeLookbackDays: 30,
     confidenceK: 1.5,
     minCorridorWidthPct: 6,
-    maxCorridorWidthPct: 16,
+    maxCorridorWidthPct: 10,
     corridorShiftThresholdPct: 30,
     maxOutOfCorridorHours: 72,
     useMA200: true,
@@ -1252,12 +1252,12 @@ function normalizeSettings(input = {}, baseSettings = DEFAULT_SETTINGS) {
       minCorridorWidthPct: clamp(
         toNumber(srcCorridor.minCorridorWidthPct, baseCorridor.minCorridorWidthPct),
         2,
-        20
+        10
       ),
       maxCorridorWidthPct: clamp(
         toNumber(srcCorridor.maxCorridorWidthPct, baseCorridor.maxCorridorWidthPct),
-        6,
-        40
+        2,
+        10
       ),
       corridorShiftThresholdPct: clamp(
         toNumber(srcCorridor.corridorShiftThresholdPct, baseCorridor.corridorShiftThresholdPct),
@@ -5959,12 +5959,12 @@ class Uc6Bot {
       minCorridorWidthPct: clamp(
         Number(cfg.minCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.minCorridorWidthPct),
         2,
-        20
+        10
       ),
       maxCorridorWidthPct: clamp(
         Number(cfg.maxCorridorWidthPct ?? DEFAULT_SETTINGS.corridor.maxCorridorWidthPct),
-        6,
-        40
+        2,
+        10
       ),
       corridorShiftThresholdPct: clamp(
         Number(cfg.corridorShiftThresholdPct ?? DEFAULT_SETTINGS.corridor.corridorShiftThresholdPct),

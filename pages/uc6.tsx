@@ -958,7 +958,7 @@ function defaultDraft(): Uc6DraftSettings {
     corridorRangeLookbackDays: 30,
     corridorConfidenceK: 1.5,
     corridorMinWidthPct: 3,
-    corridorMaxWidthPct: 15,
+    corridorMaxWidthPct: 10,
     corridorShiftThresholdPct: 30,
     corridorMaxOutOfCorridorHours: 72,
     corridorUseMA200: true,
