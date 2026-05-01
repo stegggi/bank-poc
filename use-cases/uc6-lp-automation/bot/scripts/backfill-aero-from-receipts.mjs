@@ -53,14 +53,30 @@ function parseArgs() {
   };
 }
 
+function maskRpcUrl(url) {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}/…`;
+  } catch {
+    return "(unparseable rpc url)";
+  }
+}
+
 function main() {
   const cfg = parseArgs();
-  const rpcUrl = process.env.UC6_RPC_URL;
+  const rpcUrl =
+    process.env.UC6_RPC_URL ||
+    process.env.UC6_HTTP_ALCHEMY_URL ||
+    process.env.UC6_HTTP_INFURA_URL ||
+    process.env.UC6_HTTP_ANKR_URL ||
+    process.env.UC6_HTTP_PUBLIC_URL ||
+    "";
   const ownerAddress = process.env.UC6_OWNER_ADDRESS;
   if (!rpcUrl) {
-    console.error("Missing UC6_RPC_URL env var");
+    console.error("Missing RPC URL — set UC6_RPC_URL, UC6_HTTP_ALCHEMY_URL, UC6_HTTP_INFURA_URL, or UC6_HTTP_ANKR_URL");
     process.exit(1);
   }
+  console.log(`Using RPC: ${maskRpcUrl(rpcUrl)}`);
   if (!ownerAddress || !/^0x[a-fA-F0-9]{40}$/.test(ownerAddress)) {
     console.error("Missing or invalid UC6_OWNER_ADDRESS env var");
     process.exit(1);
