@@ -1,4 +1,34 @@
-import { erc20Abi, formatUnits, parseAbi } from "viem";
+import { decodeEventLog, erc20Abi, formatUnits, parseAbi } from "viem";
+
+// ── AERO Transfer event (authoritative AERO claim amount from receipt) ───────
+const AERO_TRANSFER_EVENT = {
+  type: "event",
+  name: "Transfer",
+  inputs: [
+    { indexed: true, name: "from", type: "address" },
+    { indexed: true, name: "to", type: "address" },
+    { indexed: false, name: "value", type: "uint256" },
+  ],
+};
+
+function sumAeroTransfersToAccount(receipt, accountAddress) {
+  if (!receipt || !accountAddress) return 0n;
+  const wantTo = String(accountAddress).toLowerCase();
+  const wantToken = AERO_ADDRESS.toLowerCase();
+  let total = 0n;
+  for (const log of receipt.logs || []) {
+    if (!log?.address || String(log.address).toLowerCase() !== wantToken) continue;
+    try {
+      const decoded = decodeEventLog({ abi: [AERO_TRANSFER_EVENT], data: log.data, topics: log.topics });
+      if (decoded.eventName !== "Transfer") continue;
+      if (String(decoded.args.to).toLowerCase() !== wantTo) continue;
+      total += BigInt(decoded.args.value ?? 0);
+    } catch {
+      // ignore unrelated logs
+    }
+  }
+  return total;
+}
 
 // ── Constants ────────────────────────────────────────────────────────────────
 export const AERO_ADDRESS = "0x940181a94A35A4569E4529A3CDfB74e38FD98631";
@@ -517,13 +547,22 @@ export async function unstakeNft(
     }
   }
 
+  // Authoritative source: AERO Transfer event(s) in the withdraw receipt that
+  // credit our address. balanceOf-deltas are unreliable when RPC reads fail or
+  // when other in-flight txs land in the same block.
+  const aeroFromReceipt = sumAeroTransfersToAccount(receipt, accountAddress);
   const hasBothBalances = aeroBefore != null && aeroAfter != null;
   const aeroDelta = hasBothBalances ? aeroAfter - aeroBefore : 0n;
-  const aeroClaimed = Number(formatUnits(aeroDelta > 0n ? aeroDelta : 0n, 18));
-  if (!hasBothBalances) {
-    _log(`⚠ AERO balance read incomplete (before=${aeroBefore != null} after=${aeroAfter != null}) — aeroClaimed may be 0`);
+  const aeroClaimedRaw = aeroFromReceipt > 0n
+    ? aeroFromReceipt
+    : (aeroDelta > 0n ? aeroDelta : 0n);
+  const aeroClaimed = Number(formatUnits(aeroClaimedRaw, 18));
+  if (aeroFromReceipt > 0n) {
+    _log(`AERO claimed (from receipt): ${aeroClaimed.toFixed(6)}`);
+  } else if (!hasBothBalances) {
+    _log(`⚠ AERO balance read incomplete (before=${aeroBefore != null} after=${aeroAfter != null}) and no AERO Transfer in receipt — aeroClaimed=0`);
   } else if (aeroClaimed > 0) {
-    _log(`AERO claimed: ${aeroClaimed.toFixed(6)}`);
+    _log(`AERO claimed (from balance delta): ${aeroClaimed.toFixed(6)}`);
   }
 
   const gasUsed = receipt.gasUsed ?? 0n;
@@ -598,8 +637,14 @@ export async function claimRewards(
     });
   } catch {}
 
+  // Authoritative source: AERO Transfer event(s) in the receipt that credit our
+  // address. Falls back to balanceOf-delta if the receipt has no Transfer log.
+  const aeroFromReceipt = sumAeroTransfersToAccount(receipt, accountAddress);
   const aeroDelta = aeroAfter - aeroBefore;
-  const aeroClaimed = Number(formatUnits(aeroDelta > 0n ? aeroDelta : 0n, 18));
+  const aeroClaimedRaw = aeroFromReceipt > 0n
+    ? aeroFromReceipt
+    : (aeroDelta > 0n ? aeroDelta : 0n);
+  const aeroClaimed = Number(formatUnits(aeroClaimedRaw, 18));
 
   const gasUsed = receipt.gasUsed ?? 0n;
   const effectiveGasPrice = receipt.effectiveGasPrice ?? 0n;

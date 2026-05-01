@@ -605,6 +605,17 @@ const NPM_COLLECT_EVENT = {
   ],
 };
 
+const NPM_DECREASE_LIQUIDITY_EVENT = {
+  type: "event",
+  name: "DecreaseLiquidity",
+  inputs: [
+    { indexed: true, name: "tokenId", type: "uint256" },
+    { indexed: false, name: "liquidity", type: "uint128" },
+    { indexed: false, name: "amount0", type: "uint256" },
+    { indexed: false, name: "amount1", type: "uint256" },
+  ],
+};
+
 const DEFAULT_SETTINGS = {
   version: 1,
   tradingEnabled: true,
@@ -7749,6 +7760,28 @@ class Uc6Bot {
     return { amount0, amount1 };
   }
 
+  extractDecreaseLiquidityFromReceipt(receipt, npmAddress, tokenId) {
+    let amount0 = BigInt(0);
+    let amount1 = BigInt(0);
+    let found = false;
+    const wantTokenId = tokenId != null ? BigInt(tokenId) : null;
+    for (const log of receipt?.logs || []) {
+      if (!sameAddress(log.address, npmAddress)) continue;
+      try {
+        const decoded = decodeEventLog({ abi: [NPM_DECREASE_LIQUIDITY_EVENT], data: log.data, topics: log.topics });
+        if (decoded.eventName !== "DecreaseLiquidity") continue;
+        const evTokenId = BigInt(decoded.args.tokenId ?? 0);
+        if (wantTokenId != null && evTokenId !== wantTokenId) continue;
+        amount0 += BigInt(decoded.args.amount0 ?? 0);
+        amount1 += BigInt(decoded.args.amount1 ?? 0);
+        found = true;
+      } catch {
+        // ignore unrelated logs
+      }
+    }
+    return { amount0, amount1, found };
+  }
+
   extractWalletErc20DeltaFromReceipt(receipt, tokenAddress) {
     let inflow = BigInt(0);
     let outflow = BigInt(0);
@@ -8535,6 +8568,13 @@ class Uc6Bot {
     const decodedCollect = collectReceipt
       ? this.extractCollectedAmountsFromReceipt(collectReceipt, npmAddress, id)
       : null;
+    // DecreaseLiquidity event amounts are the EXACT principal returned to the position
+    // (separate from the prior tokensOwed which carry fees). Lets us compute true fees
+    // as collect_total - principal regardless of how stale the pre-close snapshot was.
+    const decreaseReceipt = recDec || recMulticall;
+    const decodedDecrease = decreaseReceipt
+      ? this.extractDecreaseLiquidityFromReceipt(decreaseReceipt, npmAddress, id)
+      : null;
 
     const postUsdc = await this.readTokenBalance(this.tokenQuote);
     const postWeth = await this.readTokenBalance(this.tokenBase);
@@ -8554,33 +8594,86 @@ class Uc6Bot {
         collectWethRaw = mappedWeth;
       }
     }
-    const feesUsd =
-      Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)) +
-      Number(formatUnits(wethDelta, this.tokenBaseDecimals)) * this.getSpotUsdcPerWeth();
-    // For rebalance close, collect() contains principal + fees after decreaseLiquidity.
-    // We attribute only pre-close collectable fees (or fallback computed value if override absent).
-    this.addFeesToActiveAction(feeValueOverrideUsd == null ? feesUsd : feeValueOverrideUsd);
-    this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
 
-    const feeBreakdown = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
-      ? {
-          usdc: Math.max(0, Number(feeBreakdownOverride.usdc || 0)),
-          weth: Math.max(0, Number(feeBreakdownOverride.weth || 0)),
-          usd: Math.max(0, Number(feeBreakdownOverride.usd || 0)),
-        }
-      : {
-          usdc: Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)),
-          weth: Number(formatUnits(wethDelta, this.tokenBaseDecimals)),
-          usd: feeValueOverrideUsd == null ? feesUsd : Number(feeValueOverrideUsd || 0),
-        };
     const collectOut = {
       usdc: Number(formatUnits(collectUsdcRaw, this.tokenQuoteDecimals)),
       weth: Number(formatUnits(collectWethRaw, this.tokenBaseDecimals)),
     };
-    const principalOut = {
-      usdc: Math.max(0, collectOut.usdc - feeBreakdown.usdc),
-      weth: Math.max(0, collectOut.weth - feeBreakdown.weth),
-    };
+    const spotForClose = this.getSpotUsdcPerWeth();
+
+    // Compute exact fees from on-chain DecreaseLiquidity event when available:
+    //   actual_fees = collect_total - principal_from_decrease
+    // Pre-close snapshot understates fees if the position kept earning between
+    // the snapshot and the actual close transactions (commonly happens during
+    // rebalance because the staked-position simulate path is read seconds before
+    // the close txs land). The on-chain event split is authoritative.
+    let principalFromEvent = null;
+    if (decodedDecrease?.found) {
+      let decUsdcRaw = 0n;
+      let decWethRaw = 0n;
+      if (this.isTokenQuote(pos.token0)) decUsdcRaw = decodedDecrease.amount0;
+      if (this.isTokenQuote(pos.token1)) decUsdcRaw = decodedDecrease.amount1;
+      if (this.isTokenBase(pos.token0)) decWethRaw = decodedDecrease.amount0;
+      if (this.isTokenBase(pos.token1)) decWethRaw = decodedDecrease.amount1;
+      principalFromEvent = {
+        usdc: Number(formatUnits(decUsdcRaw, this.tokenQuoteDecimals)),
+        weth: Number(formatUnits(decWethRaw, this.tokenBaseDecimals)),
+      };
+    }
+
+    const overrideUsdc = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
+      ? Math.max(0, Number(feeBreakdownOverride.usdc || 0))
+      : null;
+    const overrideWeth = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
+      ? Math.max(0, Number(feeBreakdownOverride.weth || 0))
+      : null;
+    const overrideUsd = feeBreakdownOverride && typeof feeBreakdownOverride === "object"
+      ? Math.max(0, Number(feeBreakdownOverride.usd || 0))
+      : (feeValueOverrideUsd == null ? null : Math.max(0, Number(feeValueOverrideUsd || 0)));
+
+    let feeBreakdown;
+    if (principalFromEvent) {
+      const feesUsdcExact = Math.max(0, collectOut.usdc - principalFromEvent.usdc);
+      const feesWethExact = Math.max(0, collectOut.weth - principalFromEvent.weth);
+      const feesUsdExact = feesUsdcExact + feesWethExact * spotForClose;
+      feeBreakdown = { usdc: feesUsdcExact, weth: feesWethExact, usd: feesUsdExact };
+      if (overrideUsd != null && Math.abs(feesUsdExact - overrideUsd) > 0.01) {
+        console.log(
+          `[UC6] closePosition: fees from on-chain event $${feesUsdExact.toFixed(4)} ` +
+          `vs pre-close snapshot $${overrideUsd.toFixed(4)} — using event value`
+        );
+      }
+    } else {
+      // No DecreaseLiquidity event found (e.g. position had no liquidity left, or
+      // event parsing failed). Fall back to override snapshot, then to collect total.
+      const feesUsd =
+        Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)) +
+        Number(formatUnits(wethDelta, this.tokenBaseDecimals)) * spotForClose;
+      feeBreakdown = overrideUsd != null
+        ? {
+            usdc: overrideUsdc ?? 0,
+            weth: overrideWeth ?? 0,
+            usd: overrideUsd,
+          }
+        : {
+            usdc: Number(formatUnits(usdcDelta, this.tokenQuoteDecimals)),
+            weth: Number(formatUnits(wethDelta, this.tokenBaseDecimals)),
+            usd: feesUsd,
+          };
+    }
+
+    this.addFeesToActiveAction(feeBreakdown.usd);
+    this.state.latest.collectableNow = { usdc: 0, weth: 0, usd: 0, isEstimated: false };
+
+    const principalOut = principalFromEvent
+      ? {
+          usdc: principalFromEvent.usdc,
+          weth: principalFromEvent.weth,
+        }
+      : {
+          usdc: Math.max(0, collectOut.usdc - feeBreakdown.usdc),
+          weth: Math.max(0, collectOut.weth - feeBreakdown.weth),
+        };
     const closeTxHashes = Array.from(
       new Set([hashMulticall, hashDec, hashCollect, hashBurn].filter(Boolean).map(String))
     );
