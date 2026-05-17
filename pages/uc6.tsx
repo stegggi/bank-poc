@@ -961,7 +961,7 @@ function defaultDraft(): Uc6DraftSettings {
     corridorMaxWidthPct: 10,
     corridorShiftThresholdPct: 30,
     corridorMaxOutOfCorridorHours: 72,
-    corridorUseMA200: true,
+    corridorUseMA200: false,
     corridorUseMA50Center: true,
   };
 }

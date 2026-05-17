@@ -753,7 +753,7 @@ const DEFAULT_SETTINGS = {
     maxCorridorWidthPct: 10,
     corridorShiftThresholdPct: 30,
     maxOutOfCorridorHours: 72,
-    useMA200: true,
+    useMA200: false,
     useMA50Center: true,
   },
 };
@@ -1389,6 +1389,7 @@ function defaultState(accountAddress) {
     },
     corridor: {
       active: null,
+      candidate: null,
       mintedAtIso: null,
       holdUntilIso: null,
       lastRefreshAtIso: null,
@@ -5985,12 +5986,15 @@ class Uc6Bot {
     if (!this.state.corridor || typeof this.state.corridor !== "object") {
       this.state.corridor = {
         active: null,
+        candidate: null,
         mintedAtIso: null,
         holdUntilIso: null,
         lastRefreshAtIso: null,
         outOfCorridorSinceIso: null,
         consecutiveOutOfCorridorHours: 0,
       };
+    } else if (!("candidate" in this.state.corridor)) {
+      this.state.corridor.candidate = null;
     }
     return this.state.corridor;
   }
@@ -6327,8 +6331,27 @@ class Uc6Bot {
     await this.bootstrapPriceHistory().catch(() => {});
     const corridor = this.computeCorridor();
     if (!corridor?.ok) return false;
-    this.state.corridor.active = corridor;
+
+    // `candidate` is always refreshed — used to detect drift vs the active
+    // (mint-time) corridor for the corridor_shifted recenter trigger.
+    this.state.corridor.candidate = corridor;
     this.state.corridor.lastRefreshAtIso = nowIso();
+
+    // `active` is the corridor the LP was actually minted into. While a
+    // position is open we must NOT overwrite it: the in/out-of-corridor
+    // signal needs to reflect the LP's real range, not whatever bounds the
+    // estimator would pick if we minted today. Otherwise spot can drift just
+    // outside a freshly recomputed corridor while still inside the LP's
+    // range, and the bot wrongly counts "out of corridor" hours and shows
+    // OUT in the UI.
+    const hasPosition = Boolean(this.state.position?.tokenId);
+    const cachedActive = this.state.corridor.active;
+    const cachedSchemaStale = Boolean(
+      cachedActive && (!cachedActive.lowerDrivers || !cachedActive.upperDrivers)
+    );
+    if (!cachedActive || cachedSchemaStale || !hasPosition) {
+      this.state.corridor.active = corridor;
+    }
     return true;
   }
 
@@ -6420,6 +6443,7 @@ class Uc6Bot {
       return;
     }
     this.state.corridor.active = newCorridor;
+    this.state.corridor.candidate = newCorridor;
     this.state.corridor.lastRefreshAtIso = nowIso();
 
     const ticks = this.corridorTicksFromSnapshot(newCorridor, snapshot);
@@ -11853,11 +11877,27 @@ class Uc6Bot {
     const oldestDate = history.length > 0 ? history[0].date : null;
     const newestDate = history.length > 0 ? history[history.length - 1].date : null;
     const spot = this.getSpotPrice();
+    const liveSpot = Number.isFinite(spot) && spot > 0 ? Number(spot) : null;
     const priceInCorridor = active
-      ? Number.isFinite(spot) && spot > 0
-        ? spot >= Number(active.lower) && spot <= Number(active.upper)
+      ? liveSpot != null
+        ? liveSpot >= Number(active.lower) && liveSpot <= Number(active.upper)
         : null
       : null;
+    // Live percentages vs the locked (mint-time) bounds so the UI shows how
+    // far spot is from the LP's actual edges right now, not the stale values
+    // from when the corridor was last computed.
+    const liveLowerPct =
+      active && liveSpot != null
+        ? ((liveSpot - Number(active.lower)) / liveSpot) * 100
+        : active
+          ? Number(active.lowerPct)
+          : 0;
+    const liveUpperPct =
+      active && liveSpot != null
+        ? ((Number(active.upper) - liveSpot) / liveSpot) * 100
+        : active
+          ? Number(active.upperPct)
+          : 0;
     const holdUntilMs = Date.parse(state?.holdUntilIso || "");
     const holdRemainingHours =
       Number.isFinite(holdUntilMs) && holdUntilMs > Date.now()
@@ -11870,9 +11910,9 @@ class Uc6Bot {
             lower: Number(active.lower),
             upper: Number(active.upper),
             center: Number(active.center),
-            currentPrice: Number(active.currentPrice),
-            lowerPct: Number(active.lowerPct),
-            upperPct: Number(active.upperPct),
+            currentPrice: liveSpot != null ? liveSpot : Number(active.currentPrice),
+            lowerPct: Math.round(liveLowerPct * 10) / 10,
+            upperPct: Math.round(liveUpperPct * 10) / 10,
             dailySigma: Number(active.dailySigma),
             volWidthPct: Number(active.volWidthPct),
             volProjectionPct: Number(active.volProjectionPct ?? active.volWidthPct),
