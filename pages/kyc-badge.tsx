@@ -245,13 +245,13 @@ export default function KYCBadge() {
     const base: CSSProperties = {
       display: "inline-flex", alignItems: "center", gap: 6,
       borderRadius: 999, padding: "5px 12px", fontSize: 12, fontWeight: 700,
-      border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)",
+      border: "1px solid rgba(var(--ink),0.1)", background: "rgba(var(--ink),0.06)", color: "rgba(var(--ink),0.55)",
     };
-    if (verifyStatus === "valid")     return <span style={{ ...base, background: "rgba(16,185,129,0.15)",  borderColor: "rgba(16,185,129,0.35)",  color: "#34d399" }}>Valid ✅</span>;
-    if (verifyStatus === "expired")   return <span style={{ ...base, background: "rgba(245,158,11,0.15)", borderColor: "rgba(245,158,11,0.35)", color: "#fbbf24" }}>Expired ⏳</span>;
-    if (verifyStatus === "revoked")   return <span style={{ ...base, background: "rgba(239,68,68,0.15)",  borderColor: "rgba(239,68,68,0.35)",  color: "#f87171" }}>Revoked ⛔</span>;
+    if (verifyStatus === "valid")     return <span style={{ ...base, background: "rgba(16,185,129,0.15)",  borderColor: "rgba(16,185,129,0.35)",  color: "var(--a-34d399)" }}>Valid ✅</span>;
+    if (verifyStatus === "expired")   return <span style={{ ...base, background: "rgba(245,158,11,0.15)", borderColor: "rgba(245,158,11,0.35)", color: "var(--a-fbbf24)" }}>Expired ⏳</span>;
+    if (verifyStatus === "revoked")   return <span style={{ ...base, background: "rgba(239,68,68,0.15)",  borderColor: "rgba(239,68,68,0.35)",  color: "var(--a-f87171)" }}>Revoked ⛔</span>;
     if (verifyStatus === "not_found") return <span style={{ ...base }}>No badge found</span>;
-    if (verifyStatus === "checking")  return <span style={{ ...base, background: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)", color: "#a78bfa" }}>Checking…</span>;
+    if (verifyStatus === "checking")  return <span style={{ ...base, background: "rgba(139,92,246,0.15)", borderColor: "rgba(139,92,246,0.35)", color: "var(--a-a78bfa)" }}>Checking…</span>;
     return null;
   })();
 
@@ -269,38 +269,38 @@ export default function KYCBadge() {
   }, [verifyResult]);
 
   // --- Style objects ---
-  const page:      CSSProperties = { minHeight: "100vh", background: "#0d0d0d", color: "#fff", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" };
+  const page:      CSSProperties = { minHeight: "100vh", background: "var(--bg)", color: "var(--heading)", fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif" };
   const wrap:      CSSProperties = { maxWidth: 780, margin: "0 auto", padding: isMobile ? "20px 16px 48px" : "24px 20px 64px" };
-  const glassCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: isMobile ? 14 : 20, marginTop: 16 };
-  const miniGlass: CSSProperties = { background: "rgba(255,255,255,0.04)",  border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
+  const glassCard: CSSProperties = { background: "rgba(var(--ink),0.032)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 16, padding: isMobile ? 14 : 20, marginTop: 16 };
+  const miniGlass: CSSProperties = { background: "rgba(var(--ink),0.04)",  border: "1px solid rgba(var(--ink),0.07)", borderRadius: 12, padding: 14 };
 
-  const stepChip:    CSSProperties = { display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 };
-  const sectionTitle: CSSProperties = { fontSize: 16, fontWeight: 700, color: "#fff", margin: 0 };
-  const sectionSub:   CSSProperties = { fontSize: 14, color: "rgba(255,255,255,0.60)", marginTop: 4, lineHeight: 1.6 };
+  const stepChip:    CSSProperties = { display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.08em", color: "var(--a-8b5cf6)", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 10 };
+  const sectionTitle: CSSProperties = { fontSize: 16, fontWeight: 700, color: "var(--heading)", margin: 0 };
+  const sectionSub:   CSSProperties = { fontSize: 14, color: "rgba(var(--ink),0.60)", marginTop: 4, lineHeight: 1.6 };
 
-  const fieldLabel: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "rgba(255,255,255,0.60)", marginBottom: 6, textTransform: "uppercase" as const };
-  const miniLabel:  CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.52)", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 6 };
-  const monoVal:    CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, color: "rgba(255,255,255,0.88)", wordBreak: "break-all", lineHeight: 1.55 };
-  const hintText:   CSSProperties = { marginTop: 6, fontSize: 12, color: "rgba(255,255,255,0.52)", lineHeight: 1.55 };
+  const fieldLabel: CSSProperties = { fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "rgba(var(--ink),0.60)", marginBottom: 6, textTransform: "uppercase" as const };
+  const miniLabel:  CSSProperties = { fontSize: 11, fontWeight: 700, color: "rgba(var(--ink),0.52)", letterSpacing: "0.05em", textTransform: "uppercase" as const, marginBottom: 6 };
+  const monoVal:    CSSProperties = { fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace", fontSize: 13, color: "rgba(var(--ink),0.88)", wordBreak: "break-all", lineHeight: 1.55 };
+  const hintText:   CSSProperties = { marginTop: 6, fontSize: 12, color: "rgba(var(--ink),0.52)", lineHeight: 1.55 };
 
-  const statusBox: CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.75)", lineHeight: 1.5, wordBreak: "break-all" };
-  const divider:   CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "18px 0" };
+  const statusBox: CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(var(--ink),0.04)", border: "1px solid rgba(var(--ink),0.08)", fontSize: 13, color: "rgba(var(--ink),0.75)", lineHeight: 1.5, wordBreak: "break-all" };
+  const divider:   CSSProperties = { border: "none", borderTop: "1px solid rgba(var(--ink),0.06)", margin: "18px 0" };
 
-  const contractLink: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "rgba(255,255,255,0.45)", textDecoration: "none", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: "4px 10px" };
+  const contractLink: CSSProperties = { display: "inline-flex", alignItems: "center", gap: 4, fontSize: 12, fontWeight: 600, color: "rgba(var(--ink),0.45)", textDecoration: "none", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 8, padding: "4px 10px" };
 
   // WTM
   const wtmOuter:     CSSProperties = { marginTop: 32 };
-  const wtmTitle:     CSSProperties = { fontSize: isMobile ? 16 : 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
-  const wtmIntro:     CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55, margin: "0 0 16px" };
+  const wtmTitle:     CSSProperties = { fontSize: isMobile ? 16 : 18, fontWeight: 700, color: "var(--heading)", margin: "0 0 6px" };
+  const wtmIntro:     CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.65)", lineHeight: 1.55, margin: "0 0 16px" };
   const wtmTabBar:    CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap" as const, marginBottom: 16 };
-  const wtmPanel:     CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: isMobile ? 14 : 20 };
-  const wtmPanelTitle: CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 };
-  const wtmPanelSub:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.55, marginBottom: 14 };
+  const wtmPanel:     CSSProperties = { background: "rgba(var(--ink),0.032)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 16, padding: isMobile ? 14 : 20 };
+  const wtmPanelTitle: CSSProperties = { fontSize: 15, fontWeight: 700, color: "var(--heading)", marginBottom: 4 };
+  const wtmPanelSub:  CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.60)", lineHeight: 1.55, marginBottom: 14 };
   const wtmGrid2:     CSSProperties = { display: "grid", gridTemplateColumns: isMobile ? "1fr" : "repeat(auto-fit, minmax(210px, 1fr))", gap: 12 };
-  const wtmCard:      CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
-  const wtmCardTitle: CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
-  const wtmCardText:  CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
-  const wtmNote:      CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.6 };
+  const wtmCard:      CSSProperties = { background: "rgba(var(--ink),0.04)", border: "1px solid rgba(var(--ink),0.07)", borderRadius: 12, padding: 14 };
+  const wtmCardTitle: CSSProperties = { fontSize: 13, fontWeight: 700, color: "var(--heading)", marginBottom: 6 };
+  const wtmCardText:  CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.68)", lineHeight: 1.5 };
+  const wtmNote:      CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(var(--ink),0.04)", border: "1px solid rgba(var(--ink),0.08)", fontSize: 13, color: "rgba(var(--ink),0.65)", lineHeight: 1.6 };
 
   const WTM_TABS = ["Trust & Verifiers", "Safety", "No PII on-chain", "Upgrade path"];
 
@@ -379,11 +379,11 @@ export default function KYCBadge() {
 
           {/* Page header */}
           <div style={{ marginBottom: 28 }}>
-            <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: "#8b5cf6", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
+            <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: "var(--a-8b5cf6)", background: "rgba(139,92,246,0.12)", border: "1px solid rgba(139,92,246,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
               UC 03
             </div>
-            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>KYC Badge</h1>
-            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 560 }}>
+            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "var(--heading)", margin: "0 0 8px" }}>KYC Badge</h1>
+            <p style={{ fontSize: 14, color: "rgba(var(--ink),0.55)", margin: 0, lineHeight: 1.6, maxWidth: 560 }}>
               Issue and verify on-chain identity credentials. Banks mint time-limited badges with embedded claims; any counterparty can verify instantly — no wallet required.
             </p>
           </div>
@@ -459,9 +459,9 @@ export default function KYCBadge() {
               <button className="kc-btn kc-btn-primary" style={isMobile ? { width: "100%" } : undefined} onClick={verify}>Verify</button>
             </div>
 
-            {verifyStatus === "invalid_input" && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "rgba(255,255,255,0.62)" }}>Please enter a valid wallet address (0x…).</div>}
-            {verifyStatus === "missing"       && <div style={{ ...statusBox, color: "rgba(255,255,255,0.50)" }}>KYC badge contract address not configured.</div>}
-            {verifyStatus === "error"         && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "#f87171" }}>Verification failed. Check the address and try again.</div>}
+            {verifyStatus === "invalid_input" && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "rgba(var(--ink),0.62)" }}>Please enter a valid wallet address (0x…).</div>}
+            {verifyStatus === "missing"       && <div style={{ ...statusBox, color: "rgba(var(--ink),0.50)" }}>KYC badge contract address not configured.</div>}
+            {verifyStatus === "error"         && <div style={{ ...statusBox, borderColor: "rgba(239,68,68,0.25)", color: "var(--a-f87171)" }}>Verification failed. Check the address and try again.</div>}
 
             {verifyResult && (
               <>
@@ -472,7 +472,7 @@ export default function KYCBadge() {
                   </div>
                   <div style={miniGlass}>
                     <div style={miniLabel}>Valid until</div>
-                    <div style={{ fontSize: 13, color: "rgba(255,255,255,0.82)" }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
+                    <div style={{ fontSize: 13, color: "rgba(var(--ink),0.82)" }}>{verifyResult.validUntil ? fmtDate(verifyResult.validUntil) : "—"}</div>
                   </div>
                 </div>
                 <div style={{ ...miniGlass, marginTop: 12 }}>
@@ -483,8 +483,8 @@ export default function KYCBadge() {
             )}
 
             <hr style={divider} />
-            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(255,255,255,0.35)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Share link</div>
-            <div style={{ ...monoVal, fontSize: 12, color: "rgba(255,255,255,0.50)" }}>{shareUrl || "—"}</div>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "rgba(var(--ink),0.35)", letterSpacing: "0.05em", textTransform: "uppercase", marginBottom: 6 }}>Share link</div>
+            <div style={{ ...monoVal, fontSize: 12, color: "rgba(var(--ink),0.50)" }}>{shareUrl || "—"}</div>
           </div>
 
           {/* ── Why This Matters ── */}
@@ -519,16 +519,16 @@ export default function KYCBadge() {
           width: 100%;
           padding: 9px 12px;
           border-radius: 10px;
-          border: 1px solid rgba(255,255,255,0.10);
-          background: rgba(255,255,255,0.05);
-          color: #fff;
+          border: 1px solid rgba(var(--ink),0.10);
+          background: rgba(var(--ink),0.05);
+          color: var(--heading);
           font-size: 13px;
           font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
           outline: none;
           box-sizing: border-box;
           transition: border-color 150ms;
         }
-        .kc-input::placeholder { color: rgba(255,255,255,0.22); }
+        .kc-input::placeholder { color: rgba(var(--ink),0.22); }
         .kc-input:focus { border-color: rgba(139,92,246,0.50); }
 
         .kc-check {
@@ -536,11 +536,11 @@ export default function KYCBadge() {
           align-items: center;
           gap: 8px;
           font-size: 13px;
-          color: rgba(255,255,255,0.70);
+          color: rgba(var(--ink),0.70);
           cursor: pointer;
         }
         .kc-check input[type="checkbox"] {
-          accent-color: #8b5cf6;
+          accent-color: var(--a-8b5cf6);
           width: 15px;
           height: 15px;
           cursor: pointer;
@@ -549,9 +549,9 @@ export default function KYCBadge() {
         .kc-btn {
           padding: 9px 16px;
           border-radius: 10px;
-          border: 1px solid rgba(255,255,255,0.10);
-          background: rgba(255,255,255,0.06);
-          color: rgba(255,255,255,0.78);
+          border: 1px solid rgba(var(--ink),0.10);
+          background: rgba(var(--ink),0.06);
+          color: rgba(var(--ink),0.78);
           font-size: 13px;
           font-weight: 700;
           cursor: pointer;
@@ -559,35 +559,35 @@ export default function KYCBadge() {
         }
         .kc-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .kc-btn-primary {
-          background: #8b5cf6;
-          border-color: #8b5cf6;
+          background: var(--a-8b5cf6);
+          border-color: var(--a-8b5cf6);
           color: #fff;
         }
-        .kc-btn-primary:hover:not(:disabled) { background: #7c3aed; border-color: #7c3aed; }
+        .kc-btn-primary:hover:not(:disabled) { background: var(--a-7c3aed); border-color: var(--a-7c3aed); }
         .kc-btn-danger {
           background: rgba(239,68,68,0.10);
           border-color: rgba(239,68,68,0.22);
-          color: #f87171;
+          color: var(--a-f87171);
         }
         .kc-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.18); }
 
         .wtm-tab {
           padding: 6px 14px;
           border-radius: 8px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(var(--ink),0.08);
           background: transparent;
-          color: rgba(255,255,255,0.42);
+          color: rgba(var(--ink),0.42);
           font-size: 12px;
           font-weight: 600;
           cursor: pointer;
           transition: all 150ms;
           font-family: inherit;
         }
-        .wtm-tab:hover { color: rgba(255,255,255,0.68); border-color: rgba(255,255,255,0.14); }
+        .wtm-tab:hover { color: rgba(var(--ink),0.68); border-color: rgba(var(--ink),0.14); }
         .wtm-tab-active {
           background: rgba(139,92,246,0.14);
           border-color: rgba(139,92,246,0.35);
-          color: #a78bfa;
+          color: var(--a-a78bfa);
         }
         @keyframes wtmIn {
           from { opacity: 0; transform: translateY(6px); }
@@ -602,9 +602,9 @@ function Pill({ state, label }: { state: "on" | "off" | "revoked"; label: string
   const isOn      = state === "on";
   const isRevoked = state === "revoked";
 
-  const bg    = isRevoked ? "rgba(239,68,68,0.15)"   : isOn ? "rgba(16,185,129,0.15)" : "rgba(255,255,255,0.05)";
-  const bd    = isRevoked ? "rgba(239,68,68,0.30)"   : isOn ? "rgba(16,185,129,0.30)" : "rgba(255,255,255,0.08)";
-  const color = isRevoked ? "#f87171"                : isOn ? "#34d399"               : "rgba(255,255,255,0.38)";
+  const bg    = isRevoked ? "rgba(239,68,68,0.15)"   : isOn ? "rgba(16,185,129,0.15)" : "rgba(var(--ink),0.05)";
+  const bd    = isRevoked ? "rgba(239,68,68,0.30)"   : isOn ? "rgba(16,185,129,0.30)" : "rgba(var(--ink),0.08)";
+  const color = isRevoked ? "var(--a-f87171)"                : isOn ? "var(--a-34d399)"               : "rgba(var(--ink),0.38)";
   const icon  = isRevoked ? "⛔" : isOn ? "✅" : "—";
 
   return (

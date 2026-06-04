@@ -3,22 +3,60 @@
   box-sizing: border-box;
 }
 
+/* ── Theme tokens (flipped by <html data-theme>; set pre-paint in _document) ── */
+:root {
+  --bg: #07080f;
+  --ink: 255, 255, 255;            /* neutral ink — use as rgba(var(--ink), α) */
+  --text: #e8e8f0;                 /* default body text */
+  --heading: #ffffff;              /* strong headings / high-emphasis text */
+  --nav-bg: rgba(7, 8, 15, 0.82);  /* sticky nav glass */
+  color-scheme: dark;
+
+  /* Accents — bright in dark mode (named by their dark hex). In light mode they map to a
+     darker, readable value below so accent text stays legible on the light background. */
+  --a-22c55e: #22c55e; --a-10b981: #10b981; --a-34d399: #34d399; --a-6ee7b7: #6ee7b7; --a-0ea572: #0ea572;
+  --a-ef4444: #ef4444; --a-fca5a5: #fca5a5; --a-f87171: #f87171;
+  --a-f59e0b: #f59e0b; --a-fbbf24: #fbbf24;
+  --a-06b6d4: #06b6d4;
+  --a-3b82f6: #3b82f6; --a-60a5fa: #60a5fa; --a-93c5fd: #93c5fd; --a-cbd5f5: #cbd5f5;
+  --a-8b5cf6: #8b5cf6; --a-a78bfa: #a78bfa; --a-7c3aed: #7c3aed; --a-6366f1: #6366f1; --a-c084fc: #c084fc;
+  --a-ec4899: #ec4899; --a-22d3a8: #22d3a8;
+}
+:root[data-theme="light"] {
+  --bg: #eef1f7;
+  --ink: 17, 19, 31;
+  --text: #1c1f2e;
+  --heading: #0a0b14;
+  --nav-bg: rgba(238, 241, 247, 0.82);
+  color-scheme: light;
+
+  /* darker, WCAG-readable accent values for the light background */
+  --a-22c55e: #15803d; --a-10b981: #047857; --a-34d399: #047857; --a-6ee7b7: #047857; --a-0ea572: #047857;
+  --a-ef4444: #dc2626; --a-fca5a5: #dc2626; --a-f87171: #dc2626;
+  --a-f59e0b: #b45309; --a-fbbf24: #b45309;
+  --a-06b6d4: #0e7490;
+  --a-3b82f6: #2563eb; --a-60a5fa: #2563eb; --a-93c5fd: #2563eb; --a-cbd5f5: #475569;
+  --a-8b5cf6: #6d28d9; --a-a78bfa: #6d28d9; --a-7c3aed: #6d28d9; --a-6366f1: #4f46e5; --a-c084fc: #7c3aed;
+  --a-ec4899: #be185d; --a-22d3a8: #0f766e;
+}
+
 html, body {
   margin: 0;
   padding: 0;
-  background: #07080f;
-  color: #e8e8f0;
+  background: var(--bg);
+  color: var(--text);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   font-size: 14px;
   line-height: 1.6;
+  transition: background 160ms ease, color 160ms ease;
 }
 
 /* ── Typography defaults ────────────────────────────────────── */
 h1, h2, h3, h4, h5, h6 {
   margin: 0;
-  color: #ffffff;
+  color: var(--heading);
   line-height: 1.2;
 }
 
@@ -51,11 +89,11 @@ a {
   background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(var(--ink), 0.18);
   border-radius: 3px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.20);
+  background: rgba(var(--ink), 0.28);
 }
 
 /* ── Responsive utilities ───────────────────────────────────── */

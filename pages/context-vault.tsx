@@ -1279,30 +1279,30 @@ export default function ContextVaultPage() {
   }
 
   const moduleStatusLine = (
-    <div style={{ marginTop: 8, color: "rgba(255,255,255,0.45)", fontSize: 12, lineHeight: 1.5 }}>
+    <div style={{ marginTop: 8, color: "rgba(var(--ink),0.45)", fontSize: 12, lineHeight: 1.5 }}>
       ModuleId: <span style={mono}>{isBytes32(customerModuleId) ? customerModuleId : "—"}</span>
-      <br />Onchain: <b style={{ color: customerModuleExistsOnchain ? "#34d399" : "rgba(255,255,255,0.45)" }}>{customerModuleExistsOnchain ? "yes" : "no"}</b>
-      {" · "}Local pkg: <b style={{ color: localPkgForSelected ? "#34d399" : "rgba(255,255,255,0.45)" }}>{localPkgForSelected ? "yes" : "no"}</b>
+      <br />Onchain: <b style={{ color: customerModuleExistsOnchain ? "var(--a-34d399)" : "rgba(var(--ink),0.45)" }}>{customerModuleExistsOnchain ? "yes" : "no"}</b>
+      {" · "}Local pkg: <b style={{ color: localPkgForSelected ? "var(--a-34d399)" : "rgba(var(--ink),0.45)" }}>{localPkgForSelected ? "yes" : "no"}</b>
     </div>
   );
 
-  const accent = "#f59e0b";
+  const accent = "var(--a-f59e0b)";
 
   const page: React.CSSProperties = {
     minHeight: "100vh",
-    background: "#0d0d0d",
-    color: "#fff",
+    background: "var(--bg)",
+    color: "var(--heading)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
   };
   const wrap: React.CSSProperties = { maxWidth: 1000, margin: "0 auto", padding: isMobile ? "20px 16px 64px" : "24px 20px 64px" };
-  const sectionHeading: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", margin: "0 0 4px" };
-  const sectionSub: React.CSSProperties = { fontSize: 14, color: "rgba(255,255,255,0.62)", lineHeight: 1.6, marginBottom: 14 };
-  const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(255,255,255,0.06)", margin: "14px 0" };
+  const sectionHeading: React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "var(--heading)", margin: "0 0 4px" };
+  const sectionSub: React.CSSProperties = { fontSize: 14, color: "rgba(var(--ink),0.62)", lineHeight: 1.6, marginBottom: 14 };
+  const divider: React.CSSProperties = { border: "none", borderTop: "1px solid rgba(var(--ink),0.06)", margin: "14px 0" };
   const statusTag = (connected: boolean, right?: boolean) => ({
     fontSize: 11, fontWeight: 700, letterSpacing: "0.06em",
-    color: connected ? (right ? "rgba(52,211,153,0.9)" : "rgba(52,211,153,0.9)") : "rgba(255,255,255,0.40)",
+    color: connected ? (right ? "rgba(52,211,153,0.9)" : "rgba(52,211,153,0.9)") : "rgba(var(--ink),0.40)",
     padding: "2px 8px",
-    border: `1px solid ${connected ? (right ? "rgba(52,211,153,0.28)" : "rgba(52,211,153,0.28)") : "rgba(255,255,255,0.08)"}`,
+    border: `1px solid ${connected ? (right ? "rgba(52,211,153,0.28)" : "rgba(52,211,153,0.28)") : "rgba(var(--ink),0.08)"}`,
     borderRadius: 999,
   } as React.CSSProperties);
 
@@ -1314,8 +1314,8 @@ export default function ContextVaultPage() {
   const stepCircle = (n: number, done: boolean, locked: boolean) => (
     <div style={{
       width: 28, height: 28, borderRadius: "50%",
-      background: done ? "#34d399" : locked ? "rgba(255,255,255,0.06)" : accent,
-      color: done ? "#000" : locked ? "rgba(255,255,255,0.25)" : "#000",
+      background: done ? "var(--a-34d399)" : locked ? "rgba(var(--ink),0.06)" : accent,
+      color: done ? "#000" : locked ? "rgba(var(--ink),0.25)" : "#000",
       display: "flex", alignItems: "center", justifyContent: "center",
       fontSize: 13, fontWeight: 800, flexShrink: 0,
     }}>
@@ -1334,8 +1334,8 @@ export default function ContextVaultPage() {
             <div style={{ display: "inline-flex", alignItems: "center", fontSize: 11, fontWeight: 700, letterSpacing: "0.1em", color: accent, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.25)", borderRadius: 999, padding: "3px 10px", marginBottom: 12 }}>
               UC 04
             </div>
-            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "#fff", margin: "0 0 8px" }}>Context Passport</h1>
-            <p style={{ fontSize: 14, color: "rgba(255,255,255,0.55)", margin: 0, lineHeight: 1.6, maxWidth: 600 }}>
+            <h1 style={{ fontSize: isMobile ? 22 : 28, fontWeight: 800, color: "var(--heading)", margin: "0 0 8px" }}>Context Passport</h1>
+            <p style={{ fontSize: 14, color: "rgba(var(--ink),0.55)", margin: 0, lineHeight: 1.6, maxWidth: 600 }}>
               Customer-owned encrypted context modules. You control who can decrypt &mdash; with onchain-enforced consent.
             </p>
           </div>
@@ -1343,8 +1343,8 @@ export default function ContextVaultPage() {
           {/* ── Global status bar ── */}
           {(status || err) && (
             <div style={{ ...note, marginBottom: 20, borderColor: err ? "rgba(239,68,68,0.25)" : "rgba(52,211,153,0.18)" }}>
-              {status && <div style={{ fontWeight: 700, color: "#fff" }}>{status}</div>}
-              {err && <div style={{ color: "#f87171", marginTop: status ? 6 : 0 }}>{err}</div>}
+              {status && <div style={{ fontWeight: 700, color: "var(--heading)" }}>{status}</div>}
+              {err && <div style={{ color: "var(--a-f87171)", marginTop: status ? 6 : 0 }}>{err}</div>}
               {lastTx && (
                 <a style={{ ...linkBtn, marginTop: 8, display: "inline-flex" }} href={`${EXPLORER_TX}${lastTx}`} target="_blank" rel="noreferrer">
                   View transaction ↗
@@ -1359,25 +1359,25 @@ export default function ContextVaultPage() {
             {/* ════ CUSTOMER JOURNEY ════ */}
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>Customer Journey</div>
-                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Privy embedded wallet</div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(var(--ink),0.35)", textTransform: "uppercase" }}>Customer Journey</div>
+                <div style={{ flex: 1, height: 1, background: "rgba(var(--ink),0.06)" }} />
+                <div style={{ fontSize: 12, color: "rgba(var(--ink),0.28)" }}>Privy embedded wallet</div>
               </div>
 
               {/* ─ C-Step 1: Connect wallet ─ */}
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {stepCircle(1, custStep1Done, false)}
-                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                  <div style={{ width: 1, flex: 1, background: "rgba(var(--ink),0.07)", marginTop: 6 }} />
                 </div>
                 <div style={{ flex: 1, paddingBottom: 20 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: custStep1Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: custStep1Done ? "var(--a-34d399)" : "var(--heading)", marginBottom: 12 }}>
                     Connect your wallet
                   </div>
                   {custStep1Done ? (
                     <div style={{ ...miniCard, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
                       <div>
-                        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Wallet address</div>
+                        <div style={{ fontSize: 11, color: "rgba(var(--ink),0.40)", marginBottom: 4 }}>Wallet address</div>
                         <div style={{ ...mono, fontSize: 12 }}>{uiCustomerWallet}</div>
                       </div>
                       <div style={{ display: "flex", gap: 8 }}>
@@ -1387,7 +1387,7 @@ export default function ContextVaultPage() {
                     </div>
                   ) : (
                     <div style={card}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 14, lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.55)", marginBottom: 14, lineHeight: 1.5 }}>
                         Sign in with your embedded wallet to create and manage context modules.
                       </div>
                       <button style={btn} disabled={!ready || !mounted} onClick={login}>Login with Privy</button>
@@ -1403,15 +1403,15 @@ export default function ContextVaultPage() {
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {stepCircle(2, custStep2Done, !custStep1Done)}
-                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                  <div style={{ width: 1, flex: 1, background: "rgba(var(--ink),0.07)", marginTop: 6 }} />
                 </div>
                 <div style={{ flex: 1, paddingBottom: 20 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(255,255,255,0.28)" : custStep2Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(var(--ink),0.28)" : custStep2Done ? "var(--a-34d399)" : "var(--heading)", marginBottom: 12 }}>
                     Build your context module
                   </div>
                   {!custStep1Done ? (
                     <div style={{ ...card, opacity: 0.5 }}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.35)" }}>Complete Step 1 to unlock.</div>
                     </div>
                   ) : (
                     <div style={card}>
@@ -1467,12 +1467,12 @@ export default function ContextVaultPage() {
                   {stepCircle(3, false, !custStep1Done)}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !custStep1Done ? "rgba(var(--ink),0.28)" : "var(--heading)", marginBottom: 12 }}>
                     Share with banks
                   </div>
                   {!custStep1Done ? (
                     <div style={{ ...card, opacity: 0.5 }}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.35)" }}>Complete Step 1 to unlock.</div>
                     </div>
                   ) : (
                     <div style={card}>
@@ -1498,7 +1498,7 @@ export default function ContextVaultPage() {
                               <div>
                                 {accessStatusModules.map((m) => {
                                   const st = moduleAccessStatus(m, bank);
-                                  const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.28)";
+                                  const col = st === "granted" ? "var(--a-34d399)" : st === "pending" ? "var(--a-fbbf24)" : "rgba(var(--ink),0.28)";
                                   return (
                                     <div key={m.key} style={{ fontSize: 11, color: col, marginTop: 3 }}>
                                       {m.label}: {st === "granted" ? "granted ✓" : st === "pending" ? "pending…" : "no grant"}
@@ -1511,7 +1511,7 @@ export default function ContextVaultPage() {
                         })}
                       </div>
                       <div style={{ ...note, marginTop: 12, fontSize: 12 }}>
-                        <strong style={{ color: "#fff" }}>Grant</strong> uploads ciphertext + wrapped DEK to the bank&apos;s storage and records onchain consent.
+                        <strong style={{ color: "var(--heading)" }}>Grant</strong> uploads ciphertext + wrapped DEK to the bank&apos;s storage and records onchain consent.
                       </div>
                     </div>
                   )}
@@ -1522,31 +1522,31 @@ export default function ContextVaultPage() {
             {/* ════ BANK JOURNEY ════ */}
             <div>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 20 }}>
-                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(255,255,255,0.35)", textTransform: "uppercase" }}>Bank Journey</div>
-                <div style={{ flex: 1, height: 1, background: "rgba(255,255,255,0.06)" }} />
-                <div style={{ fontSize: 12, color: "rgba(255,255,255,0.28)" }}>Privy embedded wallet</div>
+                <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.07em", color: "rgba(var(--ink),0.35)", textTransform: "uppercase" }}>Bank Journey</div>
+                <div style={{ flex: 1, height: 1, background: "rgba(var(--ink),0.06)" }} />
+                <div style={{ fontSize: 12, color: "rgba(var(--ink),0.28)" }}>Privy embedded wallet</div>
               </div>
 
               {/* ─ B-Step 1: Select bank ─ */}
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {stepCircle(1, bankStep1Done, false)}
-                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                  <div style={{ width: 1, flex: 1, background: "rgba(var(--ink),0.07)", marginTop: 6 }} />
                 </div>
                 <div style={{ flex: 1, paddingBottom: 20 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: bankStep1Done ? "#34d399" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: bankStep1Done ? "var(--a-34d399)" : "var(--heading)", marginBottom: 12 }}>
                     Select bank
                   </div>
                   {!bankStep1Done ? (
                     <div style={card}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.55)", marginBottom: 14, lineHeight: 1.5 }}>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.55)", marginBottom: 14, lineHeight: 1.5 }}>
                         Sign in with Privy — the embedded wallet acts as operator and sends bank-side transactions.
                       </div>
                       <button style={btn} disabled={!ready || !mounted} onClick={login}>Login with Privy</button>
                     </div>
                   ) : (
                     <div style={miniCard}>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 8 }}>Act as</div>
+                      <div style={{ fontSize: 11, color: "rgba(var(--ink),0.40)", marginBottom: 8 }}>Act as</div>
                       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
                         {(["bank-a", "bank-b"] as BankId[]).map((bank) => {
                           const active = selectedBank === bank;
@@ -1556,9 +1556,9 @@ export default function ContextVaultPage() {
                               onClick={() => setSelectedBank(bank)}
                               style={{
                                 ...btnSecondary,
-                                borderColor: active ? "rgba(245,158,11,0.50)" : "rgba(255,255,255,0.10)",
-                                background: active ? "rgba(245,158,11,0.12)" : "rgba(255,255,255,0.06)",
-                                color: active ? "#fbbf24" : "rgba(255,255,255,0.78)",
+                                borderColor: active ? "rgba(245,158,11,0.50)" : "rgba(var(--ink),0.10)",
+                                background: active ? "rgba(245,158,11,0.12)" : "rgba(var(--ink),0.06)",
+                                color: active ? "var(--a-fbbf24)" : "rgba(var(--ink),0.78)",
                               }}
                             >
                               {bankLabel(bank)}
@@ -1566,13 +1566,13 @@ export default function ContextVaultPage() {
                           );
                         })}
                       </div>
-                      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Your wallet (Privy embedded)</div>
+                      <div style={{ fontSize: 11, color: "rgba(var(--ink),0.40)", marginBottom: 4 }}>Your wallet (Privy embedded)</div>
                       <div style={{ ...mono, fontSize: 12, marginBottom: 6 }}>{uiCustomerWallet}</div>
                       {(() => {
                         if (!walletAddress) return null;
                         const claimed = !!contractOperator && contractOperator !== ethers.ZeroAddress;
                         const matches = claimed && contractOperator.toLowerCase() === walletAddress.toLowerCase();
-                        const col = matches ? "#34d399" : claimed ? "#fbbf24" : "rgba(255,255,255,0.45)";
+                        const col = matches ? "var(--a-34d399)" : claimed ? "var(--a-fbbf24)" : "rgba(var(--ink),0.45)";
                         const text = matches
                           ? "operator role claimed ✓"
                           : claimed
@@ -1589,15 +1589,15 @@ export default function ContextVaultPage() {
               <div style={{ display: "flex", gap: 14, marginBottom: 16 }}>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "center" }}>
                   {stepCircle(2, false, !bankStep1Done)}
-                  <div style={{ width: 1, flex: 1, background: "rgba(255,255,255,0.07)", marginTop: 6 }} />
+                  <div style={{ width: 1, flex: 1, background: "rgba(var(--ink),0.07)", marginTop: 6 }} />
                 </div>
                 <div style={{ flex: 1, paddingBottom: 20 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(var(--ink),0.28)" : "var(--heading)", marginBottom: 12 }}>
                     Request access
                   </div>
                   {!bankStep1Done ? (
                     <div style={{ ...card, opacity: 0.5 }}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.35)" }}>Complete Step 1 to unlock.</div>
                     </div>
                   ) : (
                     <div style={card}>
@@ -1623,10 +1623,10 @@ export default function ContextVaultPage() {
                         <div style={labelStyle}>Access status</div>
                         {(["bank-a", "bank-b"] as BankId[]).map((bank) => (
                           <div key={bank} style={{ marginTop: 8 }}>
-                            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(255,255,255,0.50)", marginBottom: 3 }}>{bankLabel(bank)}</div>
+                            <div style={{ fontSize: 12, fontWeight: 700, color: "rgba(var(--ink),0.50)", marginBottom: 3 }}>{bankLabel(bank)}</div>
                             {accessStatusModules.map((m) => {
                               const st = moduleAccessStatus(m, bank);
-                              const col = st === "granted" ? "#34d399" : st === "pending" ? "#fbbf24" : "rgba(255,255,255,0.28)";
+                              const col = st === "granted" ? "var(--a-34d399)" : st === "pending" ? "var(--a-fbbf24)" : "rgba(var(--ink),0.28)";
                               return (
                                 <div key={m.key} style={{ fontSize: 11, color: col, marginLeft: 8, marginTop: 2 }}>
                                   {m.label}: {st === "granted" ? "granted ✓" : st === "pending" ? "pending…" : "no grant"}
@@ -1647,23 +1647,23 @@ export default function ContextVaultPage() {
                   {stepCircle(3, false, !bankStep1Done)}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(255,255,255,0.28)" : "#fff", marginBottom: 12 }}>
+                  <div style={{ fontSize: 15, fontWeight: 700, color: !bankStep1Done ? "rgba(var(--ink),0.28)" : "var(--heading)", marginBottom: 12 }}>
                     Load &amp; decrypt context
                   </div>
                   {!bankStep1Done ? (
                     <div style={{ ...card, opacity: 0.5 }}>
-                      <div style={{ fontSize: 13, color: "rgba(255,255,255,0.35)" }}>Complete Step 1 to unlock.</div>
+                      <div style={{ fontSize: 13, color: "rgba(var(--ink),0.35)" }}>Complete Step 1 to unlock.</div>
                     </div>
                   ) : (
                     <div style={card}>
                       <div style={{ ...miniCard, marginBottom: 14 }}>
                         <div style={{ display: "grid", gap: 8, gridTemplateColumns: "1fr 1fr" }}>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Customer address (auto)</div>
+                            <div style={{ fontSize: 11, color: "rgba(var(--ink),0.40)", marginBottom: 4 }}>Customer address (auto)</div>
                             <div style={{ ...mono, fontSize: 11 }}>{bankOwner || "—"}</div>
                           </div>
                           <div>
-                            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.40)", marginBottom: 4 }}>Module ID (auto)</div>
+                            <div style={{ fontSize: 11, color: "rgba(var(--ink),0.40)", marginBottom: 4 }}>Module ID (auto)</div>
                             <div style={{ ...mono, fontSize: 11 }}>{isBytes32(bankModuleId) ? fmtShort(bankModuleId) : "—"}</div>
                           </div>
                         </div>
@@ -1674,11 +1674,11 @@ export default function ContextVaultPage() {
                         const bankErrMsg = bank === "bank-a" ? bankAErr : bankBErr;
                         const isActive = selectedBank === bank;
                         return (
-                          <div key={bank} style={{ ...miniCard, marginBottom: 10, borderColor: isActive ? "rgba(245,158,11,0.28)" : "rgba(255,255,255,0.07)" }}>
+                          <div key={bank} style={{ ...miniCard, marginBottom: 10, borderColor: isActive ? "rgba(245,158,11,0.28)" : "rgba(var(--ink),0.07)" }}>
                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
-                              <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{bankLabel(bank)}</div>
+                              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--heading)" }}>{bankLabel(bank)}</div>
                               {isActive && (
-                                <span style={{ fontSize: 11, color: "#fbbf24", fontWeight: 700 }}>selected ✓</span>
+                                <span style={{ fontSize: 11, color: "var(--a-fbbf24)", fontWeight: 700 }}>selected ✓</span>
                               )}
                             </div>
                             <button
@@ -1689,7 +1689,7 @@ export default function ContextVaultPage() {
                               Decrypt as {bankLabel(bank)}
                             </button>
                             {bankErrMsg && (
-                              <div style={{ ...note, marginTop: 8, color: "#f87171", borderColor: "rgba(239,68,68,0.25)", fontSize: 12 }}>{bankErrMsg}</div>
+                              <div style={{ ...note, marginTop: 8, color: "var(--a-f87171)", borderColor: "rgba(239,68,68,0.25)", fontSize: 12 }}>{bankErrMsg}</div>
                             )}
                             {plain && (
                               <textarea
@@ -1716,17 +1716,17 @@ export default function ContextVaultPage() {
       <style jsx global>{`
         input, select, textarea { transition: border-color 150ms; font-family: inherit; }
         input:focus, select:focus, textarea:focus { border-color: rgba(245,158,11,0.50) !important; outline: none; }
-        input::placeholder, textarea::placeholder { color: rgba(255,255,255,0.22); }
+        input::placeholder, textarea::placeholder { color: rgba(var(--ink),0.22); }
         select option { background: #1a1a1a; color: #fff; }
-        input[type="checkbox"] { accent-color: #f59e0b; cursor: pointer; width: 15px; height: 15px; }
+        input[type="checkbox"] { accent-color: var(--a-f59e0b); cursor: pointer; width: 15px; height: 15px; }
         input:disabled, select:disabled, textarea:disabled { opacity: 0.42; cursor: not-allowed; }
         .wtm-tab {
-          padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);
-          background: transparent; color: rgba(255,255,255,0.42); font-size: 12px; font-weight: 600;
+          padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(var(--ink),0.08);
+          background: transparent; color: rgba(var(--ink),0.42); font-size: 12px; font-weight: 600;
           cursor: pointer; transition: all 150ms; font-family: inherit;
         }
-        .wtm-tab:hover { color: rgba(255,255,255,0.68); border-color: rgba(255,255,255,0.14); }
-        .wtm-tab-active { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.30); color: #fbbf24; }
+        .wtm-tab:hover { color: rgba(var(--ink),0.68); border-color: rgba(var(--ink),0.14); }
+        .wtm-tab-active { background: rgba(245,158,11,0.12); border-color: rgba(245,158,11,0.30); color: var(--a-fbbf24); }
         @keyframes wtmIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
       `}</style>
     </>
@@ -1740,20 +1740,20 @@ function WhyThisMatters() {
   const TABS = ["What you do here", "Encryption", "On-Chain", "For Banks"];
 
   const outer:      React.CSSProperties = { marginTop: 32 };
-  const heading:    React.CSSProperties = { fontSize: 18, fontWeight: 700, color: "#fff", margin: "0 0 6px" };
-  const intro:      React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.65)", lineHeight: 1.55, margin: "0 0 16px" };
+  const heading:    React.CSSProperties = { fontSize: 18, fontWeight: 700, color: "var(--heading)", margin: "0 0 6px" };
+  const intro:      React.CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.65)", lineHeight: 1.55, margin: "0 0 16px" };
   const tabBar:     React.CSSProperties = { display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 16 };
-  const panel:      React.CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: 20 };
-  const pTitle:     React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "#fff", marginBottom: 4 };
-  const pSub:       React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.60)", lineHeight: 1.55, marginBottom: 14 };
+  const panel:      React.CSSProperties = { background: "rgba(var(--ink),0.032)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 16, padding: 20 };
+  const pTitle:     React.CSSProperties = { fontSize: 15, fontWeight: 700, color: "var(--heading)", marginBottom: 4 };
+  const pSub:       React.CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.60)", lineHeight: 1.55, marginBottom: 14 };
   const g2:         React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 };
-  const wCard:      React.CSSProperties = { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 12, padding: 14 };
-  const wCardTitle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "#fff", marginBottom: 6 };
-  const wCardText:  React.CSSProperties = { fontSize: 13, color: "rgba(255,255,255,0.68)", lineHeight: 1.5 };
-  const wNote:      React.CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", fontSize: 12, color: "rgba(255,255,255,0.55)", lineHeight: 1.5 };
+  const wCard:      React.CSSProperties = { background: "rgba(var(--ink),0.04)", border: "1px solid rgba(var(--ink),0.07)", borderRadius: 12, padding: 14 };
+  const wCardTitle: React.CSSProperties = { fontSize: 13, fontWeight: 700, color: "var(--heading)", marginBottom: 6 };
+  const wCardText:  React.CSSProperties = { fontSize: 13, color: "rgba(var(--ink),0.68)", lineHeight: 1.5 };
+  const wNote:      React.CSSProperties = { marginTop: 12, padding: "10px 14px", borderRadius: 10, background: "rgba(var(--ink),0.04)", border: "1px solid rgba(var(--ink),0.08)", fontSize: 12, color: "rgba(var(--ink),0.55)", lineHeight: 1.5 };
   const wPillRow:   React.CSSProperties = { marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" };
-  const wPill:      React.CSSProperties = { display: "inline-flex", padding: "3px 9px", borderRadius: 999, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", fontSize: 12, fontWeight: 700, color: "#fbbf24" };
-  const wList:      React.CSSProperties = { margin: "0 0 0 16px", padding: 0, color: "rgba(255,255,255,0.68)", fontSize: 13, lineHeight: 1.7 };
+  const wPill:      React.CSSProperties = { display: "inline-flex", padding: "3px 9px", borderRadius: 999, background: "rgba(245,158,11,0.12)", border: "1px solid rgba(245,158,11,0.28)", fontSize: 12, fontWeight: 700, color: "var(--a-fbbf24)" };
+  const wList:      React.CSSProperties = { margin: "0 0 0 16px", padding: 0, color: "rgba(var(--ink),0.68)", fontSize: 13, lineHeight: 1.7 };
 
   const content = [
     /* 0 — What you do here */
@@ -1761,11 +1761,11 @@ function WhyThisMatters() {
       <div style={pTitle}>What you do here</div>
       <div style={pSub}>You create portable context modules and control who can decrypt them — with onchain-enforced consent.</div>
       <ul style={wList}>
-        <li>Create or update three modules: <strong style={{ color: "#fff" }}>Suitability</strong>, <strong style={{ color: "#fff" }}>Sustainability</strong>, and <strong style={{ color: "#fff" }}>Service Scope</strong>.</li>
-        <li>Each module is <strong style={{ color: "#fff" }}>encrypted locally</strong> and stored as a reusable package you can export.</li>
-        <li>Grant access per bank with a <strong style={{ color: "#fff" }}>purpose</strong> and <strong style={{ color: "#fff" }}>expiry</strong> — revoke anytime, instantly.</li>
+        <li>Create or update three modules: <strong style={{ color: "var(--heading)" }}>Suitability</strong>, <strong style={{ color: "var(--heading)" }}>Sustainability</strong>, and <strong style={{ color: "var(--heading)" }}>Service Scope</strong>.</li>
+        <li>Each module is <strong style={{ color: "var(--heading)" }}>encrypted locally</strong> and stored as a reusable package you can export.</li>
+        <li>Grant access per bank with a <strong style={{ color: "var(--heading)" }}>purpose</strong> and <strong style={{ color: "var(--heading)" }}>expiry</strong> — revoke anytime, instantly.</li>
       </ul>
-      <div style={wNote}><strong style={{ color: "#fff" }}>Key idea:</strong> the customer controls the data. Each bank only gets access when consent is explicit.</div>
+      <div style={wNote}><strong style={{ color: "var(--heading)" }}>Key idea:</strong> the customer controls the data. Each bank only gets access when consent is explicit.</div>
     </div>,
 
     /* 1 — Encryption */
@@ -1844,8 +1844,8 @@ function WhyThisMatters() {
 /* ---------- Dark theme style constants ---------- */
 
 const card: React.CSSProperties = {
-  background: "rgba(255,255,255,0.032)",
-  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(var(--ink),0.032)",
+  border: "1px solid rgba(var(--ink),0.08)",
   borderRadius: 16,
   padding: 16,
 };
@@ -1872,15 +1872,15 @@ const grid2: React.CSSProperties = {
 };
 
 const miniCard: React.CSSProperties = {
-  background: "rgba(255,255,255,0.04)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.04)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 12,
   padding: 12,
 };
 
 const miniTitle: React.CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(var(--ink),0.55)",
   fontWeight: 700,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
@@ -1890,8 +1890,8 @@ const miniTitle: React.CSSProperties = {
 const btn: React.CSSProperties = {
   padding: "9px 14px",
   borderRadius: 10,
-  border: "1px solid #f59e0b",
-  background: "#f59e0b",
+  border: "1px solid var(--a-f59e0b)",
+  background: "var(--a-f59e0b)",
   color: "#000",
   fontWeight: 700,
   cursor: "pointer",
@@ -1901,9 +1901,9 @@ const btn: React.CSSProperties = {
 const btnSecondary: React.CSSProperties = {
   padding: "9px 14px",
   borderRadius: 10,
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(255,255,255,0.06)",
-  color: "rgba(255,255,255,0.78)",
+  border: "1px solid rgba(var(--ink),0.10)",
+  background: "rgba(var(--ink),0.06)",
+  color: "rgba(var(--ink),0.78)",
   fontWeight: 700,
   cursor: "pointer",
   fontSize: 13,
@@ -1919,18 +1919,18 @@ const linkBtn: React.CSSProperties = {
 const input: React.CSSProperties = {
   width: "100%",
   boxSizing: "border-box",
-  border: "1px solid rgba(255,255,255,0.10)",
+  border: "1px solid rgba(var(--ink),0.10)",
   borderRadius: 10,
   padding: "9px 12px",
   outline: "none",
-  background: "rgba(255,255,255,0.05)",
-  color: "#fff",
+  background: "rgba(var(--ink),0.05)",
+  color: "var(--heading)",
   fontSize: 13,
 };
 
 const labelStyle: React.CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.62)",
+  color: "rgba(var(--ink),0.62)",
   fontWeight: 700,
   letterSpacing: "0.05em",
   textTransform: "uppercase",
@@ -1940,7 +1940,7 @@ const labelStyle: React.CSSProperties = {
 const hint: React.CSSProperties = {
   marginTop: 8,
   fontSize: 12,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(var(--ink),0.55)",
   lineHeight: 1.55,
 };
 
@@ -1948,15 +1948,15 @@ const mono: React.CSSProperties = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Liberation Mono', 'Courier New', monospace",
   fontSize: 13,
   wordBreak: "break-all",
-  color: "rgba(255,255,255,0.80)",
+  color: "rgba(var(--ink),0.80)",
 };
 
 const note: React.CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.08)",
-  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--ink),0.08)",
+  background: "rgba(var(--ink),0.04)",
   padding: 12,
   borderRadius: 12,
-  color: "rgba(255,255,255,0.75)",
+  color: "rgba(var(--ink),0.75)",
   lineHeight: 1.6,
   fontSize: 13,
 };
@@ -1966,6 +1966,6 @@ const checkWrap: React.CSSProperties = {
   alignItems: "center",
   gap: 8,
   fontSize: 13,
-  color: "rgba(255,255,255,0.70)",
+  color: "rgba(var(--ink),0.70)",
   cursor: "pointer",
 };

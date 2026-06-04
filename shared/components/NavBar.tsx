@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import type { CSSProperties, ReactNode } from "react";
+import { useTheme } from "../lib/theme-context";
 
 type NavActive =
   | "home"
@@ -14,19 +15,21 @@ type NavActive =
   | "uc4"
   | "uc5"
   | "uc6"
-  | "uc7";
+  | "uc7"
+  | "uc8";
 
 type NavBarProps = { active?: NavActive };
 
 /* Accent colours match the homepage use-case cards */
 const ACCENT = {
-  uc1: "#3b82f6",
-  uc2: "#10b981",
-  uc3: "#8b5cf6",
-  uc4: "#f59e0b",
-  uc5: "#ef4444",
-  uc6: "#06b6d4",
-  uc7: "#ec4899",
+  uc1: "var(--a-3b82f6)",
+  uc2: "var(--a-10b981)",
+  uc3: "var(--a-8b5cf6)",
+  uc4: "var(--a-f59e0b)",
+  uc5: "var(--a-ef4444)",
+  uc6: "var(--a-06b6d4)",
+  uc7: "var(--a-ec4899)",
+  uc8: "var(--a-6366f1)",
 } as const;
 
 export default function NavBar({ active }: NavBarProps) {
@@ -39,7 +42,9 @@ export default function NavBar({ active }: NavBarProps) {
   const isUc5      = active === "uc5";
   const isUc6      = active === "uc6";
   const isUc7      = active === "uc7";
+  const isUc8      = active === "uc8";
   const isUc2      = isBankA || isBankB;
+  const { dark, toggle } = useTheme();
 
   return (
     <nav style={navWrap} aria-label="Primary navigation">
@@ -55,27 +60,27 @@ export default function NavBar({ active }: NavBarProps) {
         }
         .navPill:hover {
           transform: translateY(-1px);
-          border-color: rgba(255,255,255,0.18) !important;
-          background: rgba(255,255,255,0.08) !important;
+          border-color: rgba(var(--ink),0.18) !important;
+          background: rgba(var(--ink),0.08) !important;
         }
         .navSeg {
           transition: background 130ms ease, color 130ms ease;
         }
         .navSeg:hover {
-          background: rgba(255,255,255,0.09) !important;
+          background: rgba(var(--ink),0.09) !important;
         }
         .chevBtn {
           transition: background 130ms ease, opacity 160ms ease;
         }
         .chevBtn:hover:not(:disabled) {
-          background: rgba(255,255,255,0.12) !important;
+          background: rgba(var(--ink),0.12) !important;
         }
         /* Reveal chevrons on strip hover on non-touch */
         .stripRoot:hover .chevBtn {
           opacity: 1 !important;
         }
         :focus-visible {
-          outline: 2px solid rgba(255,255,255,0.45);
+          outline: 2px solid rgba(var(--ink),0.45);
           outline-offset: 2px;
         }
         @media (prefers-reduced-motion: reduce) {
@@ -96,10 +101,10 @@ export default function NavBar({ active }: NavBarProps) {
         {/* ── Brand + home ── */}
         <div style={navLeft}>
           <div style={brandStyle}>
-            <span className="navBrandMain" style={{ fontWeight: 900, color: "#fff", letterSpacing: "-0.02em" }}>
+            <span className="navBrandMain" style={{ fontWeight: 900, color: "var(--heading)", letterSpacing: "-0.02em" }}>
               blockchain
             </span>
-            <span className="navBrandSub" style={{ color: "rgba(255,255,255,0.3)", marginLeft: 6, fontWeight: 400 }}>
+            <span className="navBrandSub" style={{ color: "rgba(var(--ink),0.3)", marginLeft: 6, fontWeight: 400 }}>
               concept bank
             </span>
           </div>
@@ -188,7 +193,28 @@ export default function NavBar({ active }: NavBarProps) {
             accent={ACCENT.uc7}
             active={isUc7}
           />
+
+          {/* UC8 */}
+          <NavPill
+            n="08"
+            label="Stablecoin Rail"
+            href="/uc8"
+            accent={ACCENT.uc8}
+            active={isUc8}
+          />
         </NavStrip>
+
+        {/* Theme toggle — global light/dark for the whole concept bank */}
+        <button
+          type="button"
+          onClick={toggle}
+          aria-label={dark ? "Switch to light theme" : "Switch to dark theme"}
+          title={dark ? "Switch to light" : "Switch to dark"}
+          className="navPill"
+          style={{ ...pillBase, width: 36, height: 36, padding: 0, justifyContent: "center", borderRadius: 10, cursor: "pointer" }}
+        >
+          {dark ? <MoonIcon /> : <SunIcon />}
+        </button>
       </div>
     </nav>
   );
@@ -218,8 +244,8 @@ function NavPill({
         ...pillBase,
         ...(active
           ? {
-              background: `${accent}1a`,
-              borderColor: `${accent}55`,
+              background: `color-mix(in srgb, ${accent} 10%, transparent)`,
+              borderColor: `color-mix(in srgb, ${accent} 33%, transparent)`,
             }
           : {}),
       }}
@@ -227,14 +253,14 @@ function NavPill({
       <span
         style={{
           ...numStyle,
-          color: active ? accent : "rgba(255,255,255,0.25)",
+          color: active ? accent : "rgba(var(--ink),0.25)",
         }}
       >
         {n}
       </span>
       <span
         style={{
-          color: active ? "#fff" : "rgba(255,255,255,0.58)",
+          color: active ? "var(--heading)" : "rgba(var(--ink),0.58)",
           fontWeight: active ? 700 : 500,
         }}
       >
@@ -269,8 +295,8 @@ function NavSegmented({
         display: "inline-flex",
         alignItems: "stretch",
         borderRadius: 10,
-        border: `1px solid ${groupActive ? `${accent}55` : "rgba(255,255,255,0.08)"}`,
-        background: groupActive ? `${accent}1a` : "rgba(255,255,255,0.04)",
+        border: `1px solid ${groupActive ? `color-mix(in srgb, ${accent} 33%, transparent)` : "rgba(var(--ink),0.08)"}`,
+        background: groupActive ? `color-mix(in srgb, ${accent} 10%, transparent)` : "rgba(var(--ink),0.04)",
         overflow: "hidden",
         flex: "0 0 auto",
         whiteSpace: "nowrap",
@@ -285,8 +311,8 @@ function NavSegmented({
           fontSize: 11,
           fontWeight: 800,
           letterSpacing: "0.04em",
-          color: groupActive ? accent : "rgba(255,255,255,0.25)",
-          borderRight: "1px solid rgba(255,255,255,0.08)",
+          color: groupActive ? accent : "rgba(var(--ink),0.25)",
+          borderRight: "1px solid rgba(var(--ink),0.08)",
           flexShrink: 0,
         }}
       >
@@ -299,9 +325,9 @@ function NavSegmented({
         className="navSeg"
         style={{
           ...segBase,
-          color: left.active ? "#fff" : "rgba(255,255,255,0.52)",
+          color: left.active ? "var(--heading)" : "rgba(var(--ink),0.52)",
           fontWeight: left.active ? 700 : 500,
-          background: left.active ? `${accent}28` : "transparent",
+          background: left.active ? `color-mix(in srgb, ${accent} 16%, transparent)` : "transparent",
         }}
       >
         {left.label}
@@ -312,7 +338,7 @@ function NavSegmented({
         style={{
           width: 1,
           alignSelf: "stretch",
-          background: "rgba(255,255,255,0.09)",
+          background: "rgba(var(--ink),0.09)",
           flexShrink: 0,
         }}
       />
@@ -323,9 +349,9 @@ function NavSegmented({
         className="navSeg"
         style={{
           ...segBase,
-          color: right.active ? "#fff" : "rgba(255,255,255,0.52)",
+          color: right.active ? "var(--heading)" : "rgba(var(--ink),0.52)",
           fontWeight: right.active ? 700 : 500,
-          background: right.active ? `${accent}28` : "transparent",
+          background: right.active ? `color-mix(in srgb, ${accent} 16%, transparent)` : "transparent",
         }}
       >
         {right.label}
@@ -440,7 +466,7 @@ function NavStrip({
           ...edgeFade,
           left: 0,
           opacity: canLeft ? 1 : 0,
-          background: "linear-gradient(to right, #07080f 20%, transparent 100%)",
+          background: "linear-gradient(to right, var(--bg) 20%, transparent 100%)",
         }}
       />
       {/* Edge fade — right */}
@@ -450,7 +476,7 @@ function NavStrip({
           ...edgeFade,
           right: 0,
           opacity: canRight ? 1 : 0,
-          background: "linear-gradient(to left, #07080f 20%, transparent 100%)",
+          background: "linear-gradient(to left, var(--bg) 20%, transparent 100%)",
         }}
       />
 
@@ -501,6 +527,21 @@ function NavStrip({
 }
 
 /* ── Icons ── */
+function MoonIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+function SunIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="4" stroke="currentColor" strokeWidth="2" />
+      <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+    </svg>
+  );
+}
 function HomeIcon() {
   return (
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden="true">
@@ -530,10 +571,10 @@ const navWrap: CSSProperties = {
   position: "sticky",
   top: 0,
   zIndex: 100,
-  background: "rgba(7,8,15,0.85)",
+  background: "var(--nav-bg)",
   backdropFilter: "blur(16px)",
   WebkitBackdropFilter: "blur(16px)",
-  borderBottom: "1px solid rgba(255,255,255,0.07)",
+  borderBottom: "1px solid rgba(var(--ink),0.07)",
   fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
@@ -595,12 +636,12 @@ const chevBtn: CSSProperties = {
   width: 26,
   height: 26,
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.10)",
-  background: "rgba(255,255,255,0.06)",
+  border: "1px solid rgba(var(--ink),0.10)",
+  background: "rgba(var(--ink),0.06)",
   display: "grid",
   placeItems: "center",
   cursor: "pointer",
-  color: "rgba(255,255,255,0.75)",
+  color: "rgba(var(--ink),0.75)",
   zIndex: 3,
   transition: "opacity 160ms ease, background 130ms ease",
 };
@@ -611,8 +652,8 @@ const pillBase: CSSProperties = {
   gap: 6,
   padding: "7px 12px",
   borderRadius: 10,
-  border: "1px solid rgba(255,255,255,0.08)",
-  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--ink),0.08)",
+  background: "rgba(var(--ink),0.04)",
   textDecoration: "none",
   fontSize: 13,
   whiteSpace: "nowrap",
@@ -621,8 +662,8 @@ const pillBase: CSSProperties = {
 };
 
 const pillActiveBase: CSSProperties = {
-  background: "rgba(255,255,255,0.1)",
-  borderColor: "rgba(255,255,255,0.2)",
+  background: "rgba(var(--ink),0.1)",
+  borderColor: "rgba(var(--ink),0.2)",
 };
 
 const numStyle: CSSProperties = {

@@ -802,22 +802,22 @@ export default function Uc5Page() {
     <>
       <style jsx global>{`
         .uc5-recharts .recharts-cartesian-axis-tick text { fill: rgba(232,232,240,0.35) !important; font-size: 10px !important; }
-        .uc5-recharts .recharts-cartesian-grid line { stroke: rgba(255,255,255,0.05) !important; }
+        .uc5-recharts .recharts-cartesian-grid line { stroke: rgba(var(--ink),0.05) !important; }
         .uc5-ctrl details > summary { list-style: none; }
         .uc5-ctrl details > summary::-webkit-details-marker { display: none; }
-        .uc5-ctrl input[type=range] { accent-color: #f59e0b; }
-        .uc5-ctrl input[type=checkbox] { accent-color: #f59e0b; width: 15px; height: 15px; }
+        .uc5-ctrl input[type=range] { accent-color: var(--a-f59e0b); }
+        .uc5-ctrl input[type=checkbox] { accent-color: var(--a-f59e0b); width: 15px; height: 15px; }
         .uc5-ctrl input[type=number], .uc5-ctrl input[type=text] {
-          background: rgba(255,255,255,0.06) !important;
-          border: 1px solid rgba(255,255,255,0.12) !important;
-          color: #e8e8f0 !important; border-radius: 8px !important;
+          background: rgba(var(--ink),0.06) !important;
+          border: 1px solid rgba(var(--ink),0.12) !important;
+          color: var(--text) !important; border-radius: 8px !important;
           padding: 8px 10px !important; width: 100% !important;
           outline: none !important; font-size: 13px !important;
         }
         .uc5-ctrl input[type=number]:disabled { opacity: 0.4 !important; }
         .uc5-ctrl input[type=number]:focus { border-color: rgba(245,158,11,0.5) !important; }
         .uc5-ctrl input[type=range] { width: 100%; }
-        .uc5-ctrl summary:hover { background: rgba(255,255,255,0.03) !important; }
+        .uc5-ctrl summary:hover { background: rgba(var(--ink),0.03) !important; }
       `}</style>
       <NavBar active={"uc5" as never} />
       <div style={{ ...wrap, padding: isMobile ? "20px 16px 48px" : "14px 16px 48px", maxWidth: isMobile ? "100%" : 1400 }}>
@@ -837,12 +837,12 @@ export default function Uc5Page() {
         <div style={heroBar}>
           <div style={{ display: "flex", alignItems: "center", gap: 20, flexWrap: "wrap", flex: 1 }}>
             <div style={{ display: "flex", alignItems: "baseline", gap: 10 }}>
-              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", color: "#f59e0b", padding: "3px 7px", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 5 }}>UC5</span>
-              <span style={{ fontSize: isMobile ? 16 : 22, fontWeight: 800, color: "#e8e8f0", letterSpacing: "-0.01em" }}>AI Autopilot Perps</span>
+              <span style={{ fontSize: 10, fontWeight: 800, letterSpacing: "0.14em", color: "var(--a-f59e0b)", padding: "3px 7px", border: "1px solid rgba(245,158,11,0.35)", borderRadius: 5 }}>UC5</span>
+              <span style={{ fontSize: isMobile ? 16 : 22, fontWeight: 800, color: "var(--text)", letterSpacing: "-0.01em" }}>AI Autopilot Perps</span>
               <span style={{ fontSize: 13, color: "rgba(232,232,240,0.45)" }}>{edit?.ticker || "BTCUSD"} · Ethereal</span>
             </div>
             <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
-              <span style={{ fontSize: isMobile ? 20 : 28, fontWeight: 800, color: "#e8e8f0", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
+              <span style={{ fontSize: isMobile ? 20 : 28, fontWeight: 800, color: "var(--text)", fontVariantNumeric: "tabular-nums", letterSpacing: "-0.02em" }}>
                 {status?.market?.price ? fmtUsd(status.market.price, 0) : "—"}
               </span>
               {status?.market?.oraclePrice && (
@@ -852,11 +852,11 @@ export default function Uc5Page() {
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 999, border: `1px solid ${status?.bot?.alive ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`, background: status?.bot?.alive ? "rgba(34,197,94,0.08)" : "rgba(239,68,68,0.08)" }}>
-              <span style={{ width: 6, height: 6, borderRadius: "50%", background: status?.bot?.alive ? "#22c55e" : "#ef4444", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px #22c55e" : "none" }} />
-              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", color: status?.bot?.alive ? "#22c55e" : "#ef4444" }}>{status?.bot?.alive ? "BOT RUNNING" : "BOT STOPPED"}</span>
+              <span style={{ width: 6, height: 6, borderRadius: "50%", background: status?.bot?.alive ? "var(--a-22c55e)" : "var(--a-ef4444)", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px var(--a-22c55e)" : "none" }} />
+              <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.08em", color: status?.bot?.alive ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>{status?.bot?.alive ? "BOT RUNNING" : "BOT STOPPED"}</span>
             </div>
             {status?.agent?.desired && status.agent.desired !== "FLAT" && (
-              <div style={{ padding: "6px 12px", borderRadius: 999, fontWeight: 800, fontSize: 11, letterSpacing: "0.08em", background: status.agent.desired === "LONG" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", border: `1px solid ${status.agent.desired === "LONG" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`, color: status.agent.desired === "LONG" ? "#22c55e" : "#ef4444" }}>
+              <div style={{ padding: "6px 12px", borderRadius: 999, fontWeight: 800, fontSize: 11, letterSpacing: "0.08em", background: status.agent.desired === "LONG" ? "rgba(34,197,94,0.12)" : "rgba(239,68,68,0.12)", border: `1px solid ${status.agent.desired === "LONG" ? "rgba(34,197,94,0.35)" : "rgba(239,68,68,0.35)"}`, color: status.agent.desired === "LONG" ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>
                 {status.agent.desired === "LONG" ? "▲ LONG" : "▼ SHORT"}
               </div>
             )}
@@ -864,7 +864,7 @@ export default function Uc5Page() {
             {walletAddr ? (
               <div style={{ textAlign: "right" }}>
                 <div style={{ fontSize: 10, color: "rgba(232,232,240,0.4)", letterSpacing: "0.06em" }}>CONNECTED</div>
-                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "#e8e8f0", wordBreak: "break-all" }}>{shortAddr(walletAddr)}</div>
+                <div style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "var(--text)", wordBreak: "break-all" }}>{shortAddr(walletAddr)}</div>
               </div>
             ) : (
               <button onClick={connectWallet} style={btnPrimary}>Connect MetaMask</button>
@@ -875,16 +875,16 @@ export default function Uc5Page() {
         {/* METRICS STRIP */}
         <div style={{ ...metricsStrip, flexWrap: isMobile ? "wrap" : "nowrap" }}>
           {([
-            { label: "BID", val: status?.market?.bestBid ? fmtUsd(status.market.bestBid, 0) : "—", color: "#22c55e" },
-            { label: "ASK", val: status?.market?.bestAsk ? fmtUsd(status.market.bestAsk, 0) : "—", color: "#ef4444" },
+            { label: "BID", val: status?.market?.bestBid ? fmtUsd(status.market.bestBid, 0) : "—", color: "var(--a-22c55e)" },
+            { label: "ASK", val: status?.market?.bestAsk ? fmtUsd(status.market.bestAsk, 0) : "—", color: "var(--a-ef4444)" },
             { label: "SPREAD", val: (status?.market?.bestBid && status?.market?.bestAsk) ? `${(((status.market.bestAsk - status.market.bestBid) / status.market.bestAsk) * 10000).toFixed(1)} bps` : "—", color: "rgba(232,232,240,0.7)" },
             { label: "MARGIN USED", val: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, color: "rgba(232,232,240,0.7)" },
-            { label: "UNREAL PNL", val: fmtUsd(portfolio?.unrealizedPnl), color: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-            { label: "TODAY PNL", val: fmtUsd(portfolio?.realizedPnlToday), color: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+            { label: "UNREAL PNL", val: fmtUsd(portfolio?.unrealizedPnl), color: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
+            { label: "TODAY PNL", val: fmtUsd(portfolio?.realizedPnlToday), color: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
             { label: "REGIME", val: status?.agent?.regimeState ? `${status.agent.regimeState}${status.agent.regimeDirection ? " " + String(status.agent.regimeDirection) : ""}` : "—", color: "rgba(232,232,240,0.7)" },
-            { label: "CONFIDENCE", val: status?.agent?.regimeStrength != null ? `${(status.agent.regimeStrength * 100).toFixed(1)}% ${status.agent.confidenceBand || ""}` : "—", color: "#f59e0b" },
+            { label: "CONFIDENCE", val: status?.agent?.regimeStrength != null ? `${(status.agent.regimeStrength * 100).toFixed(1)}% ${status.agent.confidenceBand || ""}` : "—", color: "var(--a-f59e0b)" },
           ] as Array<{ label: string; val: string; color: string }>).map(({ label, val, color }) => (
-            <div key={label} style={{ padding: isMobile ? "0 10px" : "0 18px", borderRight: "1px solid rgba(255,255,255,0.06)", flexShrink: 0 }}>
+            <div key={label} style={{ padding: isMobile ? "0 10px" : "0 18px", borderRight: "1px solid rgba(var(--ink),0.06)", flexShrink: 0 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.32)", marginBottom: 3 }}>{label}</div>
               <div style={{ fontSize: 13, fontWeight: 700, color, fontVariantNumeric: "tabular-nums" }}>{val}</div>
             </div>
@@ -903,21 +903,21 @@ export default function Uc5Page() {
                   <span style={{ marginLeft: 10, fontSize: 10, color: "rgba(232,232,240,0.3)" }}>{chart.candles.length} pts</span>
                 </div>
                 <div style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", textAlign: "right" }}>
-                  <span style={{ color: "#22c55e" }}>● entry</span>{" · "}<span style={{ color: "#f59e0b" }}>● regime end</span>{" · "}<span style={{ color: "#b45309" }}>● flip</span>{" · "}<span style={{ color: "#ef4444" }}>● risk exit</span>{" · "}<span style={{ color: "#6b7280" }}>● other</span>
+                  <span style={{ color: "var(--a-22c55e)" }}>● entry</span>{" · "}<span style={{ color: "var(--a-f59e0b)" }}>● regime end</span>{" · "}<span style={{ color: "#b45309" }}>● flip</span>{" · "}<span style={{ color: "var(--a-ef4444)" }}>● risk exit</span>{" · "}<span style={{ color: "#6b7280" }}>● other</span>
                 </div>
               </div>
-              {chart.partial24h && <div style={{ fontSize: 11, color: "#f59e0b", marginBottom: 8 }}>Partial 24h · missing: {(chart.missingDays || []).join(", ") || "unknown"}</div>}
+              {chart.partial24h && <div style={{ fontSize: 11, color: "var(--a-f59e0b)", marginBottom: 8 }}>Partial 24h · missing: {(chart.missingDays || []).join(", ") || "unknown"}</div>}
               {chartRows.length === 0 ? (
                 <div style={{ height: isMobile ? 220 : MARKET_CHART_HEIGHT, display: "grid", placeItems: "center", color: "rgba(232,232,240,0.25)", fontSize: 13 }}>No chart data yet</div>
               ) : (
                 <div className="uc5-recharts" style={{ width: "100%", height: isMobile ? 220 : MARKET_CHART_HEIGHT }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={chartRows} margin={{ top: 16, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(var(--ink),0.05)" />
                       <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} />
                       <YAxis type="number" domain={yDomain ?? ["auto", "auto"]} tickFormatter={(v) => Number(v).toFixed(0)} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} width={52} />
                       <Tooltip content={renderChartTooltip} />
-                      <Line dataKey="close" type="monotone" stroke="#f59e0b" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                      <Line dataKey="close" type="monotone" stroke="var(--a-f59e0b)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                       {markerRows.slice(-500).map((m, i) => (
                         <ReferenceDot key={`${m.t}-${i}`} x={m.t} y={Number(m.price)} r={4} fill={markerColor(m)} stroke="rgba(0,0,0,0.4)" strokeWidth={1} ifOverflow="visible" />
                       ))}
@@ -937,12 +937,12 @@ export default function Uc5Page() {
                 <div className="uc5-recharts" style={{ width: "100%", height: isMobile ? 100 : CONFIDENCE_CHART_HEIGHT }}>
                   <ResponsiveContainer width="100%" height="100%">
                     <ComposedChart data={regimeRows} margin={{ top: 8, right: 16, left: 4, bottom: 4 }} syncId="uc5-price">
-                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" />
+                      <CartesianGrid strokeDasharray="3 3" stroke="rgba(var(--ink),0.05)" />
                       <XAxis dataKey="t" type="number" domain={["dataMin", "dataMax"]} tickFormatter={(v) => new Date(Number(v)).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} />
                       <YAxis type="number" domain={[0, 100]} tickFormatter={(v) => `${Number(v).toFixed(0)}%`} tick={{ fontSize: 10, fill: "rgba(232,232,240,0.32)" }} tickLine={false} axisLine={false} width={40} />
                       <Tooltip content={renderConfidenceTooltip} />
-                      <ReferenceLine y={trendEntryStrengthPct} stroke="#f59e0b" strokeDasharray="4 4" strokeOpacity={0.6} ifOverflow="extendDomain" />
-                      <Line dataKey="strengthPct" type="monotone" stroke="#60a5fa" strokeWidth={1.5} dot={false} isAnimationActive={false} />
+                      <ReferenceLine y={trendEntryStrengthPct} stroke="var(--a-f59e0b)" strokeDasharray="4 4" strokeOpacity={0.6} ifOverflow="extendDomain" />
+                      <Line dataKey="strengthPct" type="monotone" stroke="var(--a-60a5fa)" strokeWidth={1.5} dot={false} isAnimationActive={false} />
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
@@ -957,21 +957,21 @@ export default function Uc5Page() {
                   <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)", fontFamily: "ui-monospace, Menlo, monospace" }}>{shortAddr(cfg?.ownerAddress)}</span>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(portfolio?.portfolioValueUsd)}</div>
+                  <div style={{ fontSize: 34, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(portfolio?.portfolioValueUsd)}</div>
                   <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL VALUE</div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {([
                     { k: "Available margin", v: fmtUsd(portfolio?.availableMarginUsd), c: undefined as string | undefined },
                     { k: "Used margin", v: `${fmtUsd(portfolio?.usedMarginUsd)} · ${fmtPct(portfolio?.usedMarginPct)}`, c: undefined as string | undefined },
-                    { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                    { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                    { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                    { k: "Net PnL (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
+                    { k: "Unrealized PnL", v: fmtUsd(portfolio?.unrealizedPnl), c: (portfolio?.unrealizedPnl ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
+                    { k: "Realized PnL today", v: fmtUsd(portfolio?.realizedPnlToday), c: (portfolio?.realizedPnlToday ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
+                    { k: "Realized PnL total", v: fmtUsd(portfolio?.realizedPnlTotal), c: (portfolio?.realizedPnlTotal ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
+                    { k: "Net PnL (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
                   ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(var(--ink),0.04)" }}>
                       <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "var(--text)", fontVariantNumeric: "tabular-nums" }}>{v}</span>
                     </div>
                   ))}
                   {portfolio?.startPortfolioValueUsd != null && portfolio.startPortfolioValueUsd > 0 && (() => {
@@ -985,17 +985,17 @@ export default function Uc5Page() {
                       : null;
                     return (
                       <>
-                        <div style={{ borderTop: "1px solid rgba(255,255,255,0.08)", marginTop: 4, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
+                        <div style={{ borderTop: "1px solid rgba(var(--ink),0.08)", marginTop: 4, paddingTop: 8, display: "flex", flexDirection: "column", gap: 6 }}>
                           <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.28)", marginBottom: 2 }}>PERFORMANCE</div>
                           {([
                             { k: "Start value", v: fmtUsd(startVal), c: undefined as string | undefined },
                             { k: "Tracking since", v: startAt > 0 ? fmtDateTime(startAt) : "—", c: undefined as string | undefined },
-                            { k: "Total return", v: totalReturnPct != null ? `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%` : "—", c: totalReturnPct != null ? (totalReturnPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
-                            { k: "Annualized", v: annualizedPct != null ? `${annualizedPct >= 0 ? "+" : ""}${annualizedPct.toFixed(1)}%` : "—", c: annualizedPct != null ? (annualizedPct >= 0 ? "#22c55e" : "#ef4444") : undefined },
+                            { k: "Total return", v: totalReturnPct != null ? `${totalReturnPct >= 0 ? "+" : ""}${totalReturnPct.toFixed(2)}%` : "—", c: totalReturnPct != null ? (totalReturnPct >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)") : undefined },
+                            { k: "Annualized", v: annualizedPct != null ? `${annualizedPct >= 0 ? "+" : ""}${annualizedPct.toFixed(1)}%` : "—", c: annualizedPct != null ? (annualizedPct >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)") : undefined },
                           ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                            <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "4px 0", borderBottom: "1px solid rgba(var(--ink),0.04)" }}>
                               <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                              <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                              <span style={{ fontSize: 13, fontWeight: 700, color: c || "var(--text)", fontVariantNumeric: "tabular-nums" }}>{v}</span>
                             </div>
                           ))}
                         </div>
@@ -1010,25 +1010,25 @@ export default function Uc5Page() {
                   <span style={{ fontSize: 10, color: "rgba(232,232,240,0.3)" }}>all-time</span>
                 </div>
                 <div style={{ marginBottom: 14 }}>
-                  <div style={{ fontSize: 34, fontWeight: 900, color: "#e8e8f0", letterSpacing: "-0.02em" }}>{tradeSummary?.totalTrades ?? 0}</div>
+                  <div style={{ fontSize: 34, fontWeight: 900, color: "var(--text)", letterSpacing: "-0.02em" }}>{tradeSummary?.totalTrades ?? 0}</div>
                   <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", letterSpacing: "0.08em", marginTop: 2 }}>TOTAL TRADES</div>
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {([
-                    { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "#f59e0b" },
-                    { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "#22c55e" },
-                    { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "#ef4444" },
-                    { k: "Total fees", v: fmtUsd(tradeSummary?.totalFeesUsd), c: "#ef4444" },
-                    { k: "Net P&L (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "#22c55e" : "#ef4444" },
-                    { k: "Avg slippage", v: tradeSummary?.avgSlippageBps != null ? `${tradeSummary.avgSlippageBps.toFixed(1)} bps` : "—", c: tradeSummary?.avgSlippageBps != null ? (tradeSummary.avgSlippageBps < 2 ? "#22c55e" : tradeSummary.avgSlippageBps < 5 ? "#f59e0b" : "#ef4444") : undefined },
+                    { k: "Win rate", v: fmtPct((tradeSummary?.winRate ?? 0) * 100), c: "var(--a-f59e0b)" },
+                    { k: "Avg win", v: fmtUsd(tradeSummary?.avgWin), c: "var(--a-22c55e)" },
+                    { k: "Avg loss", v: fmtUsd(tradeSummary?.avgLoss), c: "var(--a-ef4444)" },
+                    { k: "Total fees", v: fmtUsd(tradeSummary?.totalFeesUsd), c: "var(--a-ef4444)" },
+                    { k: "Net P&L (after fees)", v: fmtUsd(tradeSummary?.netPnlTotal), c: (tradeSummary?.netPnlTotal ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" },
+                    { k: "Avg slippage", v: tradeSummary?.avgSlippageBps != null ? `${tradeSummary.avgSlippageBps.toFixed(1)} bps` : "—", c: tradeSummary?.avgSlippageBps != null ? (tradeSummary.avgSlippageBps < 2 ? "var(--a-22c55e)" : tradeSummary.avgSlippageBps < 5 ? "var(--a-f59e0b)" : "var(--a-ef4444)") : undefined },
                     { k: "Regime end exits", v: String(tradeSummary?.closedByRegimeEnd ?? 0), c: undefined as string | undefined },
                     { k: "Regime flip exits", v: String(tradeSummary?.closedByRegimeFlip ?? 0), c: undefined as string | undefined },
                     { k: "Risk loop exits", v: String(tradeSummary?.closedByRiskLoop ?? 0), c: undefined as string | undefined },
                     { k: "Other / manual exits", v: String(tradeSummary?.closedByOther ?? 0), c: undefined as string | undefined },
                   ] as Array<{ k: string; v: string; c: string | undefined }>).map(({ k, v, c }) => (
-                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" }}>
+                    <div key={k} style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid rgba(var(--ink),0.04)" }}>
                       <span style={{ fontSize: 12, color: "rgba(232,232,240,0.48)" }}>{k}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{v}</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: c || "var(--text)", fontVariantNumeric: "tabular-nums" }}>{v}</span>
                     </div>
                   ))}
                 </div>
@@ -1041,7 +1041,7 @@ export default function Uc5Page() {
 
             <div style={darkCard}>
               <div style={sideCardLabel}>AGENT DECISION</div>
-              <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.02em", textAlign: "center", padding: "12px 0 8px", color: status?.agent?.desired === "LONG" ? "#22c55e" : status?.agent?.desired === "SHORT" ? "#ef4444" : "rgba(232,232,240,0.28)" }}>
+              <div style={{ fontSize: 32, fontWeight: 900, letterSpacing: "-0.02em", textAlign: "center", padding: "12px 0 8px", color: status?.agent?.desired === "LONG" ? "var(--a-22c55e)" : status?.agent?.desired === "SHORT" ? "var(--a-ef4444)" : "rgba(232,232,240,0.28)" }}>
                 {status?.agent?.desired === "LONG" ? "▲ LONG" : status?.agent?.desired === "SHORT" ? "▼ SHORT" : "— FLAT"}
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 }}>
@@ -1051,13 +1051,13 @@ export default function Uc5Page() {
                   { label: "BAND", val: status?.agent?.confidenceBand || "—" },
                   { label: "LAST CHANGE", val: status?.agent?.lastRegimeChangeAt ? fmtAgo(status.agent.lastRegimeChangeAt) : "—" },
                 ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
-                  <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px" }}>
+                  <div key={label} style={{ background: "rgba(var(--ink),0.03)", borderRadius: 8, padding: "8px 10px" }}>
                     <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.3)", marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{val}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{val}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ borderTop: "1px solid rgba(255,255,255,0.06)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+              <div style={{ borderTop: "1px solid rgba(var(--ink),0.06)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
                 {([
                   { label: "Next decision", val: fmtCountdown(trading?.countdowns?.nextDecisionInSec) },
                   { label: "Next reassess", val: fmtCountdown(trading?.countdowns?.nextReassessInSec) },
@@ -1067,7 +1067,7 @@ export default function Uc5Page() {
                 ] as Array<{ label: string; val: string }>).map(({ label, val }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                     <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
-                    <span style={{ fontWeight: 700, color: "#e8e8f0", fontVariantNumeric: "tabular-nums" }}>{val}</span>
+                    <span style={{ fontWeight: 700, color: "var(--text)", fontVariantNumeric: "tabular-nums" }}>{val}</span>
                   </div>
                 ))}
               </div>
@@ -1189,7 +1189,7 @@ export default function Uc5Page() {
                 const progressPct = (slPrice != null && tpPrice != null && currentPrice > 0)
                   ? Math.max(0, Math.min(100, ((currentPrice - slPrice) / (tpPrice - slPrice)) * 100))
                   : null;
-                const row = (label: string, val: React.ReactNode, valColor = "#e8e8f0") => (
+                const row = (label: string, val: React.ReactNode, valColor = "var(--text)") => (
                   <div key={String(label)} style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", fontSize: 12 }}>
                     <span style={{ color: "rgba(232,232,240,0.45)" }}>{label}</span>
                     <span style={{ fontWeight: 700, color: valColor, fontFamily: "monospace" }}>{val}</span>
@@ -1197,7 +1197,7 @@ export default function Uc5Page() {
                 );
                 return (
                   <div>
-                    <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: isLong ? "#22c55e" : "#ef4444" }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, textAlign: "center", padding: "10px 0 6px", letterSpacing: "-0.01em", color: isLong ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>
                       {isLong ? "▲ LONG" : "▼ SHORT"}
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1206,7 +1206,7 @@ export default function Uc5Page() {
                       {row("LEVERAGE", posRecord.leverage != null ? `${Number(posRecord.leverage).toFixed(1)}×` : "—")}
                       {row("ENTRY", fmtUsd(entryPrice || null))}
                       {row("AGE", pos.ageSec != null ? `${Math.floor(pos.ageSec / 60)}m ${Math.floor(pos.ageSec % 60)}s` : "—")}
-                      {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "#22c55e" : "#ef4444")}
+                      {row("UNREAL PNL", fmtUsd(pos.unrealizedPnl), (pos.unrealizedPnl ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)")}
 
                       {/* ATR / exits block — always shown when position open */}
                       <div style={{ margin: "4px 0 2px", padding: "8px 10px", background: "rgba(6,182,212,0.06)", border: "1px solid rgba(6,182,212,0.15)", borderRadius: 8 }}>
@@ -1215,7 +1215,7 @@ export default function Uc5Page() {
                         </div>
                         <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, marginBottom: 4 }}>
                           <span style={{ color: "rgba(232,232,240,0.5)" }}>{entryAtrPct > 0 ? "ATR at entry" : "1 ATR"}</span>
-                          <span style={{ fontFamily: "monospace", fontWeight: 700, color: atrUsd != null ? "#06b6d4" : "rgba(232,232,240,0.3)" }}>
+                          <span style={{ fontFamily: "monospace", fontWeight: 700, color: atrUsd != null ? "var(--a-06b6d4)" : "rgba(232,232,240,0.3)" }}>
                             {atrUsd != null
                               ? <>{fmtUsd(atrUsd)} <span style={{ color: "rgba(232,232,240,0.4)", fontSize: 11 }}>({(atrPct * 100).toFixed(3)}%)</span></>
                               : "not computed"}
@@ -1225,11 +1225,11 @@ export default function Uc5Page() {
                         {/* SL distance */}
                         {slPrice != null && (
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12, marginBottom: 3 }}>
-                            <span style={{ color: "#ef4444", opacity: 0.8 }}>
+                            <span style={{ color: "var(--a-ef4444)", opacity: 0.8 }}>
                               SL {fmtUsd(slPrice)}
                               {isAtrBasedSl && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({slAtrMult}× ATR)</span>}
                             </span>
-                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#ef4444" }}>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--a-ef4444)" }}>
                               {distToSlAtr != null ? `${distToSlAtr.toFixed(2)}× ATR` : distToSlPct != null ? `${distToSlPct.toFixed(2)}%` : "—"}
                               {distToSlPct != null && distToSlAtr == null && (
                                 <span style={{ fontSize: 10, color: "rgba(239,68,68,0.6)", marginLeft: 4 }}>({distToSlPct.toFixed(2)}%)</span>
@@ -1240,7 +1240,7 @@ export default function Uc5Page() {
                         {atrSlDebounceActive && atrSlConfirmRemainingSec != null && (
                           <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 3 }}>
                             <span style={{ color: "rgba(239,68,68,0.75)" }}>SL confirm</span>
-                            <span style={{ fontFamily: "monospace", color: "#ef4444" }}>
+                            <span style={{ fontFamily: "monospace", color: "var(--a-ef4444)" }}>
                               {fmtCountdown(atrSlConfirmRemainingSec)} / {fmtCountdown(atrSlConfirmSec)}
                             </span>
                           </div>
@@ -1249,11 +1249,11 @@ export default function Uc5Page() {
                         {/* TP distance */}
                         {tpPrice != null && (
                           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", fontSize: 12 }}>
-                            <span style={{ color: "#22c55e", opacity: 0.8 }}>
+                            <span style={{ color: "var(--a-22c55e)", opacity: 0.8 }}>
                               TP {fmtUsd(tpPrice)}
                               {isAtrBasedTp && <span style={{ fontSize: 10, marginLeft: 4, opacity: 0.6 }}>({tpAtrMult}× ATR)</span>}
                             </span>
-                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "#22c55e" }}>
+                            <span style={{ fontFamily: "monospace", fontWeight: 700, color: "var(--a-22c55e)" }}>
                               {distToTpAtr != null ? `${distToTpAtr.toFixed(2)}× ATR` : distToTpPct != null ? `${distToTpPct.toFixed(2)}%` : "—"}
                               {distToTpPct != null && distToTpAtr == null && (
                                 <span style={{ fontSize: 10, color: "rgba(34,197,94,0.6)", marginLeft: 4 }}>({distToTpPct.toFixed(2)}%)</span>
@@ -1276,8 +1276,8 @@ export default function Uc5Page() {
                             <span style={{ color: "rgba(232,232,240,0.25)" }}>{progressPct.toFixed(0)}% to TP</span>
                             <span>TP</span>
                           </div>
-                          <div style={{ height: 6, borderRadius: 3, background: "rgba(255,255,255,0.08)", position: "relative", overflow: "hidden" }}>
-                            <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${progressPct}%`, background: progressPct > 60 ? "#22c55e" : progressPct < 25 ? "#ef4444" : "#f59e0b", borderRadius: 3, transition: "width 0.5s" }} />
+                          <div style={{ height: 6, borderRadius: 3, background: "rgba(var(--ink),0.08)", position: "relative", overflow: "hidden" }}>
+                            <div style={{ position: "absolute", left: 0, top: 0, height: "100%", width: `${progressPct}%`, background: progressPct > 60 ? "var(--a-22c55e)" : progressPct < 25 ? "var(--a-ef4444)" : "var(--a-f59e0b)", borderRadius: 3, transition: "width 0.5s" }} />
                           </div>
                         </div>
                       )}
@@ -1300,13 +1300,13 @@ export default function Uc5Page() {
                   { label: "LAST ENTRY", val: status?.execution?.lastEntryFill ? (status.execution.lastEntryFill.isMaker ? "MAKER" : "TAKER") : "—", ok: status?.execution?.lastEntryFill?.isMaker as boolean | undefined },
                   { label: "LAST EXIT", val: status?.execution?.lastExitMethod || "—", ok: (status?.execution?.lastExitMethod === "maker") as boolean | undefined },
                 ] as Array<{ label: string; val: string; ok: boolean | undefined }>).map(({ label, val, ok }) => (
-                  <div key={label} style={{ background: "rgba(255,255,255,0.03)", borderRadius: 8, padding: "8px 10px" }}>
+                  <div key={label} style={{ background: "rgba(var(--ink),0.03)", borderRadius: 8, padding: "8px 10px" }}>
                     <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.3)", marginBottom: 4 }}>{label}</div>
-                    <div style={{ fontSize: 12, fontWeight: 700, color: ok === undefined ? "#e8e8f0" : ok ? "#22c55e" : "#ef4444" }}>{val}</div>
+                    <div style={{ fontSize: 12, fontWeight: 700, color: ok === undefined ? "var(--text)" : ok ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>{val}</div>
                   </div>
                 ))}
               </div>
-              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", flexDirection: "column", gap: 5 }}>
+              <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px solid rgba(var(--ink),0.06)", display: "flex", flexDirection: "column", gap: 5 }}>
                 {([
                   { label: "Avg fill time", val: status?.execution?.avgEntryTimeToFirstFillMs != null ? `${Math.round(status.execution.avgEntryTimeToFirstFillMs)} ms` : "—" },
                   { label: "WS restarts", val: `${status?.execution?.wsQuotes?.restartCount ?? 0} (${status?.execution?.wsQuotes?.lastRestartReason || "—"})` },
@@ -1324,28 +1324,28 @@ export default function Uc5Page() {
 
         {/* STATUS ROW */}
         <div style={statusRow}>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: status?.bot?.alive ? "rgba(34,197,94,0.06)" : "rgba(255,255,255,0.025)", border: `1px solid ${status?.bot?.alive ? "rgba(34,197,94,0.2)" : "rgba(255,255,255,0.06)"}`, borderRadius: 10 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: status?.bot?.alive ? "#22c55e" : "#ef4444", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px #22c55e" : "none" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: status?.bot?.alive ? "rgba(34,197,94,0.06)" : "rgba(var(--ink),0.025)", border: `1px solid ${status?.bot?.alive ? "rgba(34,197,94,0.2)" : "rgba(var(--ink),0.06)"}`, borderRadius: 10 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: status?.bot?.alive ? "var(--a-22c55e)" : "var(--a-ef4444)", display: "inline-block", boxShadow: status?.bot?.alive ? "0 0 6px var(--a-22c55e)" : "none" }} />
             <div>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>HEARTBEAT</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{fmtAgo(status?.updatedAt)}{status?.bot?.version ? ` · v${status.bot.version}` : ""}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{fmtAgo(status?.updatedAt)}{status?.bot?.version ? ` · v${status.bot.version}` : ""}</div>
             </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, flex: 1 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: ingestion?.running ? "#22c55e" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(var(--ink),0.025)", border: "1px solid rgba(var(--ink),0.06)", borderRadius: 10, flex: 1 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: ingestion?.running ? "var(--a-22c55e)" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>DATA INGESTION</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{ingestion?.running ? "RUNNING" : "STOPPED"} · {(ingestion?.ingestionRatePerMin5m ?? 0).toFixed(1)} ticks/min</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{ingestion?.running ? "RUNNING" : "STOPPED"} · {(ingestion?.ingestionRatePerMin5m ?? 0).toFixed(1)} ticks/min</div>
             </div>
             <button style={ingestion?.enabled ? miniWarnBtn : miniGreenBtn} disabled={!isOwner || !!busy} onClick={() => void setIngestionEnabled(!(ingestion?.enabled ?? true))}>
               {ingestion?.enabled ? "PAUSE" : "START"}
             </button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, flex: 1 }}>
-            <span style={{ width: 7, height: 7, borderRadius: "50%", background: trading?.running ? "#22c55e" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(var(--ink),0.025)", border: "1px solid rgba(var(--ink),0.06)", borderRadius: 10, flex: 1 }}>
+            <span style={{ width: 7, height: 7, borderRadius: "50%", background: trading?.running ? "var(--a-22c55e)" : "rgba(232,232,240,0.2)", display: "inline-block" }} />
             <div style={{ flex: 1 }}>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>TRADING</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: "#e8e8f0" }}>{trading?.running ? "RUNNING" : "STOPPED"} · {trading?.positionOpen ? `${trading.side || "OPEN"} · ${fmtCountdown(trading?.timeSinceEntrySec)} age` : "no position"}</div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "var(--text)" }}>{trading?.running ? "RUNNING" : "STOPPED"} · {trading?.positionOpen ? `${trading.side || "OPEN"} · ${fmtCountdown(trading?.timeSinceEntrySec)} age` : "no position"}</div>
               {(() => {
                 const todayCount = status?.trading?.tradesToday ?? 0;
                 const maxDaily = status?.trading?.maxDailyTrades ?? 0;
@@ -1353,12 +1353,12 @@ export default function Uc5Page() {
                 const fillPct = maxDaily > 0 ? Math.min(100, (todayCount / maxDaily) * 100) : 0;
                 return (
                   <div style={{ marginTop: 4, display: "flex", alignItems: "center", gap: 6 }}>
-                    <span style={{ fontSize: 10, color: atLimit ? "#ef4444" : "rgba(232,232,240,0.45)" }}>
+                    <span style={{ fontSize: 10, color: atLimit ? "var(--a-ef4444)" : "rgba(232,232,240,0.45)" }}>
                       {todayCount} / {maxDaily > 0 ? maxDaily : "∞"} today
                     </span>
                     {maxDaily > 0 && (
-                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(255,255,255,0.08)", overflow: "hidden" }}>
-                        <div style={{ height: "100%", width: `${fillPct}%`, background: atLimit ? "#ef4444" : "#f59e0b", borderRadius: 2, transition: "width 0.5s" }} />
+                      <div style={{ flex: 1, height: 4, borderRadius: 2, background: "rgba(var(--ink),0.08)", overflow: "hidden" }}>
+                        <div style={{ height: "100%", width: `${fillPct}%`, background: atLimit ? "var(--a-ef4444)" : "var(--a-f59e0b)", borderRadius: 2, transition: "width 0.5s" }} />
                       </div>
                     )}
                   </div>
@@ -1369,10 +1369,10 @@ export default function Uc5Page() {
               {trading?.enabled ? "PAUSE" : "START"}
             </button>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 14px", background: "rgba(var(--ink),0.025)", border: "1px solid rgba(var(--ink),0.06)", borderRadius: 10 }}>
             <div>
               <div style={{ fontSize: 9, fontWeight: 700, letterSpacing: "0.1em", color: "rgba(232,232,240,0.38)" }}>LAST ACTION</div>
-              <div style={{ fontSize: 12, fontWeight: 700, color: status?.lastAction?.ok === false ? "#ef4444" : status?.lastAction?.ok ? "#22c55e" : "#e8e8f0" }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: status?.lastAction?.ok === false ? "var(--a-ef4444)" : status?.lastAction?.ok ? "var(--a-22c55e)" : "var(--text)" }}>
                 {status?.lastAction?.type || (trading?.lastAction && typeof trading.lastAction === "object" && "type" in (trading.lastAction as { type?: unknown }) ? String((trading.lastAction as { type?: unknown }).type) : "—")}
               </div>
             </div>
@@ -1401,24 +1401,24 @@ export default function Uc5Page() {
                   <thead>
                     <tr>
                       {(["Side", "Entry", "Exit", "Entry $", "Exit $", "P&L", "Fees", "Slip", "Duration", "Reason"] as string[]).map((h) => (
-                        <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(232,232,240,0.3)", borderBottom: "1px solid rgba(255,255,255,0.06)", whiteSpace: "nowrap" }}>{h}</th>
+                        <th key={h} style={{ textAlign: "left", padding: "4px 8px", fontSize: 9, fontWeight: 700, letterSpacing: "0.08em", color: "rgba(232,232,240,0.3)", borderBottom: "1px solid rgba(var(--ink),0.06)", whiteSpace: "nowrap" }}>{h}</th>
                       ))}
                     </tr>
                   </thead>
                   <tbody>
                     {tradesData.trades.map((t, i) => {
                       const isLong = t.side === "LONG";
-                      const pnlColor = t.pnl == null ? "#e8e8f0" : t.pnl >= 0 ? "#22c55e" : "#ef4444";
+                      const pnlColor = t.pnl == null ? "var(--text)" : t.pnl >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)";
                       return (
-                        <tr key={t.id ?? i} style={{ borderBottom: "1px solid rgba(255,255,255,0.03)" }}>
-                          <td style={{ padding: "6px 8px", fontWeight: 700, color: isLong ? "#22c55e" : "#ef4444", whiteSpace: "nowrap" }}>{t.side || "—"}</td>
+                        <tr key={t.id ?? i} style={{ borderBottom: "1px solid rgba(var(--ink),0.03)" }}>
+                          <td style={{ padding: "6px 8px", fontWeight: 700, color: isLong ? "var(--a-22c55e)" : "var(--a-ef4444)", whiteSpace: "nowrap" }}>{t.side || "—"}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDateTime(t.entry_ts)}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.7)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtDateTime(t.exit_ts)}</td>
-                          <td style={{ padding: "6px 8px", color: "#e8e8f0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.entry_price)}</td>
-                          <td style={{ padding: "6px 8px", color: "#e8e8f0", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.exit_price)}</td>
+                          <td style={{ padding: "6px 8px", color: "var(--text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.entry_price)}</td>
+                          <td style={{ padding: "6px 8px", color: "var(--text)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{fmtUsd(t.exit_price)}</td>
                           <td style={{ padding: "6px 8px", fontWeight: 700, color: pnlColor, whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.pnl != null ? fmtUsd(t.pnl) : "—"}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums" }}>{t.fees != null ? fmtUsd(t.fees) : "—"}</td>
-                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", fontSize: 11, fontWeight: 600, color: t.slippage_bps == null ? "rgba(232,232,240,0.3)" : t.slippage_bps < 2 ? "#22c55e" : t.slippage_bps < 5 ? "#f59e0b" : "#ef4444" }}>{t.slippage_bps != null ? `${t.slippage_bps.toFixed(1)} bp` : "—"}</td>
+                          <td style={{ padding: "6px 8px", whiteSpace: "nowrap", fontVariantNumeric: "tabular-nums", fontSize: 11, fontWeight: 600, color: t.slippage_bps == null ? "rgba(232,232,240,0.3)" : t.slippage_bps < 2 ? "var(--a-22c55e)" : t.slippage_bps < 5 ? "var(--a-f59e0b)" : "var(--a-ef4444)" }}>{t.slippage_bps != null ? `${t.slippage_bps.toFixed(1)} bp` : "—"}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.55)", whiteSpace: "nowrap" }}>{fmtDuration(t.duration_sec)}</td>
                           <td style={{ padding: "6px 8px", color: "rgba(232,232,240,0.6)", whiteSpace: "nowrap", fontSize: 11 }}>{closeReasonTag(t.close_reason)}</td>
                         </tr>
@@ -1428,15 +1428,15 @@ export default function Uc5Page() {
                 </table>
               </div>
               {tradesData.total > 10 && (
-                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+                <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, marginTop: 12, paddingTop: 10, borderTop: "1px solid rgba(var(--ink),0.06)" }}>
                   <button
-                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: tradesPage === 0 ? "rgba(232,232,240,0.2)" : "#e8e8f0", cursor: tradesPage === 0 ? "default" : "pointer" }}
+                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(var(--ink),0.06)", border: "1px solid rgba(var(--ink),0.1)", borderRadius: 6, color: tradesPage === 0 ? "rgba(232,232,240,0.2)" : "var(--text)", cursor: tradesPage === 0 ? "default" : "pointer" }}
                     disabled={tradesPage === 0}
                     onClick={() => { const p = tradesPage - 1; setTradesPage(p); void refreshTrades(p); }}
                   >Prev</button>
                   <span style={{ fontSize: 11, color: "rgba(232,232,240,0.4)" }}>{tradesPage + 1} / {Math.ceil(tradesData.total / 10)}</span>
                   <button
-                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(255,255,255,0.06)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 6, color: (tradesPage + 1) * 10 >= tradesData.total ? "rgba(232,232,240,0.2)" : "#e8e8f0", cursor: (tradesPage + 1) * 10 >= tradesData.total ? "default" : "pointer" }}
+                    style={{ padding: "4px 12px", fontSize: 11, fontWeight: 700, background: "rgba(var(--ink),0.06)", border: "1px solid rgba(var(--ink),0.1)", borderRadius: 6, color: (tradesPage + 1) * 10 >= tradesData.total ? "rgba(232,232,240,0.2)" : "var(--text)", cursor: (tradesPage + 1) * 10 >= tradesData.total ? "default" : "pointer" }}
                     disabled={(tradesPage + 1) * 10 >= tradesData.total}
                     onClick={() => { const p = tradesPage + 1; setTradesPage(p); void refreshTrades(p); }}
                   >Next</button>
@@ -1460,7 +1460,7 @@ export default function Uc5Page() {
             ] as Array<{ k: string; v: string }>).map(({ k, v }) => (
               <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: 12 }}>
                 <span style={{ color: "rgba(232,232,240,0.45)" }}>{k}</span>
-                <span style={{ fontWeight: 600, color: "#e8e8f0" }}>{v}</span>
+                <span style={{ fontWeight: 600, color: "var(--text)" }}>{v}</span>
               </div>
             ))}
           </div>
@@ -1470,8 +1470,8 @@ export default function Uc5Page() {
         <div className="uc5-ctrl" style={{ ...controlCenter, padding: isMobile ? "16px 14px 14px" : "20px 20px 16px" }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: isMobile ? "flex-start" : "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
             <div>
-              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 900, color: "#e8e8f0", letterSpacing: "0.04em" }}>
-                <span style={{ color: "#f59e0b", marginRight: 8 }}>&#9881;</span>CONTROL CENTER
+              <div style={{ fontSize: isMobile ? 14 : 16, fontWeight: 900, color: "var(--text)", letterSpacing: "0.04em" }}>
+                <span style={{ color: "var(--a-f59e0b)", marginRight: 8 }}>&#9881;</span>CONTROL CENTER
               </div>
               <div style={{ fontSize: 12, color: "rgba(232,232,240,0.38)", marginTop: 3 }}>Owner settings · requires MetaMask signature</div>
             </div>
@@ -1480,8 +1480,8 @@ export default function Uc5Page() {
 
           <details open style={ctrlSection}>
             <summary style={ctrlSummary}>
-              <span style={{ marginRight: 8, color: "#f59e0b" }}>&#9654;</span>
-              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#f59e0b" }}>STRATEGY &amp; SIGNAL</span>
+              <span style={{ marginRight: 8, color: "var(--a-f59e0b)" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "var(--a-f59e0b)" }}>STRATEGY &amp; SIGNAL</span>
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>regime thresholds · timing · loops</span>
             </summary>
             <div style={ctrlBody}>
@@ -1531,8 +1531,8 @@ export default function Uc5Page() {
 
           <details style={ctrlSection}>
             <summary style={ctrlSummary}>
-              <span style={{ marginRight: 8, color: "#ef4444" }}>&#9654;</span>
-              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#ef4444" }}>RISK &amp; STOPS</span>
+              <span style={{ marginRight: 8, color: "var(--a-ef4444)" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "var(--a-ef4444)" }}>RISK &amp; STOPS</span>
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>leverage · margin · SL/TP · hold times</span>
             </summary>
             <div style={ctrlBody}>
@@ -1594,8 +1594,8 @@ export default function Uc5Page() {
 
           <details style={ctrlSection}>
             <summary style={ctrlSummary}>
-              <span style={{ marginRight: 8, color: "#60a5fa" }}>&#9654;</span>
-              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#60a5fa" }}>EXECUTION</span>
+              <span style={{ marginRight: 8, color: "var(--a-60a5fa)" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "var(--a-60a5fa)" }}>EXECUTION</span>
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>maker orders · spread · chase · timing</span>
             </summary>
             <div style={ctrlBody}>
@@ -1640,13 +1640,13 @@ export default function Uc5Page() {
                   <input style={input} type="number" min={1} max={2000} step={1} value={edit?.maxOrdersPerHour ?? 120} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, maxOrdersPerHour: Number(e.target.value) } : p))} />
                 </Field>
                 <Field label="makerReplaceOnlyOnTouchMove" help="Preserve queue priority unless the touch price actually moves." error={undefined}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "#e8e8f0", fontSize: 13 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "var(--text)", fontSize: 13 }}>
                     <input type="checkbox" checked={Boolean(edit?.makerReplaceOnlyOnTouchMove ?? true)} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerReplaceOnlyOnTouchMove: e.target.checked } : p))} />
                     Replace only on touch move
                   </label>
                 </Field>
                 <Field label="makerImproveOneTickOnWideSpread" help="Improve by one tick while staying post-only when spread is wide." error={undefined}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "#e8e8f0", fontSize: 13 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700, color: "var(--text)", fontSize: 13 }}>
                     <input type="checkbox" checked={Boolean(edit?.makerImproveOneTickOnWideSpread ?? true)} disabled={!isOwner} onChange={(e) => setEdit((p) => (p ? { ...p, makerImproveOneTickOnWideSpread: e.target.checked } : p))} />
                     Improve one tick on wide spread
                   </label>
@@ -1669,8 +1669,8 @@ export default function Uc5Page() {
 
           <details open style={ctrlSection}>
             <summary style={ctrlSummary}>
-              <span style={{ marginRight: 8, color: "#22c55e" }}>&#9654;</span>
-              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "#22c55e" }}>PROFITABILITY CONTROLS</span>
+              <span style={{ marginRight: 8, color: "var(--a-22c55e)" }}>&#9654;</span>
+              <span style={{ fontSize: 12, fontWeight: 800, letterSpacing: "0.1em", color: "var(--a-22c55e)" }}>PROFITABILITY CONTROLS</span>
               <span style={{ marginLeft: 10, fontSize: 11, color: "rgba(232,232,240,0.35)", fontWeight: 400 }}>edge gate · funding · daily limit</span>
             </summary>
             <div style={ctrlBody}>
@@ -1691,24 +1691,24 @@ export default function Uc5Page() {
             </div>
           </details>
 
-          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(255,255,255,0.06)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+          <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid rgba(var(--ink),0.06)", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <button style={saveBtnCtrl} disabled={!isOwner || !!busy || hasValidationErrors} onClick={() => void saveConfig()}>
               {busy === "save" ? "Saving..." : "Save Settings"}
             </button>
-            {hasValidationErrors && <span style={{ fontSize: 12, color: "#ef4444" }}>Fix validation errors before saving.</span>}
+            {hasValidationErrors && <span style={{ fontSize: 12, color: "var(--a-ef4444)" }}>Fix validation errors before saving.</span>}
           </div>
         </div>
 
         {/* SETUP WIZARD */}
         {shouldShowSetup ? (
           <div style={{ ...darkCard, border: "1px solid rgba(245,158,11,0.25)", background: "rgba(245,158,11,0.04)" }}>
-            <div style={{ fontSize: 13, fontWeight: 800, color: "#f59e0b", letterSpacing: "0.08em", marginBottom: 12 }}>SETUP REQUIRED</div>
+            <div style={{ fontSize: 13, fontWeight: 800, color: "var(--a-f59e0b)", letterSpacing: "0.08em", marginBottom: 12 }}>SETUP REQUIRED</div>
             <div style={{ fontSize: 12, color: "rgba(232,232,240,0.5)", marginBottom: 12 }}>Missing: {missingSetup.join(", ")}</div>
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <StepRow title="Discover subaccount" text="Used for balances and active positions." buttonText={busy === "discover-sub" ? "Discovering..." : "Discover subaccount"} disabled={!isOwner || !!busy} onClick={() => void discoverSubaccount()} />
               <StepRow title="Discover productId" text="Used for market data and order placement." buttonText={busy === "discover-product" ? "Discovering..." : "Discover productId"} disabled={!isOwner || !!busy} onClick={() => void discoverProduct()} />
-              <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 14 }}>
-                <div style={{ fontWeight: 700, color: "#e8e8f0", marginBottom: 4 }}>Link bot signer (recommended)</div>
+              <div style={{ border: "1px solid rgba(var(--ink),0.08)", borderRadius: 12, padding: 14 }}>
+                <div style={{ fontWeight: 700, color: "var(--text)", marginBottom: 4 }}>Link bot signer (recommended)</div>
                 <div style={{ color: "rgba(232,232,240,0.5)", marginBottom: 10, fontSize: 13 }}>Safer than trading with your MetaMask private key.</div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <input style={{ ...input, minWidth: isMobile ? 0 : 280, flex: 1 }} placeholder="Bot signer address (0x...)" value={signerAddr} onChange={(e) => setSignerAddr(e.target.value)} />
@@ -1726,9 +1726,9 @@ export default function Uc5Page() {
 
 function StepRow(props: { title: string; text: string; buttonText: string; disabled: boolean; onClick: () => void }) {
   return (
-    <div style={{ border: "1px solid rgba(255,255,255,0.08)", borderRadius: 12, padding: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+    <div style={{ border: "1px solid rgba(var(--ink),0.08)", borderRadius: 12, padding: 12, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
       <div>
-        <div style={{ fontWeight: 700, color: "#e8e8f0" }}>{props.title}</div>
+        <div style={{ fontWeight: 700, color: "var(--text)" }}>{props.title}</div>
         <div style={{ color: "rgba(232,232,240,0.5)", marginTop: 3, fontSize: 13 }}>{props.text}</div>
       </div>
       <button style={btnSecondary} disabled={props.disabled} onClick={props.onClick}>{props.buttonText}</button>
@@ -1739,10 +1739,10 @@ function StepRow(props: { title: string; text: string; buttonText: string; disab
 function Field(props: { label: string; help?: string; error?: string; children: ReactNode }) {
   return (
     <div style={fieldCard}>
-      <div style={{ fontWeight: 700, fontSize: 12, color: "#e8e8f0", marginBottom: 4 }}>{props.label}</div>
+      <div style={{ fontWeight: 700, fontSize: 12, color: "var(--text)", marginBottom: 4 }}>{props.label}</div>
       {props.help ? <div style={{ color: "rgba(232,232,240,0.42)", marginBottom: 8, fontSize: 11, lineHeight: 1.5 }}>{props.help}</div> : null}
       <div>{props.children}</div>
-      {props.error ? <div style={{ color: "#ef4444", marginTop: 6, fontSize: 11 }}>{props.error}</div> : null}
+      {props.error ? <div style={{ color: "var(--a-ef4444)", marginTop: 6, fontSize: 11 }}>{props.error}</div> : null}
     </div>
   );
 }
@@ -1757,35 +1757,35 @@ function KV(props: { k: string; v: string }) {
 }
 
 const wrap: CSSProperties = { maxWidth: 1400, margin: "0 auto", padding: "14px 16px 48px", display: "flex", flexDirection: "column", gap: 12 };
-const heroBar: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 16, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" };
-const metricsStrip: CSSProperties = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 4px", display: "flex", overflowX: "auto", gap: 0, scrollbarWidth: "none" };
-const darkCard: CSSProperties = { background: "rgba(255,255,255,0.032)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 14, padding: 18, minWidth: 0 };
+const heroBar: CSSProperties = { background: "rgba(var(--ink),0.032)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 16, padding: "16px 20px", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16, flexWrap: "wrap" };
+const metricsStrip: CSSProperties = { background: "rgba(var(--ink),0.025)", border: "1px solid rgba(var(--ink),0.06)", borderRadius: 12, padding: "12px 4px", display: "flex", overflowX: "auto", gap: 0, scrollbarWidth: "none" };
+const darkCard: CSSProperties = { background: "rgba(var(--ink),0.032)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 14, padding: 18, minWidth: 0 };
 const chartCardTitle: CSSProperties = { fontSize: 11, fontWeight: 800, letterSpacing: "0.1em", color: "rgba(232,232,240,0.6)" };
 const sideCardLabel: CSSProperties = { fontSize: 9, fontWeight: 800, letterSpacing: "0.14em", color: "rgba(232,232,240,0.35)", display: "block", marginBottom: 6 };
-const statusRow: CSSProperties = { background: "rgba(255,255,255,0.025)", border: "1px solid rgba(255,255,255,0.06)", borderRadius: 12, padding: "12px 14px", display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" };
-const controlCenter: CSSProperties = { background: "rgba(255,255,255,0.02)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 16, padding: "20px 20px 16px" };
-const ctrlSection: CSSProperties = { marginBottom: 6, border: "1px solid rgba(255,255,255,0.06)", borderRadius: 10, overflow: "hidden" };
-const ctrlSummary: CSSProperties = { cursor: "pointer", padding: "11px 14px", display: "flex", alignItems: "center", background: "rgba(255,255,255,0.015)", userSelect: "none" };
-const ctrlBody: CSSProperties = { padding: "14px 14px 12px", borderTop: "1px solid rgba(255,255,255,0.05)" };
+const statusRow: CSSProperties = { background: "rgba(var(--ink),0.025)", border: "1px solid rgba(var(--ink),0.06)", borderRadius: 12, padding: "12px 14px", display: "flex", gap: 10, alignItems: "stretch", flexWrap: "wrap" };
+const controlCenter: CSSProperties = { background: "rgba(var(--ink),0.02)", border: "1px solid rgba(var(--ink),0.07)", borderRadius: 16, padding: "20px 20px 16px" };
+const ctrlSection: CSSProperties = { marginBottom: 6, border: "1px solid rgba(var(--ink),0.06)", borderRadius: 10, overflow: "hidden" };
+const ctrlSummary: CSSProperties = { cursor: "pointer", padding: "11px 14px", display: "flex", alignItems: "center", background: "rgba(var(--ink),0.015)", userSelect: "none" };
+const ctrlBody: CSSProperties = { padding: "14px 14px 12px", borderTop: "1px solid rgba(var(--ink),0.05)" };
 const grid4ctrl: CSSProperties = { display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))" };
-const fieldCard: CSSProperties = { background: "rgba(255,255,255,0.028)", border: "1px solid rgba(255,255,255,0.07)", borderRadius: 10, padding: "11px 12px 10px" };
-const kvRow: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid rgba(255,255,255,0.04)" };
+const fieldCard: CSSProperties = { background: "rgba(var(--ink),0.028)", border: "1px solid rgba(var(--ink),0.07)", borderRadius: 10, padding: "11px 12px 10px" };
+const kvRow: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, padding: "5px 0", borderBottom: "1px solid rgba(var(--ink),0.04)" };
 const kStyle: CSSProperties = { color: "rgba(232,232,240,0.48)", fontSize: 12 };
-const vStyle: CSSProperties = { color: "#e8e8f0", fontSize: 12, fontWeight: 700, textAlign: "right", maxWidth: 260 };
-const input: CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.12)", outline: "none", background: "rgba(255,255,255,0.06)", color: "#e8e8f0", fontSize: 13 };
-const btnPrimary: CSSProperties = { borderRadius: 10, border: "1px solid #f59e0b", background: "#f59e0b", color: "#0a0a0f", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
-const btnSecondary: CSSProperties = { borderRadius: 10, border: "1px solid rgba(255,255,255,0.15)", background: "rgba(255,255,255,0.06)", color: "#e8e8f0", padding: "9px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 };
-const btnDanger: CSSProperties = { borderRadius: 10, border: "1px solid #ef4444", background: "#ef4444", color: "#fff", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
-const miniWarnBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "#f59e0b", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
-const miniGreenBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "#22c55e", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
-const saveBtnCtrl: CSSProperties = { borderRadius: 10, border: "1px solid #f59e0b", background: "#f59e0b", color: "#0a0a0f", padding: "11px 22px", fontWeight: 900, cursor: "pointer", fontSize: 14, letterSpacing: "0.04em" };
-const ownerBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.08)", color: "#22c55e", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
-const readonlyBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.04)", color: "rgba(232,232,240,0.5)", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
-const tooltipBox: CSSProperties = { background: "rgba(10,10,20,0.95)", border: "1px solid rgba(255,255,255,0.12)", borderRadius: 10, padding: "8px 10px", boxShadow: "0 4px 16px rgba(0,0,0,0.4)", fontSize: 12, color: "#e8e8f0" };
-const bannerClose: CSSProperties = { border: "1px solid rgba(255,255,255,0.15)", borderRadius: 7, background: "rgba(255,255,255,0.06)", color: "#e8e8f0", fontSize: 11, padding: "4px 8px", cursor: "pointer" };
+const vStyle: CSSProperties = { color: "var(--text)", fontSize: 12, fontWeight: 700, textAlign: "right", maxWidth: 260 };
+const input: CSSProperties = { width: "100%", padding: "8px 10px", borderRadius: 8, border: "1px solid rgba(var(--ink),0.12)", outline: "none", background: "rgba(var(--ink),0.06)", color: "var(--text)", fontSize: 13 };
+const btnPrimary: CSSProperties = { borderRadius: 10, border: "1px solid var(--a-f59e0b)", background: "var(--a-f59e0b)", color: "var(--bg)", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
+const btnSecondary: CSSProperties = { borderRadius: 10, border: "1px solid rgba(var(--ink),0.15)", background: "rgba(var(--ink),0.06)", color: "var(--text)", padding: "9px 14px", fontWeight: 700, cursor: "pointer", fontSize: 13 };
+const btnDanger: CSSProperties = { borderRadius: 10, border: "1px solid var(--a-ef4444)", background: "var(--a-ef4444)", color: "#fff", padding: "9px 14px", fontWeight: 800, cursor: "pointer", fontSize: 13 };
+const miniWarnBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(245,158,11,0.4)", background: "rgba(245,158,11,0.1)", color: "var(--a-f59e0b)", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
+const miniGreenBtn: CSSProperties = { borderRadius: 7, border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.1)", color: "var(--a-22c55e)", padding: "5px 10px", fontWeight: 800, cursor: "pointer", fontSize: 10, letterSpacing: "0.06em", flexShrink: 0 };
+const saveBtnCtrl: CSSProperties = { borderRadius: 10, border: "1px solid var(--a-f59e0b)", background: "var(--a-f59e0b)", color: "var(--bg)", padding: "11px 22px", fontWeight: 900, cursor: "pointer", fontSize: 14, letterSpacing: "0.04em" };
+const ownerBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(34,197,94,0.4)", background: "rgba(34,197,94,0.08)", color: "var(--a-22c55e)", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
+const readonlyBadge: CSSProperties = { display: "inline-block", borderRadius: 999, padding: "5px 10px", border: "1px solid rgba(var(--ink),0.12)", background: "rgba(var(--ink),0.04)", color: "rgba(232,232,240,0.5)", fontWeight: 800, fontSize: 11, letterSpacing: "0.06em" };
+const tooltipBox: CSSProperties = { background: "rgba(10,10,20,0.95)", border: "1px solid rgba(var(--ink),0.12)", borderRadius: 10, padding: "8px 10px", boxShadow: "0 4px 16px rgba(0,0,0,0.4)", fontSize: 12, color: "var(--text)" };
+const bannerClose: CSSProperties = { border: "1px solid rgba(var(--ink),0.15)", borderRadius: 7, background: "rgba(var(--ink),0.06)", color: "var(--text)", fontSize: 11, padding: "4px 8px", cursor: "pointer" };
 
 function bannerStyle(kind: "success" | "error" | "info"): CSSProperties {
-  if (kind === "success") return { border: "1px solid rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.08)", color: "#22c55e", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
-  if (kind === "error") return { border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)", color: "#ef4444", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
-  return { border: "1px solid rgba(255,255,255,0.1)", background: "rgba(255,255,255,0.04)", color: "rgba(232,232,240,0.8)", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
+  if (kind === "success") return { border: "1px solid rgba(34,197,94,0.35)", background: "rgba(34,197,94,0.08)", color: "var(--a-22c55e)", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
+  if (kind === "error") return { border: "1px solid rgba(239,68,68,0.35)", background: "rgba(239,68,68,0.08)", color: "var(--a-ef4444)", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
+  return { border: "1px solid rgba(var(--ink),0.1)", background: "rgba(var(--ink),0.04)", color: "rgba(232,232,240,0.8)", borderRadius: 10, padding: "10px 14px", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", fontSize: 13 };
 }

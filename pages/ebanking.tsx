@@ -10,7 +10,7 @@ import { useBreakpoint } from '../shared/hooks/useBreakpoint';
 
 const CHAIN_ID = 421614; // Arbitrum Sepolia
 const DEMO_ETH_CHF = 2000;
-const UC_ACCENT = '#3b82f6';
+const UC_ACCENT = 'var(--a-3b82f6)';
 
 const ERC20_MIN_ABI = [
   {
@@ -299,7 +299,7 @@ export default function EBanking() {
       <div style={pageRoot}>
         <style jsx global>{`
           html, body {
-            background: #07080f;
+            background: var(--bg);
             margin: 0;
             padding: 0;
             -webkit-font-smoothing: antialiased;
@@ -323,28 +323,28 @@ export default function EBanking() {
             transition: background 130ms ease, border-color 130ms ease;
           }
           .eb-btn-sec:hover {
-            background: rgba(255,255,255,0.09) !important;
-            border-color: rgba(255,255,255,0.18) !important;
+            background: rgba(var(--ink),0.09) !important;
+            border-color: rgba(var(--ink),0.18) !important;
           }
           .eb-bal {
             transition: background 150ms ease;
           }
           .eb-bal:hover {
-            background: rgba(255,255,255,0.055) !important;
+            background: rgba(var(--ink),0.055) !important;
           }
           .eb-arbi {
             transition: color 130ms ease;
           }
           .eb-arbi:hover {
-            color: rgba(255,255,255,0.90) !important;
+            color: rgba(var(--ink),0.90) !important;
           }
           /* Why This Matters tabs */
           .wtm-tab {
             transition: background 130ms ease, border-color 130ms ease, color 130ms ease;
           }
           .wtm-tab:hover {
-            background: rgba(255,255,255,0.07) !important;
-            border-color: rgba(255,255,255,0.14) !important;
+            background: rgba(var(--ink),0.07) !important;
+            border-color: rgba(var(--ink),0.14) !important;
           }
           .wtm-panel {
             animation: wtmIn 220ms ease;
@@ -363,7 +363,7 @@ export default function EBanking() {
               <div style={loginChipRow}>
                 <span style={loginChip}>
                   <span style={{ color: UC_ACCENT, fontWeight: 800 }}>01</span>
-                  <span style={{ color: 'rgba(255,255,255,0.30)', margin: '0 5px' }}>·</span>
+                  <span style={{ color: 'rgba(var(--ink),0.30)', margin: '0 5px' }}>·</span>
                   eBanking
                 </span>
               </div>
@@ -682,7 +682,7 @@ function WhyThisMatters() {
             className="wtm-tab"
             style={{ ...wtmTabBase, ...(tab === i ? wtmTabActive : {}) }}
           >
-            <span style={{ ...wtmTabN, color: tab === i ? UC_ACCENT : 'rgba(255,255,255,0.22)' }}>
+            <span style={{ ...wtmTabN, color: tab === i ? UC_ACCENT : 'rgba(var(--ink),0.22)' }}>
               {t.n}
             </span>
             {t.label}
@@ -705,9 +705,9 @@ function WhyThisMatters() {
 /* ── Styles ── */
 
 const pageRoot: CSSProperties = {
-  background: '#07080f',
+  background: 'var(--bg)',
   minHeight: '100vh',
-  color: '#e8e8f0',
+  color: 'var(--text)',
   fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
@@ -719,7 +719,7 @@ const loadingWrap: CSSProperties = {
 };
 
 const loadingText: CSSProperties = {
-  color: 'rgba(255,255,255,0.38)',
+  color: 'rgba(var(--ink),0.38)',
   fontSize: 15,
 };
 
@@ -733,8 +733,8 @@ const loginOuter: CSSProperties = {
 const loginCard: CSSProperties = {
   width: '100%',
   maxWidth: 420,
-  background: 'rgba(255,255,255,0.032)',
-  border: '1px solid rgba(255,255,255,0.09)',
+  background: 'rgba(var(--ink),0.032)',
+  border: '1px solid rgba(var(--ink),0.09)',
   borderRadius: 20,
   padding: '32px 28px',
   display: 'flex',
@@ -751,11 +751,11 @@ const loginChip: CSSProperties = {
   alignItems: 'center',
   padding: '5px 12px',
   borderRadius: 999,
-  border: '1px solid rgba(255,255,255,0.10)',
-  background: 'rgba(255,255,255,0.04)',
+  border: '1px solid rgba(var(--ink),0.10)',
+  background: 'rgba(var(--ink),0.04)',
   fontSize: 12,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.65)',
+  color: 'rgba(var(--ink),0.65)',
   letterSpacing: '0.02em',
 };
 
@@ -763,7 +763,7 @@ const loginTitle: CSSProperties = {
   margin: '0 0 10px',
   fontSize: 28,
   fontWeight: 900,
-  color: '#fff',
+  color: 'var(--heading)',
   letterSpacing: '-0.022em',
   lineHeight: 1.15,
 };
@@ -771,7 +771,7 @@ const loginTitle: CSSProperties = {
 const loginSub: CSSProperties = {
   margin: '0 0 24px',
   fontSize: 14,
-  color: 'rgba(255,255,255,0.55)',
+  color: 'rgba(var(--ink),0.55)',
   lineHeight: 1.6,
 };
 
@@ -779,9 +779,9 @@ const inputField: CSSProperties = {
   width: '100%',
   padding: '11px 14px',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.05)',
-  color: '#fff',
+  border: '1px solid rgba(var(--ink),0.12)',
+  background: 'rgba(var(--ink),0.05)',
+  color: 'var(--heading)',
   fontSize: 14,
   marginBottom: 12,
   boxSizing: 'border-box',
@@ -796,7 +796,7 @@ const btnPrimary: CSSProperties = {
   borderRadius: 12,
   border: '1px solid transparent',
   background: UC_ACCENT,
-  color: '#fff',
+  color: 'var(--heading)',
   fontSize: 14,
   fontWeight: 700,
   cursor: 'pointer',
@@ -809,9 +809,9 @@ const btnGhost: CSSProperties = {
   alignItems: 'center',
   padding: '9px 16px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.12)',
-  background: 'rgba(255,255,255,0.04)',
-  color: 'rgba(255,255,255,0.60)',
+  border: '1px solid rgba(var(--ink),0.12)',
+  background: 'rgba(var(--ink),0.04)',
+  color: 'rgba(var(--ink),0.60)',
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -823,9 +823,9 @@ const btnSecondary: CSSProperties = {
   alignItems: 'center',
   padding: '11px 20px',
   borderRadius: 12,
-  border: '1px solid rgba(255,255,255,0.14)',
-  background: 'rgba(255,255,255,0.05)',
-  color: 'rgba(255,255,255,0.75)',
+  border: '1px solid rgba(var(--ink),0.14)',
+  background: 'rgba(var(--ink),0.05)',
+  color: 'rgba(var(--ink),0.75)',
   fontSize: 14,
   fontWeight: 700,
   cursor: 'pointer',
@@ -836,9 +836,9 @@ const statusBox: CSSProperties = {
   marginTop: 16,
   padding: '10px 14px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.09)',
-  background: 'rgba(255,255,255,0.04)',
-  color: 'rgba(255,255,255,0.65)',
+  border: '1px solid rgba(var(--ink),0.09)',
+  background: 'rgba(var(--ink),0.04)',
+  color: 'rgba(var(--ink),0.65)',
   fontSize: 13,
   lineHeight: 1.5,
   wordBreak: 'break-all',
@@ -863,7 +863,7 @@ const dashHeader: CSSProperties = {
 const dashChip: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.42)',
+  color: 'rgba(var(--ink),0.42)',
   letterSpacing: '0.04em',
   marginBottom: 6,
 };
@@ -872,7 +872,7 @@ const dashTitle: CSSProperties = {
   margin: 0,
   fontSize: 30,
   fontWeight: 900,
-  color: '#fff',
+  color: 'var(--heading)',
   letterSpacing: '-0.022em',
 };
 
@@ -885,8 +885,8 @@ const acctGrid: CSSProperties = {
 };
 
 const acctCard: CSSProperties = {
-  background: 'rgba(255,255,255,0.032)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(var(--ink),0.032)',
+  border: '1px solid rgba(var(--ink),0.08)',
   borderRadius: 16,
   padding: '22px 24px',
 };
@@ -894,7 +894,7 @@ const acctCard: CSSProperties = {
 const acctLabel: CSSProperties = {
   fontSize: 12,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.40)',
+  color: 'rgba(var(--ink),0.40)',
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
   marginBottom: 10,
@@ -903,22 +903,22 @@ const acctLabel: CSSProperties = {
 const acctAmount: CSSProperties = {
   fontSize: 30,
   fontWeight: 800,
-  color: '#fff',
+  color: 'var(--heading)',
   letterSpacing: '-0.02em',
   marginBottom: 8,
 };
 
 const acctIban: CSSProperties = {
   fontSize: 12,
-  color: 'rgba(255,255,255,0.30)',
+  color: 'rgba(var(--ink),0.30)',
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
   letterSpacing: '0.02em',
 };
 
 /* Crypto wallet panel */
 const walletPanel: CSSProperties = {
-  background: 'rgba(255,255,255,0.04)',
-  border: '1px solid rgba(255,255,255,0.10)',
+  background: 'rgba(var(--ink),0.04)',
+  border: '1px solid rgba(var(--ink),0.10)',
   borderRadius: 16,
   padding: '24px',
   marginBottom: 16,
@@ -934,7 +934,7 @@ const walletPanelHead: CSSProperties = {
 const walletPanelTitle: CSSProperties = {
   fontSize: 17,
   fontWeight: 800,
-  color: '#fff',
+  color: 'var(--heading)',
 };
 
 const walletEvmBadge: CSSProperties = {
@@ -942,8 +942,8 @@ const walletEvmBadge: CSSProperties = {
   alignItems: 'center',
   padding: '3px 9px',
   borderRadius: 999,
-  border: `1px solid ${UC_ACCENT}44`,
-  background: `${UC_ACCENT}18`,
+  border: `1px solid color-mix(in srgb, ${UC_ACCENT} 27%, transparent)`,
+  background: `color-mix(in srgb, ${UC_ACCENT} 9%, transparent)`,
   color: UC_ACCENT,
   fontSize: 11,
   fontWeight: 800,
@@ -959,7 +959,7 @@ const walletUnauth: CSSProperties = {
 const walletUnauthText: CSSProperties = {
   margin: 0,
   fontSize: 14,
-  color: 'rgba(255,255,255,0.55)',
+  color: 'rgba(var(--ink),0.55)',
   lineHeight: 1.6,
 };
 
@@ -970,14 +970,14 @@ const addrRow: CSSProperties = {
   marginBottom: 16,
   padding: '14px 16px',
   borderRadius: 12,
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  background: 'rgba(var(--ink),0.03)',
+  border: '1px solid rgba(var(--ink),0.07)',
 };
 
 const addrLabel: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.35)',
+  color: 'rgba(var(--ink),0.35)',
   letterSpacing: '0.06em',
   textTransform: 'uppercase',
 };
@@ -985,7 +985,7 @@ const addrLabel: CSSProperties = {
 const addrValue: CSSProperties = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
   fontSize: 13,
-  color: 'rgba(255,255,255,0.80)',
+  color: 'rgba(var(--ink),0.80)',
   wordBreak: 'break-all',
 };
 
@@ -1005,8 +1005,8 @@ const balGrid: CSSProperties = {
 };
 
 const balCard: CSSProperties = {
-  background: 'rgba(255,255,255,0.03)',
-  border: '1px solid rgba(255,255,255,0.07)',
+  background: 'rgba(var(--ink),0.03)',
+  border: '1px solid rgba(var(--ink),0.07)',
   borderRadius: 12,
   padding: '14px 16px',
 };
@@ -1014,7 +1014,7 @@ const balCard: CSSProperties = {
 const balLabel: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.38)',
+  color: 'rgba(var(--ink),0.38)',
   letterSpacing: '0.05em',
   textTransform: 'uppercase',
   marginBottom: 6,
@@ -1023,14 +1023,14 @@ const balLabel: CSSProperties = {
 const balValue: CSSProperties = {
   fontSize: 18,
   fontWeight: 700,
-  color: '#fff',
+  color: 'var(--heading)',
   letterSpacing: '-0.01em',
 };
 
 const balUnit: CSSProperties = {
   fontSize: 13,
   fontWeight: 500,
-  color: 'rgba(255,255,255,0.45)',
+  color: 'rgba(var(--ink),0.45)',
 };
 
 const actionRow: CSSProperties = {
@@ -1057,7 +1057,7 @@ const wtmDivider: CSSProperties = {
 const wtmDividerLine: CSSProperties = {
   flex: 1,
   height: 1,
-  background: 'rgba(255,255,255,0.06)',
+  background: 'rgba(var(--ink),0.06)',
 };
 
 const wtmDividerLabel: CSSProperties = {
@@ -1065,14 +1065,14 @@ const wtmDividerLabel: CSSProperties = {
   fontWeight: 700,
   letterSpacing: '0.11em',
   textTransform: 'uppercase',
-  color: 'rgba(255,255,255,0.28)',
+  color: 'rgba(var(--ink),0.28)',
   flexShrink: 0,
 };
 
 const wtmIntro: CSSProperties = {
   margin: '0 0 28px',
   fontSize: 15,
-  color: 'rgba(255,255,255,0.52)',
+  color: 'rgba(var(--ink),0.52)',
   lineHeight: 1.6,
   maxWidth: 560,
 };
@@ -1090,9 +1090,9 @@ const wtmTabBase: CSSProperties = {
   gap: 7,
   padding: '8px 14px',
   borderRadius: 10,
-  border: '1px solid rgba(255,255,255,0.08)',
-  background: 'rgba(255,255,255,0.03)',
-  color: 'rgba(255,255,255,0.55)',
+  border: '1px solid rgba(var(--ink),0.08)',
+  background: 'rgba(var(--ink),0.03)',
+  color: 'rgba(var(--ink),0.55)',
   fontSize: 13,
   fontWeight: 600,
   cursor: 'pointer',
@@ -1100,9 +1100,9 @@ const wtmTabBase: CSSProperties = {
 };
 
 const wtmTabActive: CSSProperties = {
-  background: `${UC_ACCENT}18`,
-  borderColor: `${UC_ACCENT}44`,
-  color: '#fff',
+  background: `color-mix(in srgb, ${UC_ACCENT} 9%, transparent)`,
+  borderColor: `color-mix(in srgb, ${UC_ACCENT} 27%, transparent)`,
+  color: 'var(--heading)',
 };
 
 const wtmTabN: CSSProperties = {
@@ -1112,8 +1112,8 @@ const wtmTabN: CSSProperties = {
 };
 
 const wtmPanel: CSSProperties = {
-  background: 'rgba(255,255,255,0.032)',
-  border: '1px solid rgba(255,255,255,0.08)',
+  background: 'rgba(var(--ink),0.032)',
+  border: '1px solid rgba(var(--ink),0.08)',
   borderRadius: 16,
   padding: '24px',
 };
@@ -1121,20 +1121,20 @@ const wtmPanel: CSSProperties = {
 const wtmPanelHead: CSSProperties = {
   marginBottom: 20,
   paddingBottom: 18,
-  borderBottom: '1px solid rgba(255,255,255,0.07)',
+  borderBottom: '1px solid rgba(var(--ink),0.07)',
 };
 
 const wtmPanelTitle: CSSProperties = {
   fontSize: 18,
   fontWeight: 800,
-  color: '#fff',
+  color: 'var(--heading)',
   letterSpacing: '-0.015em',
   marginBottom: 6,
 };
 
 const wtmPanelSub: CSSProperties = {
   fontSize: 14,
-  color: 'rgba(255,255,255,0.52)',
+  color: 'rgba(var(--ink),0.52)',
   lineHeight: 1.55,
 };
 
@@ -1159,7 +1159,7 @@ const wtmArrow: CSSProperties = {
 
 const wtmListText: CSSProperties = {
   fontSize: 14,
-  color: 'rgba(255,255,255,0.68)',
+  color: 'rgba(var(--ink),0.68)',
   lineHeight: 1.6,
 };
 
@@ -1170,21 +1170,21 @@ const whyGrid2: CSSProperties = {
 };
 
 const whyCard: CSSProperties = {
-  border: '1px solid rgba(255,255,255,0.07)',
+  border: '1px solid rgba(var(--ink),0.07)',
   borderRadius: 12,
   padding: 12,
-  background: 'rgba(255,255,255,0.03)',
+  background: 'rgba(var(--ink),0.03)',
 };
 
 const whyCardTitle: CSSProperties = {
   fontWeight: 800,
   marginBottom: 8,
-  color: '#fff',
+  color: 'var(--heading)',
   fontSize: 14,
 };
 
 const whyText: CSSProperties = {
-  color: 'rgba(255,255,255,0.62)',
+  color: 'rgba(var(--ink),0.62)',
   lineHeight: 1.55,
   fontSize: 13,
 };
@@ -1192,7 +1192,7 @@ const whyText: CSSProperties = {
 const whyList: CSSProperties = {
   margin: 0,
   paddingLeft: 18,
-  color: 'rgba(255,255,255,0.62)',
+  color: 'rgba(var(--ink),0.62)',
   lineHeight: 1.65,
   fontSize: 13,
 };
@@ -1200,9 +1200,9 @@ const whyList: CSSProperties = {
 const whyCode: CSSProperties = {
   fontFamily: "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, 'Courier New', monospace",
   fontSize: 11,
-  background: 'rgba(255,255,255,0.08)',
-  border: '1px solid rgba(255,255,255,0.10)',
-  color: 'rgba(255,255,255,0.88)',
+  background: 'rgba(var(--ink),0.08)',
+  border: '1px solid rgba(var(--ink),0.10)',
+  color: 'rgba(var(--ink),0.88)',
   padding: '1px 6px',
   borderRadius: 6,
 };
@@ -1218,20 +1218,20 @@ const pill: CSSProperties = {
   display: 'inline-flex',
   padding: '4px 10px',
   borderRadius: 999,
-  border: '1px solid rgba(255,255,255,0.10)',
-  background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(var(--ink),0.10)',
+  background: 'rgba(var(--ink),0.05)',
   fontSize: 12,
   fontWeight: 700,
-  color: 'rgba(255,255,255,0.60)',
+  color: 'rgba(var(--ink),0.60)',
 };
 
 const bannerNote: CSSProperties = {
   marginTop: 10,
   padding: 12,
   borderRadius: 12,
-  border: `1px solid ${UC_ACCENT}33`,
-  background: `${UC_ACCENT}0d`,
-  color: 'rgba(255,255,255,0.72)',
+  border: `1px solid color-mix(in srgb, ${UC_ACCENT} 20%, transparent)`,
+  background: `color-mix(in srgb, ${UC_ACCENT} 5%, transparent)`,
+  color: 'rgba(var(--ink),0.72)',
   lineHeight: 1.5,
   fontSize: 13,
 };
@@ -1240,19 +1240,19 @@ const nextStep: CSSProperties = {
   marginTop: 14,
   padding: '16px 18px',
   borderRadius: 12,
-  border: `1px solid ${UC_ACCENT}33`,
-  background: `${UC_ACCENT}0d`,
+  border: `1px solid color-mix(in srgb, ${UC_ACCENT} 20%, transparent)`,
+  background: `color-mix(in srgb, ${UC_ACCENT} 5%, transparent)`,
 };
 
 const nextStepTitle: CSSProperties = {
   fontWeight: 800,
   marginBottom: 6,
-  color: '#fff',
+  color: 'var(--heading)',
   fontSize: 14,
 };
 
 const nextStepBody: CSSProperties = {
-  color: 'rgba(255,255,255,0.65)',
+  color: 'rgba(var(--ink),0.65)',
   lineHeight: 1.6,
   fontSize: 14,
 };

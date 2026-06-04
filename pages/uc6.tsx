@@ -2117,18 +2117,18 @@ export default function Uc6Page() {
     <>
       <NavBar active={"uc6" as never} />
       <style>{`
-        body { background: #07080f !important; color: #e8e8f0 !important; }
+        body { background: var(--bg) !important; color: var(--text) !important; }
         * { box-sizing: border-box; }
         input, select, textarea {
-          background: rgba(255,255,255,0.06) !important;
-          color: #e8e8f0 !important;
-          border: 1px solid rgba(255,255,255,0.15) !important;
+          background: rgba(var(--ink),0.06) !important;
+          color: var(--text) !important;
+          border: 1px solid rgba(var(--ink),0.15) !important;
           border-radius: 6px;
           padding: 6px 10px;
           font-size: 13px;
           outline: none;
         }
-        input:focus, select:focus { border-color: #06b6d4 !important; }
+        input:focus, select:focus { border-color: var(--a-06b6d4) !important; }
         details > summary { list-style: none; }
         details > summary::-webkit-details-marker { display: none; }
         @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
@@ -2136,15 +2136,15 @@ export default function Uc6Page() {
       `}</style>
 
       {/* ZONE 1: Hero Strip */}
-      <div style={{ position:"sticky", top:0, zIndex:100, background:"#07080f", borderBottom:"1px solid rgba(255,255,255,0.08)", padding:"10px 20px", display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
+      <div style={{ position:"sticky", top:0, zIndex:100, background:"var(--bg)", borderBottom:"1px solid rgba(var(--ink),0.08)", padding:"10px 20px", display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
         {/* Pulsing dot */}
-        <span className="uc6-pulse" style={{ width:10, height:10, borderRadius:"50%", background: status?.killSwitch ? "#ef4444" : (status?.tradingEnabled ? "#22c55e" : "#f59e0b"), display:"inline-block", flexShrink:0 }} />
+        <span className="uc6-pulse" style={{ width:10, height:10, borderRadius:"50%", background: status?.killSwitch ? "var(--a-ef4444)" : (status?.tradingEnabled ? "var(--a-22c55e)" : "var(--a-f59e0b)"), display:"inline-block", flexShrink:0 }} />
 
         {/* Strategy mode */}
         <span style={{ ...strategyModePillStyle(strategyMode) }}>{strategyMode}</span>
 
         {/* Spot price */}
-        <span style={{ fontFamily:"monospace", fontSize:18, fontWeight:700, color:"#e8e8f0" }}>
+        <span style={{ fontFamily:"monospace", fontSize:18, fontWeight:700, color:"var(--text)" }}>
           {fmtSpotPrice(status?.market?.spotPrice?.usdcPerWeth)}
           <span style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginLeft:4 }}>{activePairLabel}</span>
         </span>
@@ -2154,20 +2154,20 @@ export default function Uc6Page() {
 
         {/* Range pill */}
         {hasActiveLpPosition && (
-          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background: inRange ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)", color: inRange ? "#22c55e" : "#ef4444", border:`1px solid ${inRange ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}` }}>
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background: inRange ? "rgba(34,197,94,0.15)" : "rgba(239,68,68,0.15)", color: inRange ? "var(--a-22c55e)" : "var(--a-ef4444)", border:`1px solid ${inRange ? "rgba(34,197,94,0.3)" : "rgba(239,68,68,0.3)"}` }}>
             {inRange ? "IN RANGE" : "OUT OF RANGE"}
           </span>
         )}
 
         {/* Cooldown */}
         {cooldownRemaining > 0 && (
-          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background:"rgba(245,158,11,0.15)", color:"#f59e0b", border:"1px solid rgba(245,158,11,0.3)" }}>
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:700, background:"rgba(245,158,11,0.15)", color:"var(--a-f59e0b)", border:"1px solid rgba(245,158,11,0.3)" }}>
             COOLDOWN {fmtDurationCompact(cooldownRemaining)}
           </span>
         )}
 
         {/* Alpha live */}
-        <span style={{ fontFamily:"monospace", fontSize:13, color: alphaLiveUsd >= 0 ? "#22c55e" : "#ef4444", fontWeight:600 }}>
+        <span style={{ fontFamily:"monospace", fontSize:13, color: alphaLiveUsd >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)", fontWeight:600 }}>
           α {fmtSignedUsd(alphaLiveUsd)}
         </span>
 
@@ -2177,26 +2177,26 @@ export default function Uc6Page() {
             {isOwner ? "OWNER " : ""}{shortAddr(walletAddress)}
           </span>
         ) : (
-          <button onClick={connectWallet} disabled={!hasMetaMask || busy !== ""} style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontSize:12, cursor:"pointer" }}>
+          <button onClick={connectWallet} disabled={!hasMetaMask || busy !== ""} style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(6,182,212,0.4)", color:"var(--a-06b6d4)", fontSize:12, cursor:"pointer" }}>
             Connect Wallet
           </button>
         )}
 
         {/* Kill switch */}
         {status?.killSwitch && (
-          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:800, background:"rgba(239,68,68,0.2)", color:"#ef4444", border:"1px solid rgba(239,68,68,0.4)" }}>
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:12, fontWeight:800, background:"rgba(239,68,68,0.2)", color:"var(--a-ef4444)", border:"1px solid rgba(239,68,68,0.4)" }}>
             KILL SWITCH ACTIVE
           </span>
         )}
 
         {/* Emergency stop */}
         {isOwner && !status?.killSwitch && (
-          <button onClick={emergencyStop} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+          <button onClick={emergencyStop} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"var(--a-ef4444)", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             STOP
           </button>
         )}
         {isOwner && status?.killSwitch && (
-          <button onClick={enableTrading} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(34,197,94,0.15)", border:"1px solid rgba(34,197,94,0.4)", color:"#22c55e", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+          <button onClick={enableTrading} disabled={busy !== "" || !draft} style={{ padding:"4px 14px", borderRadius:6, background:"rgba(34,197,94,0.15)", border:"1px solid rgba(34,197,94,0.4)", color:"var(--a-22c55e)", fontSize:12, fontWeight:700, cursor:"pointer" }}>
             ENABLE
           </button>
         )}
@@ -2204,12 +2204,12 @@ export default function Uc6Page() {
 
       <main style={{ maxWidth:1400, margin:"0 auto", padding:"20px 16px 80px", display:"grid", gap:16 }}>
         {/* Notices */}
-        {notice && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.3)", color:"#22c55e", fontSize:14 }}>{notice}</div>}
-        {error && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>{error}</div>}
-        {statusError && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444", fontSize:13 }}>Status: {statusError}</div>}
-        {hasMultipleActive && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#ef4444", fontSize:14 }}>Multiple active LP positions detected ({activeLpCount}). Bot is blocked.</div>}
+        {notice && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(34,197,94,0.1)", border:"1px solid rgba(34,197,94,0.3)", color:"var(--a-22c55e)", fontSize:14 }}>{notice}</div>}
+        {error && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"var(--a-ef4444)", fontSize:14 }}>{error}</div>}
+        {statusError && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"var(--a-ef4444)", fontSize:13 }}>Status: {statusError}</div>}
+        {hasMultipleActive && <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"var(--a-ef4444)", fontSize:14 }}>Multiple active LP positions detected ({activeLpCount}). Bot is blocked.</div>}
         {status?.lastError && (
-          <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"#ef4444", fontSize:13, wordBreak:"break-word" }}>
+          <div style={{ padding:"10px 16px", borderRadius:8, background:"rgba(239,68,68,0.08)", border:"1px solid rgba(239,68,68,0.2)", color:"var(--a-ef4444)", fontSize:13, wordBreak:"break-word" }}>
             <strong>Last Error:</strong> {typeof status.lastError === "string" ? status.lastError : (status.ops?.lastError as { message?: string })?.message || JSON.stringify(status.lastError)}
           </div>
         )}
@@ -2306,17 +2306,17 @@ export default function Uc6Page() {
                     value={fmtUsd(status.emissions.price?.aeroUsd ?? 0)}
                   />
                   {status.emissions.gaugeAlive === false && (
-                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "#ef4444", fontSize: 12 }}>
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.3)", color: "var(--a-ef4444)", fontSize: 12 }}>
                       Gauge is not alive
                     </div>
                   )}
                   {status.emissions.autoStakeBlockedReason && !status.emissions.staked && (
-                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "#f59e0b", fontSize: 12 }}>
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "var(--a-f59e0b)", fontSize: 12 }}>
                       Auto-stake blocked: {status.emissions.autoStakeBlockedReason}
                     </div>
                   )}
                   {status.emissions.rewardToken?.symbol === "UNKNOWN" && (
-                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "#f59e0b", fontSize: 12 }}>
+                    <div style={{ padding: "6px 10px", borderRadius: 6, background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)", color: "var(--a-f59e0b)", fontSize: 12 }}>
                       Reward token is not AERO
                     </div>
                   )}
@@ -2334,7 +2334,7 @@ export default function Uc6Page() {
                           borderRadius: 6,
                           border: "1px solid rgba(6,182,212,0.4)",
                           background: "rgba(6,182,212,0.1)",
-                          color: "#06b6d4",
+                          color: "var(--a-06b6d4)",
                           fontSize: 12,
                           cursor: !!busy || status.emissions.staked || status.emissions.gaugeAlive === false ? "not-allowed" : "pointer",
                           opacity: !!busy || status.emissions.staked || status.emissions.gaugeAlive === false ? 0.4 : 1,
@@ -2350,7 +2350,7 @@ export default function Uc6Page() {
                           borderRadius: 6,
                           border: "1px solid rgba(245,158,11,0.4)",
                           background: "rgba(245,158,11,0.1)",
-                          color: "#f59e0b",
+                          color: "var(--a-f59e0b)",
                           fontSize: 12,
                           cursor: !!busy || !status.emissions.staked ? "not-allowed" : "pointer",
                           opacity: !!busy || !status.emissions.staked ? 0.4 : 1,
@@ -2366,7 +2366,7 @@ export default function Uc6Page() {
                           borderRadius: 6,
                           border: "1px solid rgba(34,197,94,0.4)",
                           background: "rgba(34,197,94,0.1)",
-                          color: "#22c55e",
+                          color: "var(--a-22c55e)",
                           fontSize: 12,
                           cursor: !!busy || !status.emissions.staked || (status.emissions.claimable?.aero ?? 0) <= 0 ? "not-allowed" : "pointer",
                           opacity: !!busy || !status.emissions.staked || (status.emissions.claimable?.aero ?? 0) <= 0 ? 0.4 : 1,
@@ -2580,14 +2580,14 @@ export default function Uc6Page() {
 
         {/* ZONE 7: Command Center */}
         {isOwner && draft && (
-          <div style={{ borderTop:"2px solid #06b6d4", paddingTop:16 }}>
+          <div style={{ borderTop:"2px solid var(--a-06b6d4)", paddingTop:16 }}>
             <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:16 }}>
-              <span style={{ color:"#06b6d4", fontWeight:800, fontSize:16, letterSpacing:1 }}>COMMAND CENTER</span>
+              <span style={{ color:"var(--a-06b6d4)", fontWeight:800, fontSize:16, letterSpacing:1 }}>COMMAND CENTER</span>
               <span style={{ color:"rgba(232,232,240,0.45)", fontSize:12, fontFamily:"monospace" }}>
                 {shortAddr(walletAddress)}
               </span>
               {!isBase && (
-                <button onClick={switchToBase} style={{ ...darkBtnStyle, borderColor:"rgba(245,158,11,0.4)", color:"#f59e0b" }}>Switch to Base</button>
+                <button onClick={switchToBase} style={{ ...darkBtnStyle, borderColor:"rgba(245,158,11,0.4)", color:"var(--a-f59e0b)" }}>Switch to Base</button>
               )}
             </div>
 
@@ -2712,14 +2712,14 @@ export default function Uc6Page() {
                 </div>
 
                 <div style={{ display:"flex", gap:10, flexWrap:"wrap", marginTop:8 }}>
-                  <button onClick={saveSettings} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.4)", color:"#06b6d4", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
+                  <button onClick={saveSettings} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.4)", color:"var(--a-06b6d4)", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                     {busy === "save" ? "Saving..." : "Save All Settings"}
                   </button>
-                  <button onClick={forceRebalance} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(245,158,11,0.15)", border:"1px solid rgba(245,158,11,0.4)", color:"#f59e0b", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
+                  <button onClick={forceRebalance} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(245,158,11,0.15)", border:"1px solid rgba(245,158,11,0.4)", color:"var(--a-f59e0b)", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                     Force Rebalance
                   </button>
                   {hasActiveLpPosition && (
-                    <button onClick={liquidateAndPause} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"#ef4444", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
+                    <button onClick={liquidateAndPause} disabled={busy !== ""} style={{ padding:"8px 20px", borderRadius:6, background:"rgba(239,68,68,0.15)", border:"1px solid rgba(239,68,68,0.4)", color:"var(--a-ef4444)", fontWeight:700, cursor:"pointer", fontSize:14, ...(isMobile ? { width:"100%" } : {}) }}>
                       Liquidate LP + Pause
                     </button>
                   )}
@@ -2745,23 +2745,23 @@ export default function Uc6Page() {
 
 // ─── module-level style constants ────────────────────────────────────────────
 
-const darkBtnStyle: CSSProperties = { padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" };
-const cmdSectionStyle: CSSProperties = { cursor:"pointer", color:"#06b6d4", fontWeight:700, fontSize:13, letterSpacing:1, padding:"8px 0 8px 4px", display:"block", borderBottom:"1px solid rgba(6,182,212,0.2)" };
+const darkBtnStyle: CSSProperties = { padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(var(--ink),0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" };
+const cmdSectionStyle: CSSProperties = { cursor:"pointer", color:"var(--a-06b6d4)", fontWeight:700, fontSize:13, letterSpacing:1, padding:"8px 0 8px 4px", display:"block", borderBottom:"1px solid rgba(6,182,212,0.2)" };
 
 function strategyModePillStyle(mode: string): CSSProperties {
   const base: CSSProperties = { padding:"3px 12px", borderRadius:20, fontSize:12, fontWeight:800, letterSpacing:0.5 };
-  if (mode === "LP_ACTIVE") return { ...base, background:"rgba(6,182,212,0.2)", color:"#06b6d4", border:"1px solid rgba(6,182,212,0.4)" };
-  if (mode === "HOLD_WETH") return { ...base, background:"rgba(245,158,11,0.2)", color:"#f59e0b", border:"1px solid rgba(245,158,11,0.4)" };
-  if (mode === "HOLD_USDC") return { ...base, background:"rgba(59,130,246,0.2)", color:"#60a5fa", border:"1px solid rgba(59,130,246,0.4)" };
-  if (mode === "HOLD_50_50") return { ...base, background:"rgba(168,85,247,0.2)", color:"#c084fc", border:"1px solid rgba(168,85,247,0.4)" };
-  return { ...base, background:"rgba(255,255,255,0.08)", color:"rgba(232,232,240,0.6)", border:"1px solid rgba(255,255,255,0.15)" };
+  if (mode === "LP_ACTIVE") return { ...base, background:"rgba(6,182,212,0.2)", color:"var(--a-06b6d4)", border:"1px solid rgba(6,182,212,0.4)" };
+  if (mode === "HOLD_WETH") return { ...base, background:"rgba(245,158,11,0.2)", color:"var(--a-f59e0b)", border:"1px solid rgba(245,158,11,0.4)" };
+  if (mode === "HOLD_USDC") return { ...base, background:"rgba(59,130,246,0.2)", color:"var(--a-60a5fa)", border:"1px solid rgba(59,130,246,0.4)" };
+  if (mode === "HOLD_50_50") return { ...base, background:"rgba(168,85,247,0.2)", color:"var(--a-c084fc)", border:"1px solid rgba(168,85,247,0.4)" };
+  return { ...base, background:"rgba(var(--ink),0.08)", color:"rgba(232,232,240,0.6)", border:"1px solid rgba(var(--ink),0.15)" };
 }
 
 // ─── sub-components ───────────────────────────────────────────────────────────
 
 function Uc6Card({ title, children, accent }: { title: string; children: ReactNode; accent?: boolean }) {
   return (
-    <div style={{ background:"rgba(255,255,255,0.03)", border:"1px solid rgba(255,255,255,0.08)", borderRadius:12, padding:16, ...(accent ? { borderTop:"2px solid #06b6d4" } : {}) }}>
+    <div style={{ background:"rgba(var(--ink),0.03)", border:"1px solid rgba(var(--ink),0.08)", borderRadius:12, padding:16, ...(accent ? { borderTop:"2px solid var(--a-06b6d4)" } : {}) }}>
       <div style={{ fontSize:11, fontWeight:700, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:1.2, marginBottom:12 }}>{title}</div>
       {children}
     </div>
@@ -2772,7 +2772,7 @@ function Uc6Metric({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div style={{ display:"grid", gap:2 }}>
       <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:0.8 }}>{label}</div>
-      <div style={{ fontSize:13, color:"#e8e8f0", fontFamily: typeof value === "string" && (value.startsWith("$") || value.includes(".")) ? "monospace" : "inherit" }}>{value}</div>
+      <div style={{ fontSize:13, color:"var(--text)", fontFamily: typeof value === "string" && (value.startsWith("$") || value.includes(".")) ? "monospace" : "inherit" }}>{value}</div>
     </div>
   );
 }
@@ -2780,9 +2780,9 @@ function Uc6Metric({ label, value }: { label: string; value: ReactNode }) {
 function Pill({ label, tone }: { label: string; tone: "good" | "warn" | "bad" | "muted" }) {
   const s: CSSProperties = {
     display:"inline-block", padding:"2px 8px", borderRadius:20, fontSize:11, fontWeight:700, letterSpacing:0.5,
-    background: tone==="good" ? "rgba(34,197,94,0.15)" : tone==="warn" ? "rgba(245,158,11,0.15)" : tone==="bad" ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.07)",
-    color: tone==="good" ? "#22c55e" : tone==="warn" ? "#f59e0b" : tone==="bad" ? "#ef4444" : "rgba(232,232,240,0.45)",
-    border: `1px solid ${tone==="good" ? "rgba(34,197,94,0.3)" : tone==="warn" ? "rgba(245,158,11,0.3)" : tone==="bad" ? "rgba(239,68,68,0.3)" : "rgba(255,255,255,0.1)"}`,
+    background: tone==="good" ? "rgba(34,197,94,0.15)" : tone==="warn" ? "rgba(245,158,11,0.15)" : tone==="bad" ? "rgba(239,68,68,0.15)" : "rgba(var(--ink),0.07)",
+    color: tone==="good" ? "var(--a-22c55e)" : tone==="warn" ? "var(--a-f59e0b)" : tone==="bad" ? "var(--a-ef4444)" : "rgba(232,232,240,0.45)",
+    border: `1px solid ${tone==="good" ? "rgba(34,197,94,0.3)" : tone==="warn" ? "rgba(245,158,11,0.3)" : tone==="bad" ? "rgba(239,68,68,0.3)" : "rgba(var(--ink),0.1)"}`,
   };
   return <span style={s}>{label}</span>;
 }
@@ -2794,7 +2794,7 @@ function DarkTable({ headers, rows, onRowClick }: { headers: string[]; rows: Arr
         <thead>
           <tr>
             {headers.map((h, i) => (
-              <th key={i} style={{ padding:"6px 8px", textAlign:"left", fontSize:10, color:"rgba(232,232,240,0.4)", fontWeight:600, letterSpacing:0.8, textTransform:"uppercase", borderBottom:"1px solid rgba(255,255,255,0.08)" }}>{h}</th>
+              <th key={i} style={{ padding:"6px 8px", textAlign:"left", fontSize:10, color:"rgba(232,232,240,0.4)", fontWeight:600, letterSpacing:0.8, textTransform:"uppercase", borderBottom:"1px solid rgba(var(--ink),0.08)" }}>{h}</th>
             ))}
           </tr>
         </thead>
@@ -2802,8 +2802,8 @@ function DarkTable({ headers, rows, onRowClick }: { headers: string[]; rows: Arr
           {rows.length === 0 ? (
             <tr><td colSpan={headers.length} style={{ padding:"16px 8px", color:"rgba(232,232,240,0.3)", textAlign:"center" }}>No data</td></tr>
           ) : rows.map((row, i) => (
-            <tr key={i} onClick={() => onRowClick?.(i)} style={{ cursor: onRowClick ? "pointer" : "default", borderBottom:"1px solid rgba(255,255,255,0.04)" }}
-              onMouseEnter={(e) => { if (onRowClick) (e.currentTarget as HTMLElement).style.background = "rgba(255,255,255,0.03)"; }}
+            <tr key={i} onClick={() => onRowClick?.(i)} style={{ cursor: onRowClick ? "pointer" : "default", borderBottom:"1px solid rgba(var(--ink),0.04)" }}
+              onMouseEnter={(e) => { if (onRowClick) (e.currentTarget as HTMLElement).style.background = "rgba(var(--ink),0.03)"; }}
               onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "transparent"; }}
             >
               {row.map((cell, j) => (
@@ -2817,7 +2817,7 @@ function DarkTable({ headers, rows, onRowClick }: { headers: string[]; rows: Arr
   );
 }
 
-const darkInputStyle: CSSProperties = { background:"rgba(255,255,255,0.06)", border:"1px solid rgba(255,255,255,0.12)", borderRadius:6, padding:"4px 8px", color:"#e8e8f0", fontSize:12, width:"100%", boxSizing:"border-box" };
+const darkInputStyle: CSSProperties = { background:"rgba(var(--ink),0.06)", border:"1px solid rgba(var(--ink),0.12)", borderRadius:6, padding:"4px 8px", color:"var(--text)", fontSize:12, width:"100%", boxSizing:"border-box" };
 const darkLabelStyle: CSSProperties = { display:"grid", gap:4, fontSize:12 };
 const darkLabelSpanStyle: CSSProperties = { fontSize:10, color:"rgba(232,232,240,0.45)", textTransform:"uppercase", letterSpacing:0, lineHeight:1.3, wordBreak:"break-word", overflowWrap:"break-word" };
 
@@ -2925,7 +2925,7 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
   })();
 
   const trackColor = inRange ? "rgba(6,182,212,0.15)" : "rgba(239,68,68,0.1)";
-  const dotColor = inRange ? "#06b6d4" : "#ef4444";
+  const dotColor = inRange ? "var(--a-06b6d4)" : "var(--a-ef4444)";
   const fillColor = inRange ? "rgba(6,182,212,0.25)" : "rgba(239,68,68,0.2)";
 
   return (
@@ -2950,11 +2950,11 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
           <div title={`Mint point${centerPrice ? ` $${centerPrice.toFixed(0)}` : ""}`} style={{ position:"absolute", top:2, bottom:2, left:`${centerPct}%`, transform:"translateX(-50%)", width:2, background:"rgba(232,232,240,0.3)", borderRadius:1, zIndex:1 }} />
         )}
         {/* Price dot */}
-        <div style={{ position:"absolute", top:"50%", left:`${priceDotPct}%`, transform:"translate(-50%, -50%)", width:18, height:18, borderRadius:"50%", background:dotColor, border:"2px solid #07080f", boxShadow:`0 0 10px ${dotColor}`, zIndex:2 }} />
+        <div style={{ position:"absolute", top:"50%", left:`${priceDotPct}%`, transform:"translate(-50%, -50%)", width:18, height:18, borderRadius:"50%", background:dotColor, border:"2px solid var(--bg)", boxShadow:`0 0 10px ${dotColor}`, zIndex:2 }} />
       </div>
 
       {/* Spot price label */}
-      <div style={{ textAlign:"center", fontSize:14, fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>
+      <div style={{ textAlign:"center", fontSize:14, fontFamily:"monospace", fontWeight:700, color:"var(--text)" }}>
         {spotPrice > 0 ? `$${spotPrice.toFixed(2)}` : "\u2014"}
         <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginLeft:4 }}>now</span>
       </div>
@@ -2986,8 +2986,8 @@ function BandVisualizer({ hasPosition, inRange, tickLower, tickUpper, currentTic
             <span>Time In Range</span>
             <span style={{ fontFamily:"monospace", fontWeight:600 }}>{timeInRangePct.toFixed(1)}%</span>
           </div>
-          <div style={{ height:6, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
-            <div style={{ height:"100%", width:`${Math.min(100, timeInRangePct)}%`, borderRadius:3, background: timeInRangePct >= 80 ? "#22c55e" : timeInRangePct >= 50 ? "#06b6d4" : "#f59e0b" }} />
+          <div style={{ height:6, borderRadius:3, background:"rgba(var(--ink),0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.min(100, timeInRangePct)}%`, borderRadius:3, background: timeInRangePct >= 80 ? "var(--a-22c55e)" : timeInRangePct >= 50 ? "var(--a-06b6d4)" : "var(--a-f59e0b)" }} />
           </div>
         </div>
       )}
@@ -3005,21 +3005,21 @@ function LiquidityComposition({ lpUsdcSideUsd, lpWethSideUsd, lpValueUsd, lpSpli
         <div style={{ flex: lpSplitWethPct, background:"rgba(245,158,11,0.5)", minWidth: lpSplitWethPct > 0 ? 2 : 0 }} />
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"rgba(232,232,240,0.7)" }}>
-        <span>USDC <span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(lpUsdcSideUsd)}</span></span>
-        <span>WETH <span style={{ fontFamily:"monospace", color:"#f59e0b" }}>{fmtUsd(lpWethSideUsd)}</span></span>
+        <span>USDC <span style={{ fontFamily:"monospace", color:"var(--a-06b6d4)" }}>{fmtUsd(lpUsdcSideUsd)}</span></span>
+        <span>WETH <span style={{ fontFamily:"monospace", color:"var(--a-f59e0b)" }}>{fmtUsd(lpWethSideUsd)}</span></span>
       </div>
-      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, borderTop:"1px solid rgba(var(--ink),0.06)", paddingTop:8 }}>
         <span style={{ color:"rgba(232,232,240,0.6)" }}>LP Total</span>
-        <span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(lpValueUsd)}</span>
+        <span style={{ fontFamily:"monospace", fontWeight:700, color:"var(--text)" }}>{fmtUsd(lpValueUsd)}</span>
       </div>
       <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
         <span style={{ color:"rgba(232,232,240,0.5)" }}>Collectable{collectableNowEstimated ? " (est)" : ""}</span>
-        <span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(collectableNowUsd)}</span>
+        <span style={{ fontFamily:"monospace", color:"var(--a-22c55e)" }}>{fmtUsd(collectableNowUsd)}</span>
       </div>
       {pendingCompoundUsd > 0 && (
         <div style={{ display:"flex", justifyContent:"space-between", fontSize:12 }}>
           <span style={{ color:"rgba(232,232,240,0.5)" }}>Pending compound</span>
-          <span style={{ fontFamily:"monospace", color:"#e8e8f0" }}>{fmtUsd(pendingCompoundUsd)}</span>
+          <span style={{ fontFamily:"monospace", color:"var(--text)" }}>{fmtUsd(pendingCompoundUsd)}</span>
         </div>
       )}
       {tokenId && <div style={{ fontSize:11, color:"rgba(6,182,212,0.7)", fontFamily:"monospace" }}>NFT #{tokenId}</div>}
@@ -3046,7 +3046,7 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
   const barRow = (lbl: string, val: number, color: string) => (
     <div style={{ display:"grid", gridTemplateColumns: fwIsMobile ? "80px 1fr 70px" : "120px 1fr 80px", gap:8, alignItems:"center" }}>
       <span style={{ fontSize:12, color:"rgba(232,232,240,0.6)" }}>{lbl}</span>
-      <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.05)" }}>
+      <div style={{ height:8, borderRadius:4, background:"rgba(var(--ink),0.05)" }}>
         <div style={{ height:"100%", width:`${(Math.abs(val)/maxVal)*100}%`, borderRadius:4, background:color, minWidth: Math.abs(val) > 0 ? 2 : 0 }} />
       </div>
       <span style={{ fontSize:12, fontFamily:"monospace", textAlign:"right", color }}>{val >= 0 ? fmtUsd(val) : `-${fmtUsd(Math.abs(val))}`}</span>
@@ -3056,19 +3056,19 @@ function FeeWaterfall({ status: st }: { status: Uc6Status | null }) {
     <div style={{ display:"grid", gap:12 }}>
       <div style={{ display:"flex", gap:4 }}>
         {(["TODAY","7D","30D","ALL"] as const).map((t) => (
-          <button key={t} onClick={() => setTab(t)} style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", background: tab===t ? "rgba(6,182,212,0.2)" : "transparent", border:`1px solid ${tab===t ? "rgba(6,182,212,0.4)" : "rgba(255,255,255,0.1)"}`, color: tab===t ? "#06b6d4" : "rgba(232,232,240,0.5)" }}>
+          <button key={t} onClick={() => setTab(t)} style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:600, cursor:"pointer", background: tab===t ? "rgba(6,182,212,0.2)" : "transparent", border:`1px solid ${tab===t ? "rgba(6,182,212,0.4)" : "rgba(var(--ink),0.1)"}`, color: tab===t ? "var(--a-06b6d4)" : "rgba(232,232,240,0.5)" }}>
             {t}
           </button>
         ))}
       </div>
       <div style={{ display:"grid", gap:8 }}>
-        {barRow("Fees earned", data.fees, "#06b6d4")}
-        {barRow("AERO rewards", data.rewards, "#22c55e")}
-        {barRow("Gas", data.gas, "#ef4444")}
-        {barRow("Swap costs", data.swap, "#ef4444")}
-        {barRow("Mint/burn", data.mintBurn, "#ef4444")}
-        <div style={{ height:1, background:"rgba(255,255,255,0.08)", margin:"4px 0" }} />
-        {barRow("Net", data.net, data.net >= 0 ? "#22c55e" : "#ef4444")}
+        {barRow("Fees earned", data.fees, "var(--a-06b6d4)")}
+        {barRow("AERO rewards", data.rewards, "var(--a-22c55e)")}
+        {barRow("Gas", data.gas, "var(--a-ef4444)")}
+        {barRow("Swap costs", data.swap, "var(--a-ef4444)")}
+        {barRow("Mint/burn", data.mintBurn, "var(--a-ef4444)")}
+        <div style={{ height:1, background:"rgba(var(--ink),0.08)", margin:"4px 0" }} />
+        {barRow("Net", data.net, data.net >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)")}
       </div>
     </div>
   );
@@ -3088,19 +3088,19 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
       : 0;
   const brkStyle: CSSProperties = { display:"flex", justifyContent:"space-between", fontSize:11, padding:"3px 0" };
   const brkLabel: CSSProperties = { color:"rgba(232,232,240,0.45)" };
-  const brkVal = (v: number, invert = false): CSSProperties => ({ fontFamily:"monospace", color: invert ? (v > 0 ? "#ef4444" : "#22c55e") : (v >= 0 ? "#22c55e" : "#ef4444") });
+  const brkVal = (v: number, invert = false): CSSProperties => ({ fontFamily:"monospace", color: invert ? (v > 0 ? "var(--a-ef4444)" : "var(--a-22c55e)") : (v >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)") });
   return (
     <div style={{ display:"grid", gap:12 }}>
       <div style={{ textAlign:"center" }}>
-        <div style={{ fontSize:28, fontFamily:"monospace", fontWeight:800, color: alphaLiveUsd >= 0 ? "#22c55e" : "#ef4444" }}>
+        <div style={{ fontSize:28, fontFamily:"monospace", fontWeight:800, color: alphaLiveUsd >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>
           {fmtSignedUsd(alphaLiveUsd)}
         </div>
         <div style={{ fontSize:11, color:"rgba(232,232,240,0.45)", marginTop:2 }}>alpha vs HODL (total)</div>
-        <div style={{ fontSize:14, fontFamily:"monospace", color: alphaTodayUsd >= 0 ? "#22c55e" : "#ef4444", marginTop:4 }}>
+        <div style={{ fontSize:14, fontFamily:"monospace", color: alphaTodayUsd >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)", marginTop:4 }}>
           {fmtSignedUsd(alphaTodayUsd)} today
         </div>
       </div>
-      <div style={{ borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+      <div style={{ borderTop:"1px solid rgba(var(--ink),0.06)", paddingTop:8 }}>
         <div style={brkStyle}><span style={brkLabel}>Fees</span><span style={brkVal(feesCollectedUsd)}>{fmtUsd(feesCollectedUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>AERO rewards</span><span style={brkVal(rewardsClaimedUsd)}>{fmtUsd(rewardsClaimedUsd)}</span></div>
         <div style={brkStyle}><span style={brkLabel}>Costs</span><span style={brkVal(totalCostsUsd, true)}>-{fmtUsd(totalCostsUsd)}</span></div>
@@ -3111,16 +3111,16 @@ function AlphaCard({ alphaLiveUsd, feesNetLiveUsd, divVsHodlLiveUsd, requiredFee
           <span>Required to beat HODL</span>
           <span style={{ fontFamily:"monospace" }}>{fmtUsd(requiredFeesToBeatHodlLiveUsd)}</span>
         </div>
-        <div style={{ height:8, borderRadius:4, background:"rgba(255,255,255,0.08)" }}>
-          <div style={{ height:"100%", width:`${Math.max(0, fillPct)}%`, borderRadius:4, background: beating ? "#22c55e" : "#f59e0b" }} />
+        <div style={{ height:8, borderRadius:4, background:"rgba(var(--ink),0.08)" }}>
+          <div style={{ height:"100%", width:`${Math.max(0, fillPct)}%`, borderRadius:4, background: beating ? "var(--a-22c55e)" : "var(--a-f59e0b)" }} />
         </div>
-        <div style={{ fontSize:11, color: beating ? "#22c55e" : "#f59e0b", marginTop:4, textAlign:"right" }}>
+        <div style={{ fontSize:11, color: beating ? "var(--a-22c55e)" : "var(--a-f59e0b)", marginTop:4, textAlign:"right" }}>
           {beating ? "BEATING HODL" : "BELOW HODL"}
         </div>
       </div>
-      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, borderTop:"1px solid rgba(255,255,255,0.06)", paddingTop:8 }}>
+      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, borderTop:"1px solid rgba(var(--ink),0.06)", paddingTop:8 }}>
         <span style={{ color:"rgba(232,232,240,0.6)" }}>HODL Gate</span>
-        <span style={{ color: hodlGateAllowed ? "#22c55e" : "#ef4444", fontWeight:700 }} title={hodlGateReason}>
+        <span style={{ color: hodlGateAllowed ? "var(--a-22c55e)" : "var(--a-ef4444)", fontWeight:700 }} title={hodlGateReason}>
           {hodlGateAllowed ? "ALLOWED" : "BLOCKED"}
         </span>
       </div>
@@ -3147,7 +3147,7 @@ function OpsGrid({ rebalancesToday, rebalances24h, lastRebalanceAtIso, churnRati
       <Uc6Metric label="Churn protect" value={churnProtectionEnabled ? "ON" : "OFF"} />
       <Uc6Metric label="Compound" value={compoundMode === "threshold_harvest" ? `harvest $${harvestThresholdUsd}` : "on_rebalance"} />
       <Uc6Metric label="Cooldown" value={cooldownRemaining > 0 ? fmtDurationCompact(cooldownRemaining) : "ready"} />
-      <Uc6Metric label="Close gate" value={<span style={{ color: hodlGateAllowed ? "#22c55e" : "#ef4444", fontWeight:700 }} title={hodlGateReason}>{hodlGateAllowed ? "ALLOWED" : "BLOCKED"}</span>} />
+      <Uc6Metric label="Close gate" value={<span style={{ color: hodlGateAllowed ? "var(--a-22c55e)" : "var(--a-ef4444)", fontWeight:700 }} title={hodlGateReason}>{hodlGateAllowed ? "ALLOWED" : "BLOCKED"}</span>} />
     </div>
   );
 }
@@ -3160,15 +3160,15 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
 
   const eventColor = (t?: string): string => {
     switch (t) {
-      case "harvest": case "claim": return "#22c55e";
-      case "recenter": case "reentry": return "#06b6d4";
-      case "topup": case "gas_topup": return "#8b5cf6";
-      case "stake": case "unstake": return "#3b82f6";
-      case "trend_escape": case "liquidate": return "#ef4444";
-      case "action": return "#a78bfa";
+      case "harvest": case "claim": return "var(--a-22c55e)";
+      case "recenter": case "reentry": return "var(--a-06b6d4)";
+      case "topup": case "gas_topup": return "var(--a-8b5cf6)";
+      case "stake": case "unstake": return "var(--a-3b82f6)";
+      case "trend_escape": case "liquidate": return "var(--a-ef4444)";
+      case "action": return "var(--a-a78bfa)";
       case "blocked": return "rgba(232,232,240,0.35)";
-      case "error": return "#ef4444";
-      default: return "#f59e0b";
+      case "error": return "var(--a-ef4444)";
+      default: return "var(--a-f59e0b)";
     }
   };
   const eventLabel = (type?: string, reason?: string): string => {
@@ -3248,7 +3248,7 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
               {txHash && (
                 <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noopener noreferrer"
                   style={{ color:"rgba(232,232,240,0.3)", fontSize:10, textDecoration:"none", whiteSpace:"nowrap" }}
-                  onMouseOver={e => (e.currentTarget.style.color = "#06b6d4")}
+                  onMouseOver={e => (e.currentTarget.style.color = "var(--a-06b6d4)")}
                   onMouseOut={e => (e.currentTarget.style.color = "rgba(232,232,240,0.3)")}>
                   tx
                 </a>
@@ -3263,7 +3263,7 @@ function EventFeed({ events: evs }: { events: Array<{ atIso?: string; type?: str
         );
       })}
       {totalPages > 1 && (
-        <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:8, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.06)", fontSize:12, color:"rgba(232,232,240,0.5)" }}>
+        <div style={{ display:"flex", gap:8, alignItems:"center", marginTop:8, paddingTop:8, borderTop:"1px solid rgba(var(--ink),0.06)", fontSize:12, color:"rgba(232,232,240,0.5)" }}>
           <button onClick={() => setPage(p => Math.max(0, p - 1))} disabled={page === 0} style={darkBtnStyle}>Prev</button>
           <span>{page + 1} / {totalPages}</span>
           <button onClick={() => setPage(p => Math.min(totalPages - 1, p + 1))} disabled={page >= totalPages - 1} style={darkBtnStyle}>Next</button>
@@ -3284,15 +3284,15 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
   const arcLen = Math.PI * arcR;
   const conf01 = (confidencePct ?? 0) / 100;
   const arcFilled = conf01 * arcLen;
-  const regimeColor = label === "mean_reverting" ? "#06b6d4" : label === "trending" ? "#f59e0b" : "rgba(255,255,255,0.2)";
+  const regimeColor = label === "mean_reverting" ? "var(--a-06b6d4)" : label === "trending" ? "var(--a-f59e0b)" : "rgba(var(--ink),0.2)";
   return (
     <div style={{ display:"grid", gap:12 }}>
       <div style={{ display:"flex", justifyContent:"center" }}>
         <svg viewBox="0 0 120 70" width={140} height={82}>
-          <path d="M10,65 A50,50 0 0,1 110,65" stroke="rgba(255,255,255,0.08)" fill="none" strokeWidth={9} strokeLinecap="round" />
+          <path d="M10,65 A50,50 0 0,1 110,65" stroke="rgba(var(--ink),0.08)" fill="none" strokeWidth={9} strokeLinecap="round" />
           <path d="M10,65 A50,50 0 0,1 110,65" stroke={regimeColor} fill="none" strokeWidth={9}
             strokeDasharray={`${arcFilled} ${arcLen}`} strokeLinecap="round" />
-          <text x={60} y={55} textAnchor="middle" fontSize={18} fontWeight={800} fill="#e8e8f0">
+          <text x={60} y={55} textAnchor="middle" fontSize={18} fontWeight={800} fill="var(--text)">
             {confidencePct != null ? `${Math.round(confidencePct)}%` : "\u2014"}
           </text>
         </svg>
@@ -3320,16 +3320,16 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
             : muPrice != null ? fmtUsd(muPrice) : "\u2014"
         } />
         <Uc6Metric label="Theta Strength" value={
-          <span style={{ color: thetaStrength >= 0.7 ? "#22c55e" : thetaStrength >= 0.3 ? "#f59e0b" : "rgba(232,232,240,0.5)" }}>
+          <span style={{ color: thetaStrength >= 0.7 ? "var(--a-22c55e)" : thetaStrength >= 0.3 ? "var(--a-f59e0b)" : "rgba(232,232,240,0.5)" }}>
             {(thetaStrength * 100).toFixed(0)}%
           </span>
         } />
       </div>
       {fast && (
-        <div style={{ borderTop:"1px solid rgba(255,255,255,0.05)", paddingTop:8, marginTop:4 }}>
+        <div style={{ borderTop:"1px solid rgba(var(--ink),0.05)", paddingTop:8, marginTop:4 }}>
           <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.3)", textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>Fast window ({fast.windowSec ?? 300}s)</div>
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:4 }}>
-            <Uc6Metric label="Label" value={<span style={{ color: fast.label === "mean_reverting" ? "#06b6d4" : fast.label === "trending" ? "#f59e0b" : "rgba(232,232,240,0.4)", fontSize:11 }}>{fast.label || "?"}</span>} />
+            <Uc6Metric label="Label" value={<span style={{ color: fast.label === "mean_reverting" ? "var(--a-06b6d4)" : fast.label === "trending" ? "var(--a-f59e0b)" : "rgba(232,232,240,0.4)", fontSize:11 }}>{fast.label || "?"}</span>} />
             <Uc6Metric label="Theta Str" value={`${((fast.thetaStrength ?? 0) * 100).toFixed(0)}%`} />
             <Uc6Metric label="Conf" value={`${((fast.confidence ?? 0) * 100).toFixed(0)}%`} />
           </div>
@@ -3337,7 +3337,7 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
       )}
 
       {/* Threshold adjustments — show configured vs what regime is actually using */}
-      <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:10, display:"grid", gap:6 }}>
+      <div style={{ borderTop:"1px solid rgba(var(--ink),0.07)", paddingTop:10, display:"grid", gap:6 }}>
         <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.3)", textTransform:"uppercase", letterSpacing:1, marginBottom:2 }}>Regime threshold adjustments</div>
 
         {/* Band */}
@@ -3357,8 +3357,8 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
                     {!sameVal && (
                       <>
                         <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
-                        <span style={{ color: adjBps > 0 ? "#f59e0b" : "#22c55e", fontWeight:700 }}>{effPct}%</span>
-                        <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#22c55e" }}>
+                        <span style={{ color: adjBps > 0 ? "var(--a-f59e0b)" : "var(--a-22c55e)", fontWeight:700 }}>{effPct}%</span>
+                        <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "var(--a-f59e0b)" : "var(--a-22c55e)" }}>
                           ({adjBps > 0 ? "+" : ""}{adjBps})
                         </span>
                       </>
@@ -3387,8 +3387,8 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
                 {!sameVal && (
                   <>
                     <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"\u2192"}</span>
-                    <span style={{ color: adjBps > 0 ? "#f59e0b" : "#22c55e", fontWeight:700 }}>{"\u00b1"}{effPct}%</span>
-                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "#f59e0b" : "#22c55e" }}>
+                    <span style={{ color: adjBps > 0 ? "var(--a-f59e0b)" : "var(--a-22c55e)", fontWeight:700 }}>{"\u00b1"}{effPct}%</span>
+                    <span style={{ fontSize:10, marginLeft:4, color: adjBps > 0 ? "var(--a-f59e0b)" : "var(--a-22c55e)" }}>
                       ({adjBps > 0 ? "+" : ""}{adjBps} bps)
                     </span>
                   </>
@@ -3411,7 +3411,7 @@ function RegimeGauge({ label, thetaStrength, confidencePct, halfLifeLabel, theta
                 {!sameVal && (
                   <>
                     <span style={{ color:"rgba(232,232,240,0.3)", margin:"0 4px" }}>{"→"}</span>
-                    <span style={{ color: adjPct > 0 ? "#22c55e" : "#f59e0b", fontWeight:700 }}>{effectiveEdgePct.toFixed(2)}%</span>
+                    <span style={{ color: adjPct > 0 ? "var(--a-22c55e)" : "var(--a-f59e0b)", fontWeight:700 }}>{effectiveEdgePct.toFixed(2)}%</span>
                     <span style={{ fontSize:10, marginLeft:4, color:"rgba(232,232,240,0.45)" }}>
                       ({adjPct > 0 ? "+" : ""}{adjPct.toFixed(2)} pp)
                     </span>
@@ -3459,7 +3459,7 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
     : inRangeBad
       ? "rgba(239,68,68,0.15)"
       : "rgba(148,163,184,0.15)";
-  const pillColor = inRangeGood ? "#22c55e" : inRangeBad ? "#ef4444" : "#94a3b8";
+  const pillColor = inRangeGood ? "var(--a-22c55e)" : inRangeBad ? "var(--a-ef4444)" : "#94a3b8";
   const pillBorder = inRangeGood
     ? "rgba(34,197,94,0.3)"
     : inRangeBad
@@ -3549,11 +3549,11 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
   urgency: number|null; diagnostics: Record<string, unknown>|null;
 }) {
   if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
-  const borderColor = eligible ? "#22c55e" : "transparent";
+  const borderColor = eligible ? "var(--a-22c55e)" : "transparent";
   const diag = diagnostics as any;
   return (
     <div style={{ border:`1px solid ${borderColor}`, borderRadius:8, padding:"10px", display:"grid", gap:8 }}>
-      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "rgba(232,232,240,0.5)" }}>
+      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "var(--a-22c55e)" : "rgba(232,232,240,0.5)" }}>
         {eligible ? "ESCAPE ELIGIBLE" : "NOT ELIGIBLE"}
       </div>
       {eligible && holdTarget && <Uc6Metric label="Hold target" value={holdTarget} />}
@@ -3564,8 +3564,8 @@ function TrendEscapeCard({ enabled, eligible, holdTarget, reasonIfBlocked, coold
             <span>Urgency</span>
             <span style={{ fontFamily:"monospace" }}>{(urgency * 100).toFixed(1)}% / {((diag?.urgencyThreshold ?? 0.7) * 100).toFixed(0)}%</span>
           </div>
-          <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
-            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, urgency * 100))}%`, borderRadius:3, background: urgency >= (diag?.urgencyThreshold ?? 0.7) ? "#22c55e" : "#f59e0b" }} />
+          <div style={{ height:5, borderRadius:3, background:"rgba(var(--ink),0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, urgency * 100))}%`, borderRadius:3, background: urgency >= (diag?.urgencyThreshold ?? 0.7) ? "var(--a-22c55e)" : "var(--a-f59e0b)" }} />
           </div>
         </div>
       )}
@@ -3601,9 +3601,9 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
 }) {
   if (!enabled) return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13, textAlign:"center", padding:"8px 0" }}>DISABLED</div>;
 
-  const condRowStyle: CSSProperties = { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.04)" };
+  const condRowStyle: CSSProperties = { display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0", borderBottom:"1px solid rgba(var(--ink),0.04)" };
   const labelStyle: CSSProperties = { fontSize:11, color:"rgba(232,232,240,0.5)" };
-  const valOk = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
+  const valOk = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "var(--a-22c55e)" : "var(--a-f59e0b)", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
 
   // Mode A: LP_ACTIVE with position — gate is irrelevant
   if (!strategyMode.startsWith("HOLD_") && tokenId) {
@@ -3617,7 +3617,7 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
     const allOk = cooldownOk && eg.tradingEnabled;
     return (
       <div style={{ display:"grid", gap:6 }}>
-        <div style={{ fontSize:14, fontWeight:800, color: allOk ? "#22c55e" : "#f59e0b", marginBottom:2 }}>
+        <div style={{ fontSize:14, fontWeight:800, color: allOk ? "var(--a-22c55e)" : "var(--a-f59e0b)", marginBottom:2 }}>
           {allOk ? "READY TO ENTER" : "WAITING FOR ENTRY"}
         </div>
         <div style={condRowStyle}>
@@ -3665,11 +3665,11 @@ function ReEntryCard({ enabled, eligible, reasonIfBlocked, eligibleAtIso, distan
   const reentryOk = isoInPast(reEntryCooldownUntilIso);
   const cooldownOk = escapeOk && reentryOk;
 
-  const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "#22c55e" : "#f59e0b", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
+  const valStyle = (ok: boolean): CSSProperties => ({ fontSize:11, fontWeight:600, color: ok ? "var(--a-22c55e)" : "var(--a-f59e0b)", fontVariantNumeric:"tabular-nums", textAlign:"right" as const });
 
   return (
     <div style={{ display:"grid", gap:6 }}>
-      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "#22c55e" : "#f59e0b", marginBottom:2 }}>
+      <div style={{ fontSize:14, fontWeight:800, color: eligible ? "var(--a-22c55e)" : "var(--a-f59e0b)", marginBottom:2 }}>
         {eligible ? "READY" : "WAITING"}
       </div>
 
@@ -3724,7 +3724,7 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
 
   return (
     <div style={{ display:"grid", gap:8 }}>
-      <div style={{ fontSize:14, fontWeight:800, color: allowed ? "#22c55e" : "#ef4444" }} title={reason}>
+      <div style={{ fontSize:14, fontWeight:800, color: allowed ? "var(--a-22c55e)" : "var(--a-ef4444)" }} title={reason}>
         {allowed ? "ALLOWED" : "BLOCKED"}
       </div>
       <div style={{ fontSize:12, color:"rgba(232,232,240,0.45)" }}>{reason}</div>
@@ -3734,14 +3734,14 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
             <span>Alpha / Required</span>
             <span style={{ fontFamily:"monospace" }}>{fmtUsd(alphaLiveUsd)} / {fmtUsd(requiredUsd)}</span>
           </div>
-          <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
-            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, (alphaLiveUsd/requiredUsd)*100))}%`, borderRadius:3, background: alphaLiveUsd >= requiredUsd ? "#22c55e" : "#f59e0b" }} />
+          <div style={{ height:5, borderRadius:3, background:"rgba(var(--ink),0.08)" }}>
+            <div style={{ height:"100%", width:`${Math.max(0, Math.min(100, (alphaLiveUsd/requiredUsd)*100))}%`, borderRadius:3, background: alphaLiveUsd >= requiredUsd ? "var(--a-22c55e)" : "var(--a-f59e0b)" }} />
           </div>
         </div>
       )}
 
       {showOverrides && (
-        <div style={{ display:"grid", gap:8, marginTop:4, padding:"8px 0", borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+        <div style={{ display:"grid", gap:8, marginTop:4, padding:"8px 0", borderTop:"1px solid rgba(var(--ink),0.06)" }}>
           <div style={{ fontSize:11, fontWeight:700, color:"rgba(232,232,240,0.6)", textTransform:"uppercase", letterSpacing:0.5 }}>
             Out-of-range overrides
           </div>
@@ -3750,12 +3750,12 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
           <div style={{ display:"grid", gap:4 }}>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
               <span>Timeout ({fmtDurationCompact(outOfRangeMaxSec)})</span>
-              <span style={{ fontFamily:"monospace", color: timeoutPct >= 100 ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+              <span style={{ fontFamily:"monospace", color: timeoutPct >= 100 ? "var(--a-22c55e)" : "rgba(232,232,240,0.7)" }}>
                 {timeoutPct >= 100 ? "READY" : `${fmtDurationCompact(outOfRangeDurationSec)} / ${fmtDurationCompact(outOfRangeMaxSec)}`}
               </span>
             </div>
-            <div style={{ height:5, borderRadius:3, background:"rgba(255,255,255,0.08)" }}>
-              <div style={{ height:"100%", width:`${timeoutPct}%`, borderRadius:3, background: timeoutPct >= 100 ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+            <div style={{ height:5, borderRadius:3, background:"rgba(var(--ink),0.08)" }}>
+              <div style={{ height:"100%", width:`${timeoutPct}%`, borderRadius:3, background: timeoutPct >= 100 ? "var(--a-22c55e)" : "var(--a-f59e0b)", transition:"width 0.3s" }} />
             </div>
           </div>
 
@@ -3763,7 +3763,7 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
           <div style={{ display:"grid", gap:4 }}>
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:11, color:"rgba(232,232,240,0.5)" }}>
               <span>Emergency</span>
-              <span style={{ fontFamily:"monospace", color: emergencyTimeMet && emergencyEdgeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+              <span style={{ fontFamily:"monospace", color: emergencyTimeMet && emergencyEdgeMet ? "var(--a-22c55e)" : "rgba(232,232,240,0.7)" }}>
                 {emergencyTimeMet && emergencyEdgeMet ? "READY" : ""}
               </span>
             </div>
@@ -3771,23 +3771,23 @@ function HodlGateCard({ allowed, reason, alphaLiveUsd, requiredUsd, enabled: _en
               <div style={{ flex:1, display:"grid", gap:2 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", color:"rgba(232,232,240,0.45)" }}>
                   <span>Time ({fmtDurationCompact(outOfRangeEmergencyMinSec)})</span>
-                  <span style={{ fontFamily:"monospace", color: emergencyTimeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                  <span style={{ fontFamily:"monospace", color: emergencyTimeMet ? "var(--a-22c55e)" : "rgba(232,232,240,0.7)" }}>
                     {emergencyTimeMet ? "OK" : fmtDurationCompact(outOfRangeDurationSec)}
                   </span>
                 </div>
-                <div style={{ height:4, borderRadius:2, background:"rgba(255,255,255,0.08)" }}>
-                  <div style={{ height:"100%", width:`${emergencyTimePct}%`, borderRadius:2, background: emergencyTimeMet ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+                <div style={{ height:4, borderRadius:2, background:"rgba(var(--ink),0.08)" }}>
+                  <div style={{ height:"100%", width:`${emergencyTimePct}%`, borderRadius:2, background: emergencyTimeMet ? "var(--a-22c55e)" : "var(--a-f59e0b)", transition:"width 0.3s" }} />
                 </div>
               </div>
               <div style={{ flex:1, display:"grid", gap:2 }}>
                 <div style={{ display:"flex", justifyContent:"space-between", color:"rgba(232,232,240,0.45)" }}>
                   <span>Edge ({(outOfRangeEmergencyEdgePct * 100).toFixed(0)}%)</span>
-                  <span style={{ fontFamily:"monospace", color: emergencyEdgeMet ? "#22c55e" : "rgba(232,232,240,0.7)" }}>
+                  <span style={{ fontFamily:"monospace", color: emergencyEdgeMet ? "var(--a-22c55e)" : "rgba(232,232,240,0.7)" }}>
                     {(distanceBeyondEdgePct * 100).toFixed(1)}%
                   </span>
                 </div>
-                <div style={{ height:4, borderRadius:2, background:"rgba(255,255,255,0.08)" }}>
-                  <div style={{ height:"100%", width:`${Math.min(100, (distanceBeyondEdgePct / outOfRangeEmergencyEdgePct) * 100)}%`, borderRadius:2, background: emergencyEdgeMet ? "#22c55e" : "#f59e0b", transition:"width 0.3s" }} />
+                <div style={{ height:4, borderRadius:2, background:"rgba(var(--ink),0.08)" }}>
+                  <div style={{ height:"100%", width:`${Math.min(100, (distanceBeyondEdgePct / outOfRangeEmergencyEdgePct) * 100)}%`, borderRadius:2, background: emergencyEdgeMet ? "var(--a-22c55e)" : "var(--a-f59e0b)", transition:"width 0.3s" }} />
                 </div>
               </div>
             </div>
@@ -3826,25 +3826,25 @@ function PnlWindows({ status: st }: { status: Uc6Status | null }) {
     ["APR (ann.)", fmtApr(st?.pnl?.aprToday), fmtApr(st?.pnl?.apr7d), fmtApr(st?.pnl?.apr30d), "—"],
   ];
 
-  const valColor = (v: number) => v >= 0 ? "#22c55e" : "#ef4444";
+  const valColor = (v: number) => v >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)";
 
   return (
     <div style={{ display:"grid", gap:16 }}>
       <DarkTable headers={["\u00a0", "Today", "7D", "30D", "Total"]} rows={rows} />
 
       {/* Portfolio snapshot */}
-      <div style={{ borderTop:"1px solid rgba(255,255,255,0.07)", paddingTop:14 }}>
+      <div style={{ borderTop:"1px solid rgba(var(--ink),0.07)", paddingTop:14 }}>
         <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.35)", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>Portfolio Snapshot</div>
         <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
           <Uc6Metric label="LP position" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd(lpUsd)}</span>} />
           <Uc6Metric label="Wallet (idle)" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd(walletUsd)}</span>} />
-          <Uc6Metric label="Total portfolio" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(portfolioNow)}</span>} />
+          <Uc6Metric label="Total portfolio" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"var(--text)" }}>{fmtUsd(portfolioNow)}</span>} />
         </div>
         {activeEntryUsd != null && activeEntryUsd > 0 && (
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:10 }}>
             <Uc6Metric label="LP at entry" value={<span style={{ fontFamily:"monospace", color:"rgba(232,232,240,0.55)" }}>{fmtUsd(activeEntryUsd)}</span>} />
             <Uc6Metric label="LP change" value={
-              <span style={{ fontFamily:"monospace", color: lpChange! >= 0 ? "#22c55e" : "#ef4444" }}>
+              <span style={{ fontFamily:"monospace", color: lpChange! >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)" }}>
                 {fmtSignedUsd(lpChange)}
               </span>
             } />
@@ -3898,7 +3898,7 @@ function PoolDiscoveryPanel() {
     { symbol: "DAI", address: "0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb" },
   ];
 
-  const inputStyle: CSSProperties = { background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)", borderRadius:6, padding:"6px 8px", color:"#e8e8f0", fontSize:12, width:"100%", fontFamily:"monospace" };
+  const inputStyle: CSSProperties = { background:"rgba(var(--ink),0.05)", border:"1px solid rgba(var(--ink),0.1)", borderRadius:6, padding:"6px 8px", color:"var(--text)", fontSize:12, width:"100%", fontFamily:"monospace" };
 
   async function discover() {
     if (!tokenA || !tokenB) return;
@@ -3939,10 +3939,10 @@ function PoolDiscoveryPanel() {
             <input style={{ ...inputStyle, marginTop:4 }} placeholder="Or paste address" value={tokenB} onChange={(e) => setTokenB(e.target.value.trim())} />
           </div>
         </div>
-        <button onClick={discover} disabled={loading || !tokenA || !tokenB} style={{ padding:"8px 16px", borderRadius:6, cursor: loading || !tokenA || !tokenB ? "not-allowed" : "pointer", opacity: loading || !tokenA || !tokenB ? 0.4 : 1, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", color:"#06b6d4", fontSize:13, fontWeight:600 }}>
+        <button onClick={discover} disabled={loading || !tokenA || !tokenB} style={{ padding:"8px 16px", borderRadius:6, cursor: loading || !tokenA || !tokenB ? "not-allowed" : "pointer", opacity: loading || !tokenA || !tokenB ? 0.4 : 1, background:"rgba(6,182,212,0.15)", border:"1px solid rgba(6,182,212,0.3)", color:"var(--a-06b6d4)", fontSize:13, fontWeight:600 }}>
           {loading ? "Searching..." : "Discover pools"}
         </button>
-        {error && <div style={{ color:"#ef4444", fontSize:12 }}>{error}</div>}
+        {error && <div style={{ color:"var(--a-ef4444)", fontSize:12 }}>{error}</div>}
         {result && (
           <div>
             <div style={{ fontSize:11, color:"rgba(232,232,240,0.5)", marginBottom:8 }}>
@@ -3962,7 +3962,7 @@ function PoolDiscoveryPanel() {
                   pool.feeEquivalent,
                   pool.currentPrice != null ? Number(pool.currentPrice).toPrecision(6) : "\u2014",
                   pool.liquidityUsd != null ? `$${Number(pool.liquidityUsd).toLocaleString()}` : "\u2014",
-                  <a key="link" href={pool.basescanUrl} target="_blank" rel="noreferrer noopener" style={{ color:"#06b6d4", fontSize:11 }}>Verify</a>,
+                  <a key="link" href={pool.basescanUrl} target="_blank" rel="noreferrer noopener" style={{ color:"var(--a-06b6d4)", fontSize:11 }}>Verify</a>,
                 ])}
               />
             )}
@@ -3981,8 +3981,8 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
     return <div style={{ color:"rgba(232,232,240,0.4)", fontSize:13 }}>No pool comparison data.</div>;
   }
   const rowStyle = (isCurrent: boolean): CSSProperties => ({
-    display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, padding:"8px 0", borderBottom:"1px solid rgba(255,255,255,0.05)",
-    ...(isCurrent ? { borderLeft:"2px solid #06b6d4", paddingLeft:8 } : {})
+    display:"grid", gridTemplateColumns:"1fr auto auto", gap:8, padding:"8px 0", borderBottom:"1px solid rgba(var(--ink),0.05)",
+    ...(isCurrent ? { borderLeft:"2px solid var(--a-06b6d4)", paddingLeft:8 } : {})
   });
   return (
     <div style={{ display:"grid", gap:4 }}>
@@ -3990,11 +3990,11 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
       {current && (
         <div style={rowStyle(true)}>
           <div>
-            <div style={{ fontSize:12, fontWeight:700, color:"#e8e8f0" }}>{current.dex?.name || "\u2014"} {pairLabel(current)}</div>
+            <div style={{ fontSize:12, fontWeight:700, color:"var(--text)" }}>{current.dex?.name || "\u2014"} {pairLabel(current)}</div>
             <div style={{ fontSize:11, color:"rgba(232,232,240,0.45)" }}>{poolComparisonSelectorLabel(current)} \u00b7 CURRENT</div>
           </div>
           <div style={{ textAlign:"right", fontSize:12 }}>
-            <div style={{ color: (current.economics?.expectedNetDayUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444", fontFamily:"monospace" }}>{fmtSignedUsd(current.economics?.expectedNetDayUsd)}/d</div>
+            <div style={{ color: (current.economics?.expectedNetDayUsd ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)", fontFamily:"monospace" }}>{fmtSignedUsd(current.economics?.expectedNetDayUsd)}/d</div>
           </div>
           <div />
         </div>
@@ -4010,11 +4010,11 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
               <div style={{ fontSize:11, color:"rgba(232,232,240,0.4)" }}>{poolComparisonSelectorLabel(row)}</div>
             </div>
             <div style={{ textAlign:"right", fontSize:12 }}>
-              <div style={{ color:(row.economics?.expectedNetDayUsd ?? 0) >= 0 ? "#22c55e" : "#ef4444", fontFamily:"monospace" }}>{fmtSignedUsd(row.economics?.expectedNetDayUsd)}/d</div>
+              <div style={{ color:(row.economics?.expectedNetDayUsd ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)", fontFamily:"monospace" }}>{fmtSignedUsd(row.economics?.expectedNetDayUsd)}/d</div>
             </div>
             <div>
               {row.compareToCurrent?.rating && (
-                <span style={{ fontSize:11, padding:"2px 6px", borderRadius:10, background: row.compareToCurrent.rating==="More" ? "rgba(34,197,94,0.15)" : row.compareToCurrent.rating==="Less" ? "rgba(239,68,68,0.15)" : "rgba(255,255,255,0.05)", color: row.compareToCurrent.rating==="More" ? "#22c55e" : row.compareToCurrent.rating==="Less" ? "#ef4444" : "rgba(232,232,240,0.5)" }}>
+                <span style={{ fontSize:11, padding:"2px 6px", borderRadius:10, background: row.compareToCurrent.rating==="More" ? "rgba(34,197,94,0.15)" : row.compareToCurrent.rating==="Less" ? "rgba(239,68,68,0.15)" : "rgba(var(--ink),0.05)", color: row.compareToCurrent.rating==="More" ? "var(--a-22c55e)" : row.compareToCurrent.rating==="Less" ? "var(--a-ef4444)" : "rgba(232,232,240,0.5)" }}>
                   {row.compareToCurrent.rating}
                 </span>
               )}
@@ -4028,7 +4028,7 @@ function PoolComparisonCard({ current, top5, computedAtIso }: { current: PoolCom
 
 function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positionsTaxSummary"]> }) {
   const totals = taxSummary.totals;
-  const signColor = (v: number | null | undefined) => (v ?? 0) >= 0 ? "#22c55e" : "#ef4444";
+  const signColor = (v: number | null | undefined) => (v ?? 0) >= 0 ? "var(--a-22c55e)" : "var(--a-ef4444)";
 
   return (
     <div style={{ display:"grid", gap:16, marginTop:12 }}>
@@ -4037,14 +4037,14 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
       <div>
         <div style={{ fontSize:10, fontWeight:700, color:"rgba(232,232,240,0.35)", textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>All-time totals</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(140px, 1fr))", gap:10 }}>
-          <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(totals?.feesCollectedUsd)}</span>} />
-          <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(totals?.totalCostsUsd)}</span>} />
+          <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"var(--a-06b6d4)" }}>{fmtUsd(totals?.feesCollectedUsd)}</span>} />
+          <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"var(--a-ef4444)" }}>{fmtUsd(totals?.totalCostsUsd)}</span>} />
           <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.feesNetUsd) }}>{fmtSignedUsd(totals?.feesNetUsd)}</span>} />
-          <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(totals?.rewardsUsd)}</span>} />
+          <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"var(--a-22c55e)" }}>{fmtUsd(totals?.rewardsUsd)}</span>} />
           <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(totals?.alphaVsHodlUsd) }}>{fmtSignedUsd(totals?.alphaVsHodlUsd)}</span>} />
           <Uc6Metric label="Closed positions" value={String(totals?.closedPositions ?? 0)} />
           {totals?.totalAssetValueTodayUsd != null && (
-            <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"#e8e8f0" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
+            <Uc6Metric label="Total assets today" value={<span style={{ fontFamily:"monospace", fontWeight:700, color:"var(--text)" }}>{fmtUsd(totals.totalAssetValueTodayUsd)}</span>} />
           )}
           {(totals as any)?.manualStartValueUsd != null && (
             <Uc6Metric label="Start value" value={<span style={{ fontFamily:"monospace" }}>{fmtUsd((totals as any).manualStartValueUsd)} <span style={{ fontSize:9, color:"rgba(232,232,240,0.3)" }}>manual</span></span>} />
@@ -4062,10 +4062,10 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
             const endUsd = yr.assetValueTodayUsd ?? null;
             const hasPortfolioData = startUsd != null || endUsd != null;
             return (
-              <div key={yr.year} style={{ background:"rgba(255,255,255,0.02)", border:"1px solid rgba(255,255,255,0.06)", borderRadius:8, padding:"12px 14px" }}>
+              <div key={yr.year} style={{ background:"rgba(var(--ink),0.02)", border:"1px solid rgba(var(--ink),0.06)", borderRadius:8, padding:"12px 14px" }}>
                 {/* Year header */}
                 <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:12 }}>
-                  <span style={{ fontSize:16, fontWeight:800, color:"#e8e8f0" }}>{yr.year}</span>
+                  <span style={{ fontSize:16, fontWeight:800, color:"var(--text)" }}>{yr.year}</span>
                   <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                     <span style={{ fontSize:11, color:"rgba(232,232,240,0.45)" }}>{yr.closedPositions ?? 0} positions closed</span>
                     {ytdPct != null && (
@@ -4078,7 +4078,7 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
 
                 {/* Portfolio start → end */}
                 {hasPortfolioData && (
-                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(255,255,255,0.03)", borderRadius:6 }}>
+                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12, padding:"8px 10px", background:"rgba(var(--ink),0.03)", borderRadius:6 }}>
                     <Uc6Metric label="Start value" value={
                       startUsd != null
                         ? <span style={{ fontFamily:"monospace" }}>{fmtUsd(startUsd)}</span>
@@ -4086,7 +4086,7 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
                     } />
                     <Uc6Metric label="End value" value={
                       endUsd != null
-                        ? <span style={{ fontFamily:"monospace", color:"#e8e8f0", fontWeight:700 }}>{fmtUsd(endUsd)}</span>
+                        ? <span style={{ fontFamily:"monospace", color:"var(--text)", fontWeight:700 }}>{fmtUsd(endUsd)}</span>
                         : <span style={{ color:"rgba(232,232,240,0.3)" }}>—</span>
                     } />
                     <Uc6Metric label="Change" value={
@@ -4101,10 +4101,10 @@ function TaxSummary({ taxSummary }: { taxSummary: NonNullable<Uc6Status["positio
 
                 {/* P&L details */}
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill, minmax(120px, 1fr))", gap:8 }}>
-                  <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"#06b6d4" }}>{fmtUsd(yr.feesCollectedUsd)}</span>} />
-                  <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"#ef4444" }}>{fmtUsd(yr.totalCostsUsd)}</span>} />
+                  <Uc6Metric label="Fees collected" value={<span style={{ fontFamily:"monospace", color:"var(--a-06b6d4)" }}>{fmtUsd(yr.feesCollectedUsd)}</span>} />
+                  <Uc6Metric label="Total costs" value={<span style={{ fontFamily:"monospace", color:"var(--a-ef4444)" }}>{fmtUsd(yr.totalCostsUsd)}</span>} />
                   <Uc6Metric label="Net fees" value={<span style={{ fontFamily:"monospace", color:signColor(yr.feesNetUsd) }}>{fmtSignedUsd(yr.feesNetUsd)}</span>} />
-                  <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"#22c55e" }}>{fmtUsd(yr.rewardsUsd)}</span>} />
+                  <Uc6Metric label="AERO rewards" value={<span style={{ fontFamily:"monospace", color:"var(--a-22c55e)" }}>{fmtUsd(yr.rewardsUsd)}</span>} />
                   <Uc6Metric label="Alpha vs HODL" value={<span style={{ fontFamily:"monospace", color:signColor(yr.alphaVsHodlUsd) }}>{fmtSignedUsd(yr.alphaVsHodlUsd)}</span>} />
                 </div>
               </div>
@@ -4131,13 +4131,13 @@ function PositionRecordDrawer({
   const allTxs = tx.allTxHashes || [];
   return (
     <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.7)", display:"flex", justifyContent:"flex-end", zIndex:1000, backdropFilter:"blur(4px)" }} onClick={onClose}>
-      <aside style={{ width:"min(420px, 100vw)", height:"100vh", overflowY:"auto", background:"#0e0f1a", borderLeft:"1px solid rgba(255,255,255,0.1)", boxShadow:"-16px 0 48px rgba(0,0,0,0.6)", padding:20, display:"grid", gap:0, alignContent:"start" }} onClick={(e) => e.stopPropagation()}>
+      <aside style={{ width:"min(420px, 100vw)", height:"100vh", overflowY:"auto", background:"var(--bg)", borderLeft:"1px solid rgba(var(--ink),0.1)", boxShadow:"-16px 0 48px rgba(0,0,0,0.6)", padding:20, display:"grid", gap:0, alignContent:"start" }} onClick={(e) => e.stopPropagation()}>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:12, marginBottom:16 }}>
           <div>
             <div style={{ fontSize:10, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:"0.06em", marginBottom:4 }}>Position Lifecycle Record</div>
-            <div style={{ fontFamily:"monospace", fontSize:15, fontWeight:700, color:"#e8e8f0" }}>{record.id}</div>
+            <div style={{ fontFamily:"monospace", fontSize:15, fontWeight:700, color:"var(--text)" }}>{record.id}</div>
           </div>
-          <button style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(255,255,255,0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" }} onClick={onClose}>Close</button>
+          <button style={{ padding:"4px 12px", borderRadius:6, background:"transparent", border:"1px solid rgba(var(--ink),0.15)", color:"rgba(232,232,240,0.7)", fontSize:12, cursor:"pointer" }} onClick={onClose}>Close</button>
         </div>
 
         <DrawerSection title="Overview">
@@ -4190,8 +4190,8 @@ function PositionRecordDrawer({
               <div style={{ fontSize:12, color:"rgba(232,232,240,0.3)" }}>No tx hashes recorded.</div>
             ) : (
               allTxs.map((hash) => (
-                <div key={hash} style={{ padding:"5px 0", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-                  <code style={{ fontSize:11, color:"#06b6d4", wordBreak:"break-all" }}>{hash}</code>
+                <div key={hash} style={{ padding:"5px 0", borderBottom:"1px solid rgba(var(--ink),0.05)" }}>
+                  <code style={{ fontSize:11, color:"var(--a-06b6d4)", wordBreak:"break-all" }}>{hash}</code>
                 </div>
               ))
             )}
@@ -4204,8 +4204,8 @@ function PositionRecordDrawer({
 
 function DrawerSection({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <div style={{ border:"1px solid rgba(255,255,255,0.07)", borderRadius:10, padding:14, background:"rgba(255,255,255,0.02)", marginBottom:12 }}>
-      <div style={{ fontSize:11, fontWeight:700, color:"#06b6d4", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>{title}</div>
+    <div style={{ border:"1px solid rgba(var(--ink),0.07)", borderRadius:10, padding:14, background:"rgba(var(--ink),0.02)", marginBottom:12 }}>
+      <div style={{ fontSize:11, fontWeight:700, color:"var(--a-06b6d4)", textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:10 }}>{title}</div>
       {children}
     </div>
   );
@@ -4213,16 +4213,16 @@ function DrawerSection({ title, children }: { title: string; children: ReactNode
 
 function DRow({ label, value }: { label: string; value: ReactNode }) {
   return (
-    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, padding:"5px 0", borderBottom:"1px solid rgba(255,255,255,0.04)", alignItems:"start" }}>
+    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, padding:"5px 0", borderBottom:"1px solid rgba(var(--ink),0.04)", alignItems:"start" }}>
       <span style={{ fontSize:11, color:"rgba(232,232,240,0.4)", textTransform:"uppercase", letterSpacing:"0.04em" }}>{label}</span>
-      <span style={{ fontSize:12, color:"#e8e8f0", fontWeight:600, wordBreak:"break-word", textAlign:"right" }}>{value}</span>
+      <span style={{ fontSize:12, color:"var(--text)", fontWeight:600, wordBreak:"break-word", textAlign:"right" }}>{value}</span>
     </div>
   );
 }
 
 // keep styles alias referenced by poolComparisonCurrentRow/poolComparisonTopRows link elements
 const styles: Record<string, CSSProperties> = {
-  link: { color: "#06b6d4", textDecoration: "underline" },
+  link: { color: "var(--a-06b6d4)", textDecoration: "underline" },
 };
 
 // suppress unused-variable warning (styles IS used in poolComparisonCurrentRow computed above line 1695)

@@ -51,8 +51,8 @@ export default function VerifyPage() {
 
   const wrap: CSSProperties = {
     minHeight: "100vh",
-    background: "linear-gradient(180deg, #0b1220 0%, #07080f 100%)",
-    color: "#fff",
+    background: "linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)",
+    color: "var(--heading)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
     display: "flex",
     alignItems: "center",
@@ -60,8 +60,8 @@ export default function VerifyPage() {
     padding: 20,
   };
   const card: CSSProperties = {
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(var(--ink),0.04)",
+    border: "1px solid rgba(var(--ink),0.08)",
     borderRadius: 14,
     padding: 28,
     maxWidth: 720,
@@ -69,7 +69,7 @@ export default function VerifyPage() {
   };
   const fieldLabel: CSSProperties = {
     fontSize: 11,
-    color: "rgba(255,255,255,0.55)",
+    color: "rgba(var(--ink),0.55)",
     letterSpacing: "0.05em",
     textTransform: "uppercase",
     fontWeight: 700,
@@ -78,11 +78,11 @@ export default function VerifyPage() {
   };
   const valueBox: CSSProperties = {
     background: "rgba(0,0,0,0.25)",
-    border: "1px solid rgba(255,255,255,0.06)",
+    border: "1px solid rgba(var(--ink),0.06)",
     borderRadius: 6,
     padding: 10,
     fontSize: 12,
-    color: "#fff",
+    color: "var(--heading)",
     fontFamily: "monospace",
     wordBreak: "break-all",
     whiteSpace: "pre-wrap",
@@ -93,7 +93,7 @@ export default function VerifyPage() {
       <div style={wrap}>
         <div style={card}>
           <h1 style={{ margin: 0, fontSize: 22 }}>Signature verification</h1>
-          <p style={{ color: "#fca5a5", marginTop: 12 }}>{error}</p>
+          <p style={{ color: "var(--a-fca5a5)", marginTop: 12 }}>{error}</p>
         </div>
       </div>
     );
@@ -111,15 +111,15 @@ export default function VerifyPage() {
   const pending = challenge.status === "pending";
 
   const statusBadge = verified
-    ? { label: "✓ VERIFIED", color: "#6ee7b7", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.4)" }
+    ? { label: "✓ VERIFIED", color: "var(--a-6ee7b7)", bg: "rgba(16,185,129,0.1)", border: "rgba(16,185,129,0.4)" }
     : failed
-      ? { label: "✗ FAILED", color: "#fca5a5", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.4)" }
-      : { label: "PENDING", color: "#fbbf24", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.4)" };
+      ? { label: "✗ FAILED", color: "var(--a-fca5a5)", bg: "rgba(239,68,68,0.1)", border: "rgba(239,68,68,0.4)" }
+      : { label: "PENDING", color: "var(--a-fbbf24)", bg: "rgba(245,158,11,0.1)", border: "rgba(245,158,11,0.4)" };
 
   return (
     <div style={wrap}>
       <div style={card}>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
           Wallet ownership signature · public proof
         </div>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
@@ -140,7 +140,7 @@ export default function VerifyPage() {
           </span>
         </div>
 
-        <p style={{ color: "rgba(255,255,255,0.6)", fontSize: 13, marginTop: 10, lineHeight: 1.6 }}>
+        <p style={{ color: "rgba(var(--ink),0.6)", fontSize: 13, marginTop: 10, lineHeight: 1.6 }}>
           This is an off-chain cryptographic proof of wallet ownership — no on-chain
           transaction is involved. The wallet shown below produced an EIP-191 / Ed25519
           signature over the challenge message. You can independently verify the result
@@ -162,7 +162,7 @@ export default function VerifyPage() {
             <div style={valueBox}>{challenge.signature}</div>
           </>
         ) : pending ? (
-          <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 12, marginTop: 14 }}>
+          <p style={{ color: "rgba(var(--ink),0.55)", fontSize: 12, marginTop: 14 }}>
             Awaiting client signature.
           </p>
         ) : null}
@@ -171,7 +171,7 @@ export default function VerifyPage() {
           const ok = "match" in evmRecovery && evmRecovery.match;
           const failed = "match" in evmRecovery && !evmRecovery.match;
           const errored = "error" in evmRecovery;
-          const color = ok ? "#6ee7b7" : "#fca5a5";
+          const color = ok ? "var(--a-6ee7b7)" : "var(--a-fca5a5)";
           const bg = ok ? "rgba(16,185,129,0.08)" : "rgba(239,68,68,0.08)";
           const border = ok ? "rgba(16,185,129,0.35)" : "rgba(239,68,68,0.35)";
           return (
@@ -191,20 +191,20 @@ export default function VerifyPage() {
               </div>
               {!errored && (
                 <>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>Address recovered from signature</div>
+                  <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginTop: 6 }}>Address recovered from signature</div>
                   <div style={{ ...valueBox, fontSize: 12 }}>{(evmRecovery as { recovered: string }).recovered}</div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 6 }}>Claimed address</div>
+                  <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginTop: 6 }}>Claimed address</div>
                   <div style={{ ...valueBox, fontSize: 12 }}>{challenge.address}</div>
                 </>
               )}
               {errored && (
-                <div style={{ ...valueBox, fontSize: 12, color: "#fca5a5" }}>
+                <div style={{ ...valueBox, fontSize: 12, color: "var(--a-fca5a5)" }}>
                   {(evmRecovery as { error: string }).error}
                 </div>
               )}
-              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 8, lineHeight: 1.5 }}>
+              <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", marginTop: 8, lineHeight: 1.5 }}>
                 This check runs locally via{" "}
-                <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+                <code style={{ background: "rgba(var(--ink),0.05)", padding: "1px 4px", borderRadius: 3 }}>
                   ethers.verifyMessage(message, signature)
                 </code>
                 . Open DevTools, edit one byte of the signature in memory, and watch this badge flip to FAIL.
@@ -243,7 +243,7 @@ export default function VerifyPage() {
                     fontSize: 10,
                     fontWeight: 700,
                     letterSpacing: "0.05em",
-                    color: copied ? "#6ee7b7" : "#93c5fd",
+                    color: copied ? "var(--a-6ee7b7)" : "var(--a-93c5fd)",
                     background: "transparent",
                     border: `1px solid ${copied ? "rgba(16,185,129,0.5)" : "rgba(147,197,253,0.5)"}`,
                     padding: "2px 8px",
@@ -270,7 +270,7 @@ export default function VerifyPage() {
         {challenge.failReason && (
           <>
             <div style={fieldLabel}>Failure reason</div>
-            <div style={{ ...valueBox, color: "#fca5a5" }}>{challenge.failReason}</div>
+            <div style={{ ...valueBox, color: "var(--a-fca5a5)" }}>{challenge.failReason}</div>
           </>
         )}
 
@@ -278,7 +278,7 @@ export default function VerifyPage() {
         <ol
           style={{
             fontSize: 12,
-            color: "rgba(255,255,255,0.7)",
+            color: "rgba(var(--ink),0.7)",
             paddingLeft: 18,
             lineHeight: 1.7,
             marginTop: 4,
@@ -300,7 +300,7 @@ export default function VerifyPage() {
               </li>
               <li>
                 In code:{" "}
-                <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+                <code style={{ background: "rgba(var(--ink),0.05)", padding: "1px 4px", borderRadius: 3 }}>
                   ethers.verifyMessage(message, signature)
                 </code>{" "}
                 must return the wallet address.
@@ -311,7 +311,7 @@ export default function VerifyPage() {
             <>
               <li>
                 Decode the signature and the public key from base58, then call{" "}
-                <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+                <code style={{ background: "rgba(var(--ink),0.05)", padding: "1px 4px", borderRadius: 3 }}>
                   nacl.sign.detached.verify(messageBytes, sigBytes, pubKey)
                 </code>
                 .
@@ -327,7 +327,7 @@ export default function VerifyPage() {
           )}
         </ol>
 
-        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 18, lineHeight: 1.5 }}>
+        <p style={{ color: "rgba(var(--ink),0.4)", fontSize: 11, marginTop: 18, lineHeight: 1.5 }}>
           Stable URL — bookmark this page or include it in the compliance file. The data
           here is sufficient for any auditor to confirm the wallet ownership independently.
         </p>
@@ -337,6 +337,6 @@ export default function VerifyPage() {
 }
 
 const linkStyle: CSSProperties = {
-  color: "#93c5fd",
+  color: "var(--a-93c5fd)",
   textDecoration: "underline",
 };

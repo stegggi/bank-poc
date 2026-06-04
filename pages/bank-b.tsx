@@ -1101,28 +1101,28 @@ for (let i = 0; i < logs.length; i += 1) {
     <>
       <style jsx global>{`
         * { box-sizing: border-box; }
-        body { background: #07080f; color: #f0f0f0; }
+        body { background: var(--bg); color: var(--text); }
         .bb-input {
           width: 100%;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(var(--ink),0.05);
+          border: 1px solid rgba(var(--ink),0.12);
           border-radius: 8px;
           padding: 8px 12px;
-          color: #f0f0f0;
+          color: var(--text);
           font-family: inherit;
           font-size: 13px;
           outline: none;
           transition: border-color 160ms;
         }
-        .bb-input:focus { border-color: #10b981; }
-        .bb-input::placeholder { color: rgba(255,255,255,0.25); }
+        .bb-input:focus { border-color: var(--a-10b981); }
+        .bb-input::placeholder { color: rgba(var(--ink),0.25); }
         .bb-select {
           width: 100%;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(var(--ink),0.05);
+          border: 1px solid rgba(var(--ink),0.12);
           border-radius: 8px;
           padding: 8px 12px;
-          color: #f0f0f0;
+          color: var(--text);
           font-family: inherit;
           font-size: 13px;
           outline: none;
@@ -1133,9 +1133,9 @@ for (let i = 0; i < logs.length; i += 1) {
           gap: 6px;
           padding: 7px 14px;
           border-radius: 8px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.07);
-          color: #f0f0f0;
+          border: 1px solid rgba(var(--ink),0.12);
+          background: rgba(var(--ink),0.07);
+          color: var(--text);
           font-family: inherit;
           font-size: 12px;
           font-weight: 600;
@@ -1143,17 +1143,17 @@ for (let i = 0; i < logs.length; i += 1) {
           transition: background 150ms;
           white-space: nowrap;
         }
-        .bb-btn:hover { background: rgba(255,255,255,0.12); }
+        .bb-btn:hover { background: rgba(var(--ink),0.12); }
         .bb-btn-ack {
           background: rgba(16,185,129,0.15);
           border-color: rgba(16,185,129,0.4);
-          color: #10b981;
+          color: var(--a-10b981);
         }
         .bb-btn-ack:hover { background: rgba(16,185,129,0.25); }
         .bb-btn-reject {
           background: rgba(239,68,68,0.1);
           border-color: rgba(239,68,68,0.3);
-          color: #ef4444;
+          color: var(--a-ef4444);
         }
         .bb-btn-reject:hover { background: rgba(239,68,68,0.18); }
         .bb-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
@@ -1164,26 +1164,26 @@ for (let i = 0; i < logs.length; i += 1) {
           font-weight: 700;
           letter-spacing: 0.06em;
           text-transform: uppercase;
-          color: rgba(255,255,255,0.35);
-          border-bottom: 1px solid rgba(255,255,255,0.07);
+          color: rgba(var(--ink),0.35);
+          border-bottom: 1px solid rgba(var(--ink),0.07);
         }
         .bb-table td {
           padding: 10px;
           font-size: 12px;
-          color: rgba(255,255,255,0.7);
-          border-bottom: 1px solid rgba(255,255,255,0.05);
+          color: rgba(var(--ink),0.7);
+          border-bottom: 1px solid rgba(var(--ink),0.05);
           vertical-align: top;
           word-break: break-word;
           overflow-wrap: break-word;
         }
         .bb-table tr:last-child td { border-bottom: none; }
-        .bb-checkbox { accent-color: #10b981; }
+        .bb-checkbox { accent-color: var(--a-10b981); }
         .wtm-tab {
           padding: 7px 14px;
           border-radius: 6px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(var(--ink),0.08);
           background: transparent;
-          color: rgba(255,255,255,0.45);
+          color: rgba(var(--ink),0.45);
           font-family: inherit;
           font-size: 12px;
           font-weight: 600;
@@ -1191,11 +1191,11 @@ for (let i = 0; i < logs.length; i += 1) {
           transition: all 150ms;
           white-space: nowrap;
         }
-        .wtm-tab:hover { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.2); }
+        .wtm-tab:hover { color: rgba(var(--ink),0.8); border-color: rgba(var(--ink),0.2); }
         .wtm-tab-active {
           background: rgba(16,185,129,0.15);
-          border-color: #10b981;
-          color: #10b981;
+          border-color: var(--a-10b981);
+          color: var(--a-10b981);
         }
         .wtm-panel { animation: wtmIn 220ms ease; }
         @keyframes wtmIn {
@@ -1251,7 +1251,7 @@ for (let i = 0; i < logs.length; i += 1) {
 
             {showReturnToBankABanner && (
               <div style={successBanner}>
-                ACK sent. Switch back to <strong style={{ color: "#10b981" }}>Bank A</strong> and send the xBank token transfer to complete the demo.
+                ACK sent. Switch back to <strong style={{ color: "var(--a-10b981)" }}>Bank A</strong> and send the xBank token transfer to complete the demo.
                 <button className="bb-btn" style={{ marginLeft: 12 }} onClick={handleOpenBankATab}>Open Bank A →</button>
               </div>
             )}
@@ -1282,7 +1282,7 @@ for (let i = 0; i < logs.length; i += 1) {
                           <a href={arbTx(r.txHash)} target="_blank" rel="noreferrer" style={extLink}>tx ↗</a>
                         </td>
                         <td>{r.purpose}</td>
-                        <td style={{ color: "rgba(255,255,255,0.45)", fontSize: 11 }}>{formatTs(r.createdAt)}</td>
+                        <td style={{ color: "rgba(var(--ink),0.45)", fontSize: 11 }}>{formatTs(r.createdAt)}</td>
                         <td>
                           {r.parsed ? (
                             <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -1314,7 +1314,7 @@ for (let i = 0; i < logs.length; i += 1) {
                               </div>
                             </div>
                           ) : (
-                            <span style={{ color: "rgba(255,255,255,0.3)", fontSize: 12 }}>No payload decoded</span>
+                            <span style={{ color: "rgba(var(--ink),0.3)", fontSize: 12 }}>No payload decoded</span>
                           )}
                         </td>
                         <td>
@@ -1341,7 +1341,7 @@ for (let i = 0; i < logs.length; i += 1) {
                   })}
                   {rows.length === 0 && (
                     <tr>
-                      <td colSpan={5} style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 20 }}>
+                      <td colSpan={5} style={{ color: "rgba(var(--ink),0.3)", textAlign: "center", padding: 20 }}>
                         No requests yet…
                       </td>
                     </tr>
@@ -1380,7 +1380,7 @@ for (let i = 0; i < logs.length; i += 1) {
                 return (
                   <div key={i} style={logCard}>
                     <div style={logCardTop}>
-                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "rgba(255,255,255,0.38)" }}>
+                      <span style={{ fontFamily: "monospace", fontSize: 11, color: "rgba(var(--ink),0.38)" }}>
                         {formatTs(l.timestamp) || "—"}
                       </span>
                       <span style={badgeStyle}>{badgeLabel}</span>
@@ -1388,7 +1388,7 @@ for (let i = 0; i < logs.length; i += 1) {
                     <a href={arbTx(l.txHash)} target="_blank" rel="noreferrer" style={extLink}>
                       {short(l.txHash)}
                     </a>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>{l.desc}</div>
+                    <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)" }}>{l.desc}</div>
                     {l.details && (
                       <pre style={preStyle}>{JSON.stringify(l.details, null, 2)}</pre>
                     )}
@@ -1396,7 +1396,7 @@ for (let i = 0; i < logs.length; i += 1) {
                 );
               })}
               {logEvents.length === 0 && !logStatus && (
-                <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 13 }}>No hub transactions yet…</div>
+                <div style={{ color: "rgba(var(--ink),0.3)", fontSize: 13 }}>No hub transactions yet…</div>
               )}
             </div>
             {logEvents.length > 0 && (
@@ -1464,7 +1464,7 @@ for (let i = 0; i < logs.length; i += 1) {
                   ))}
                   {directoryRows.length === 0 && !dirStatus && (
                     <tr>
-                      <td colSpan={6} style={{ color: "rgba(255,255,255,0.3)", textAlign: "center", padding: 16 }}>
+                      <td colSpan={6} style={{ color: "rgba(var(--ink),0.3)", textAlign: "center", padding: 16 }}>
                         No banks loaded yet…
                       </td>
                     </tr>
@@ -1478,7 +1478,7 @@ for (let i = 0; i < logs.length; i += 1) {
             <div style={adminPanel}>
               <div style={{ ...adminPanelHeader, flexDirection: isMobileOrTablet ? "column" as const : "row" as const }}>
                 <div>
-                  <div style={{ fontWeight: 700, color: "#fff", fontSize: 13, marginBottom: 3 }}>
+                  <div style={{ fontWeight: 700, color: "var(--heading)", fontSize: 13, marginBottom: 3 }}>
                     Directory Admin — upsertBank
                   </div>
                   <div style={formNote}>
@@ -1492,7 +1492,7 @@ for (let i = 0; i < logs.length; i += 1) {
                     ) : (
                       <button className="bb-btn" onClick={disconnectMetaMask}>Disconnect MetaMask</button>
                     )}
-                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(255,255,255,0.6)", cursor: "pointer" }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12, color: "rgba(var(--ink),0.6)", cursor: "pointer" }}>
                       <input
                         type="checkbox"
                         className="bb-checkbox"
@@ -1504,7 +1504,7 @@ for (let i = 0; i < logs.length; i += 1) {
                     </label>
                     <button className="bb-btn" onClick={upsertBank}>Upsert bank</button>
                   </div>
-                  <div style={{ fontSize: 11, color: "rgba(255,255,255,0.35)", textAlign: "right" }}>
+                  <div style={{ fontSize: 11, color: "rgba(var(--ink),0.35)", textAlign: "right" }}>
                     <div>Owner: <span style={monoSmall}>{dirOwnerAddr || "—"}</span></div>
                     <div>
                       MetaMask: <span style={monoSmall}>{metaMaskAddr || "not connected"}</span>
@@ -1512,7 +1512,7 @@ for (let i = 0; i < logs.length; i += 1) {
                         <span style={{ marginLeft: 6, color: UC_ACCENT }}>✓ owner</span>
                       )}
                     </div>
-                    {metaMaskStatus && <div style={{ color: "#ef4444" }}>{metaMaskStatus}</div>}
+                    {metaMaskStatus && <div style={{ color: "var(--a-ef4444)" }}>{metaMaskStatus}</div>}
                   </div>
                 </div>
               </div>
@@ -1736,14 +1736,14 @@ function WhyThisMatters({ pendingCount, ackedCount }: { pendingCount: number; ac
 
 /* ── Styles ──────────────────────────────────────────────────────────────────── */
 
-const UC_ACCENT = "#10b981";
+const UC_ACCENT = "var(--a-10b981)";
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
 const pageWrap: CSSProperties = {
   minHeight: "100vh",
-  background: "#07080f",
+  background: "var(--bg)",
   fontFamily: FONT,
-  color: "#f0f0f0",
+  color: "var(--text)",
   paddingBottom: 80,
 };
 
@@ -1767,7 +1767,7 @@ const loadingDot: CSSProperties = {
   width: 32,
   height: 32,
   borderRadius: "50%",
-  border: "3px solid rgba(255,255,255,0.08)",
+  border: "3px solid rgba(var(--ink),0.08)",
   borderTopColor: UC_ACCENT,
   animation: "spin 0.8s linear infinite",
 };
@@ -1797,19 +1797,19 @@ const ucChip: CSSProperties = {
 const pageTitle: CSSProperties = {
   fontSize: 20,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
   lineHeight: 1.2,
 };
 
 const pageSubtitle: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.4)",
+  color: "rgba(var(--ink),0.4)",
   marginTop: 3,
 };
 
 const card: CSSProperties = {
-  background: "rgba(255,255,255,0.032)",
-  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(var(--ink),0.032)",
+  border: "1px solid rgba(var(--ink),0.08)",
   borderRadius: 16,
   padding: "20px 24px",
   display: "flex",
@@ -1834,7 +1834,7 @@ const metaRow: CSSProperties = {
 
 const metaLabel: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.52)",
+  color: "rgba(var(--ink),0.52)",
   minWidth: 110,
   flexShrink: 0,
 };
@@ -1842,19 +1842,19 @@ const metaLabel: CSSProperties = {
 const monoVal: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.85)",
+  color: "rgba(var(--ink),0.85)",
   wordBreak: "break-all",
 };
 
 const monoSmall: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 11,
-  color: "rgba(255,255,255,0.70)",
+  color: "rgba(var(--ink),0.70)",
   wordBreak: "break-all",
 };
 
 const dimText: CSSProperties = {
-  color: "rgba(255,255,255,0.60)",
+  color: "rgba(var(--ink),0.60)",
   fontSize: 13,
   lineHeight: 1.5,
 };
@@ -1868,14 +1868,14 @@ const extLink: CSSProperties = {
 const inlineCode: CSSProperties = {
   fontFamily: "ui-monospace, monospace",
   fontSize: 12,
-  background: "rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.07)",
   padding: "1px 6px",
   borderRadius: 4,
 };
 
 const formNote: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.58)",
+  color: "rgba(var(--ink),0.58)",
   lineHeight: 1.55,
 };
 
@@ -1884,13 +1884,13 @@ const formLabel: CSSProperties = {
   flexDirection: "column",
   gap: 5,
   fontSize: 12,
-  color: "rgba(255,255,255,0.65)",
+  color: "rgba(var(--ink),0.65)",
 };
 
 const tableWrap: CSSProperties = {
   overflowX: "auto",
   borderRadius: 10,
-  border: "1px solid rgba(255,255,255,0.06)",
+  border: "1px solid rgba(var(--ink),0.06)",
 };
 
 const showMoreRow: CSSProperties = {
@@ -1902,7 +1902,7 @@ const showMoreRow: CSSProperties = {
 
 const statusText: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.68)",
+  color: "rgba(var(--ink),0.68)",
   lineHeight: 1.5,
   wordBreak: "break-all",
 };
@@ -1913,7 +1913,7 @@ const successBanner: CSSProperties = {
   borderRadius: 10,
   padding: "12px 16px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.8)",
+  color: "rgba(var(--ink),0.8)",
   display: "flex",
   alignItems: "center",
   flexWrap: "wrap",
@@ -1928,7 +1928,7 @@ const tagGreen: CSSProperties = {
   borderRadius: 999,
   background: "rgba(16,185,129,0.15)",
   border: "1px solid rgba(16,185,129,0.3)",
-  color: "#10b981",
+  color: "var(--a-10b981)",
   fontSize: 11,
   fontWeight: 600,
 };
@@ -1940,7 +1940,7 @@ const tagBlue: CSSProperties = {
   borderRadius: 999,
   background: "rgba(59,130,246,0.12)",
   border: "1px solid rgba(59,130,246,0.25)",
-  color: "#60a5fa",
+  color: "var(--a-60a5fa)",
   fontSize: 11,
   fontWeight: 600,
 };
@@ -1952,7 +1952,7 @@ const tagRed: CSSProperties = {
   borderRadius: 999,
   background: "rgba(239,68,68,0.12)",
   border: "1px solid rgba(239,68,68,0.25)",
-  color: "#f87171",
+  color: "var(--a-f87171)",
   fontSize: 11,
   fontWeight: 600,
 };
@@ -1962,9 +1962,9 @@ const tagNeutral: CSSProperties = {
   alignItems: "center",
   padding: "2px 8px",
   borderRadius: 999,
-  background: "rgba(255,255,255,0.06)",
-  border: "1px solid rgba(255,255,255,0.1)",
-  color: "rgba(255,255,255,0.45)",
+  background: "rgba(var(--ink),0.06)",
+  border: "1px solid rgba(var(--ink),0.1)",
+  color: "rgba(var(--ink),0.45)",
   fontSize: 11,
   fontWeight: 600,
 };
@@ -1980,20 +1980,20 @@ const payloadSectionTitle: CSSProperties = {
   fontWeight: 700,
   letterSpacing: "0.06em",
   textTransform: "uppercase",
-  color: "rgba(255,255,255,0.35)",
+  color: "rgba(var(--ink),0.35)",
   marginBottom: 3,
 };
 
 const payloadLine: CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   lineHeight: 1.6,
   wordBreak: "break-all",
 };
 
 const logCard: CSSProperties = {
-  background: "rgba(255,255,255,0.025)",
-  border: "1px solid rgba(255,255,255,0.06)",
+  background: "rgba(var(--ink),0.025)",
+  border: "1px solid rgba(var(--ink),0.06)",
   borderRadius: 10,
   padding: "10px 14px",
   display: "flex",
@@ -2011,13 +2011,13 @@ const preStyle: CSSProperties = {
   margin: 0,
   fontSize: 10,
   whiteSpace: "pre-wrap",
-  color: "rgba(255,255,255,0.4)",
+  color: "rgba(var(--ink),0.4)",
   fontFamily: "ui-monospace, monospace",
 };
 
 const adminPanel: CSSProperties = {
-  background: "rgba(255,255,255,0.025)",
-  border: "1px dashed rgba(255,255,255,0.1)",
+  background: "rgba(var(--ink),0.025)",
+  border: "1px dashed rgba(var(--ink),0.1)",
   borderRadius: 12,
   padding: "16px 18px",
   display: "flex",
@@ -2052,7 +2052,7 @@ const wtmDivider: CSSProperties = {
 const wtmDividerLine: CSSProperties = {
   flex: 1,
   height: 1,
-  background: "rgba(255,255,255,0.06)",
+  background: "rgba(var(--ink),0.06)",
 };
 
 const wtmDividerLabel: CSSProperties = {
@@ -2060,13 +2060,13 @@ const wtmDividerLabel: CSSProperties = {
   fontWeight: 700,
   letterSpacing: "0.1em",
   textTransform: "uppercase",
-  color: "rgba(255,255,255,0.28)",
+  color: "rgba(var(--ink),0.28)",
   whiteSpace: "nowrap",
 };
 
 const wtmIntro: CSSProperties = {
   fontSize: 14,
-  color: "rgba(255,255,255,0.68)",
+  color: "rgba(var(--ink),0.68)",
   marginBottom: 16,
   lineHeight: 1.5,
   display: "flex",
@@ -2095,8 +2095,8 @@ const wtmTabStrip: CSSProperties = {
 };
 
 const wtmPanel: CSSProperties = {
-  background: "rgba(255,255,255,0.025)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.025)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 14,
   padding: "20px 22px",
 };
@@ -2106,13 +2106,13 @@ const wtmPanelHead: CSSProperties = { marginBottom: 16 };
 const wtmPanelTitle: CSSProperties = {
   fontSize: 16,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
   marginBottom: 5,
 };
 
 const wtmPanelSub: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.60)",
+  color: "rgba(var(--ink),0.60)",
   lineHeight: 1.5,
 };
 
@@ -2129,8 +2129,8 @@ const wtmGrid2: CSSProperties = {
 };
 
 const wtmCard: CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.03)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 12,
   padding: "14px 16px",
   display: "flex",
@@ -2141,12 +2141,12 @@ const wtmCard: CSSProperties = {
 const wtmCardTitle: CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
 };
 
 const wtmCardText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.70)",
+  color: "rgba(var(--ink),0.70)",
   lineHeight: 1.55,
 };
 
@@ -2165,7 +2165,7 @@ const wtmArrow: CSSProperties = {
 
 const wtmListText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   lineHeight: 1.55,
 };
 
@@ -2175,7 +2175,7 @@ const wtmCallout: CSSProperties = {
   borderRadius: 10,
   padding: "12px 14px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   lineHeight: 1.5,
 };
 
@@ -2189,9 +2189,9 @@ const pill: CSSProperties = {
   display: "inline-flex",
   padding: "3px 9px",
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.04)",
   fontSize: 11,
   fontWeight: 600,
-  color: "rgba(255,255,255,0.48)",
+  color: "rgba(var(--ink),0.48)",
 };

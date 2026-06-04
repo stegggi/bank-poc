@@ -37,7 +37,7 @@ const STEP_LABELS: Record<Step, string> = {
   report: "6. Report",
 };
 
-const UC7_ACCENT = "#ec4899";
+const UC7_ACCENT = "var(--a-ec4899)";
 
 function useCurrency(): [Currency, (c: Currency) => void] {
   const [currency, setCurrencyState] = useState<Currency>("CHF");
@@ -260,8 +260,8 @@ function CurrencyToggle({
           fontWeight: 700,
           letterSpacing: "0.04em",
           border: "none",
-          background: active ? "rgba(255,255,255,0.12)" : "transparent",
-          color: active ? "#fff" : "rgba(255,255,255,0.55)",
+          background: active ? "rgba(var(--ink),0.12)" : "transparent",
+          color: active ? "var(--heading)" : "rgba(var(--ink),0.55)",
           cursor: active ? "default" : "pointer",
           borderRadius: 6,
         }}
@@ -277,8 +277,8 @@ function CurrencyToggle({
         display: "inline-flex",
         gap: 2,
         padding: 3,
-        border: "1px solid rgba(255,255,255,0.12)",
-        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(var(--ink),0.12)",
+        background: "rgba(var(--ink),0.04)",
         borderRadius: 8,
         marginTop: 4,
       }}
@@ -399,7 +399,7 @@ function CaseListView({
                       style={{
                         background: "transparent",
                         border: "1px solid rgba(239,68,68,0.4)",
-                        color: "#fca5a5",
+                        color: "var(--a-fca5a5)",
                         borderRadius: 4,
                         padding: "2px 8px",
                         fontSize: 12,
@@ -425,11 +425,11 @@ function CaseHeader({ caseFile, onClose }: { caseFile: CaseFile; onClose: () => 
   return (
     <div style={caseHeaderStyle}>
       <div>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+        <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", letterSpacing: "0.08em", textTransform: "uppercase" }}>
           Case {caseFile.caseReference}
         </div>
         <h2 style={{ ...h2, margin: "4px 0 0" }}>{caseFile.clientName}</h2>
-        <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+        <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 4 }}>
           Status: {caseFile.status}
           {caseFile.overallRisk && (
             <>
@@ -713,15 +713,15 @@ function StepSetup({
                 <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+                      <code style={{ fontSize: 13, color: "var(--heading)" }}>{w.address}</code>
                       {isScanning && <Spinner />}
                     </div>
-                    <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+                    <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 4 }}>
                       {chainFamilyLabel(detection.chainFamily)}
                       {detection.subtype && ` · ${detection.subtype}`}
                     </div>
                     {hasScan && (
-                      <div style={{ fontSize: 20, fontWeight: 800, color: "#fff", marginTop: 8 }}>
+                      <div style={{ fontSize: 20, fontWeight: 800, color: "var(--heading)", marginTop: 8 }}>
                         {formatMoney(
                           pickValue(
                             w.scan!.totalValueChf,
@@ -763,7 +763,7 @@ function StepSetup({
                         style={{
                           cursor: "pointer",
                           fontSize: 12,
-                          color: "rgba(255,255,255,0.55)",
+                          color: "rgba(var(--ink),0.55)",
                         }}
                       >
                         View holdings breakdown
@@ -789,9 +789,9 @@ function StepSetup({
                       marginTop: 10,
                       padding: "8px 12px",
                       borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(255,255,255,0.02)",
-                      color: "rgba(255,255,255,0.55)",
+                      border: "1px solid rgba(var(--ink),0.08)",
+                      background: "rgba(var(--ink),0.02)",
+                      color: "rgba(var(--ink),0.55)",
                       fontSize: 12,
                     }}
                   >
@@ -804,7 +804,7 @@ function StepSetup({
                 )}
 
                 {!hasScan && isScanning && (
-                  <div style={{ marginTop: 10, color: "rgba(255,255,255,0.65)", fontSize: 13 }}>
+                  <div style={{ marginTop: 10, color: "rgba(var(--ink),0.65)", fontSize: 13 }}>
                     <Spinner /> &nbsp;Scanning {detection.chainFamily === "evm" ? "6 EVM chains" : "on-chain activity"}…
                   </div>
                 )}
@@ -848,14 +848,14 @@ function ChainPill({ chain, currency }: { chain: ChainActivity; currency: Curren
         gap: 6,
         fontSize: 12,
         padding: "5px 10px",
-        background: "rgba(255,255,255,0.06)",
-        border: "1px solid rgba(255,255,255,0.1)",
+        background: "rgba(var(--ink),0.06)",
+        border: "1px solid rgba(var(--ink),0.1)",
         borderRadius: 6,
-        color: "rgba(255,255,255,0.9)",
+        color: "rgba(var(--ink),0.9)",
       }}
     >
       <span style={{ fontWeight: 700, textTransform: "capitalize" }}>{chain.chain}</span>
-      <span style={{ color: "rgba(255,255,255,0.55)" }}>·</span>
+      <span style={{ color: "rgba(var(--ink),0.55)" }}>·</span>
       <span>{formatMoney(total, currency)}</span>
     </span>
   );
@@ -869,8 +869,8 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
   return (
     <div
       style={{
-        background: "rgba(255,255,255,0.02)",
-        border: "1px solid rgba(255,255,255,0.06)",
+        background: "rgba(var(--ink),0.02)",
+        border: "1px solid rgba(var(--ink),0.06)",
         borderRadius: 6,
         padding: "8px 10px",
       }}
@@ -879,7 +879,7 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
         style={{
           fontSize: 11,
           fontWeight: 700,
-          color: "rgba(255,255,255,0.7)",
+          color: "rgba(var(--ink),0.7)",
           textTransform: "capitalize",
           marginBottom: 6,
         }}
@@ -889,19 +889,19 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
       <div style={{ display: "grid", gridTemplateColumns: "1fr auto auto", gap: "2px 12px", fontSize: 12 }}>
         {hasNative && (
           <>
-            <span style={{ color: "rgba(255,255,255,0.85)" }}>Native</span>
-            <span style={{ color: "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
+            <span style={{ color: "rgba(var(--ink),0.85)" }}>Native</span>
+            <span style={{ color: "rgba(var(--ink),0.7)", textAlign: "right", fontFamily: "monospace" }}>
               {Number(chain.nativeBalance).toLocaleString("de-CH", { maximumFractionDigits: 6 })}
             </span>
-            <span style={{ color: "#fff", textAlign: "right" }}>
+            <span style={{ color: "var(--heading)", textAlign: "right" }}>
               {formatMoney(nativeForCurrency, currency)}
             </span>
           </>
         )}
         {tokens.map((t) => {
           const dim = !!t.suspicious;
-          const labelColor = dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.85)";
-          const valueColor = dim ? "rgba(255,255,255,0.4)" : "#fff";
+          const labelColor = dim ? "rgba(var(--ink),0.4)" : "rgba(var(--ink),0.85)";
+          const valueColor = dim ? "rgba(var(--ink),0.4)" : "var(--heading)";
           const tokenValue = pickValue(t.chf, t.usd ?? 0, currency);
           const isUnpriced = !t.suspicious && t.chf === 0 && (t.usd ?? 0) === 0;
           return (
@@ -913,7 +913,7 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
                     style={{
                       marginLeft: 6,
                       fontSize: 10,
-                      color: "#fca5a5",
+                      color: "var(--a-fca5a5)",
                       border: "1px solid rgba(239,68,68,0.4)",
                       padding: "0 4px",
                       borderRadius: 3,
@@ -927,7 +927,7 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
                     style={{
                       marginLeft: 6,
                       fontSize: 10,
-                      color: "#fbbf24",
+                      color: "var(--a-fbbf24)",
                       border: "1px solid rgba(245,158,11,0.3)",
                       padding: "0 4px",
                       borderRadius: 3,
@@ -937,7 +937,7 @@ function ChainBreakdown({ chain, currency }: { chain: ChainActivity; currency: C
                   </span>
                 ) : null}
               </span>
-              <span style={{ color: dim ? "rgba(255,255,255,0.4)" : "rgba(255,255,255,0.7)", textAlign: "right", fontFamily: "monospace" }}>
+              <span style={{ color: dim ? "rgba(var(--ink),0.4)" : "rgba(var(--ink),0.7)", textAlign: "right", fontFamily: "monospace" }}>
                 {t.amount.toLocaleString("de-CH", { maximumFractionDigits: 4 })}
               </span>
               <span style={{ color: valueColor, textAlign: "right" }}>
@@ -1014,7 +1014,7 @@ function StepOwnership({
           Proceed to source trace →
         </button>
         {!allVerified && (
-          <span style={{ marginLeft: 12, color: "rgba(255,255,255,0.55)", fontSize: 12 }}>
+          <span style={{ marginLeft: 12, color: "rgba(var(--ink),0.55)", fontSize: 12 }}>
             All wallets must be verified to continue
           </span>
         )}
@@ -1217,23 +1217,23 @@ function OwnershipRow({
     <div style={walletCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <div>
-          <code style={{ fontSize: 13, color: "#fff" }}>{wallet.address}</code>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+          <code style={{ fontSize: 13, color: "var(--heading)" }}>{wallet.address}</code>
+          <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 4 }}>
             {chainFamilyLabel(wallet.chainFamily)}
             {challenge?.status === "verified" && (
-              <span style={{ marginLeft: 10, color: "#6ee7b7", fontWeight: 700 }}>✓ Verified</span>
+              <span style={{ marginLeft: 10, color: "var(--a-6ee7b7)", fontWeight: 700 }}>✓ Verified</span>
             )}
             {challenge?.status === "failed" && (
-              <span style={{ marginLeft: 10, color: "#fca5a5", fontWeight: 700 }}>✗ Failed</span>
+              <span style={{ marginLeft: 10, color: "var(--a-fca5a5)", fontWeight: 700 }}>✗ Failed</span>
             )}
             {challenge?.status === "pending" && wcPhase === "signing" && (
-              <span style={{ marginLeft: 10, color: "#fbbf24" }}>✍️ Awaiting wallet signature…</span>
+              <span style={{ marginLeft: 10, color: "var(--a-fbbf24)" }}>✍️ Awaiting wallet signature…</span>
             )}
             {challenge?.status === "pending" && wcPhase === "verifying" && (
-              <span style={{ marginLeft: 10, color: "#fbbf24" }}>⏳ Verifying signature…</span>
+              <span style={{ marginLeft: 10, color: "var(--a-fbbf24)" }}>⏳ Verifying signature…</span>
             )}
             {challenge?.status === "pending" && wcPhase !== "signing" && wcPhase !== "verifying" && (
-              <span style={{ marginLeft: 10, color: "#fbbf24" }}>⏳ Waiting for signature</span>
+              <span style={{ marginLeft: 10, color: "var(--a-fbbf24)" }}>⏳ Waiting for signature</span>
             )}
           </div>
         </div>
@@ -1247,7 +1247,7 @@ function OwnershipRow({
       {challenge && challenge.status !== "verified" && (
         <div style={{ marginTop: 14, display: "flex", gap: 18, flexWrap: "wrap", alignItems: "flex-start" }}>
           <div>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
+            <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginBottom: 6 }}>
               {qrUsesWc ? "WalletConnect QR — sign in any mobile wallet" : "QR code"}
             </div>
             {wallet.chainFamily === "evm" && wcPhase === "init" && !wcUri ? (
@@ -1255,12 +1255,12 @@ function OwnershipRow({
                 style={{
                   width: 180,
                   height: 180,
-                  background: "rgba(255,255,255,0.03)",
+                  background: "rgba(var(--ink),0.03)",
                   borderRadius: 8,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
-                  color: "rgba(255,255,255,0.55)",
+                  color: "rgba(var(--ink),0.55)",
                   fontSize: 12,
                 }}
               >
@@ -1273,7 +1273,7 @@ function OwnershipRow({
                 style={{ width: 180, height: 180, background: "#fff", borderRadius: 8, padding: 6 }}
               />
             )}
-            <div style={{ fontSize: 10, color: "rgba(255,255,255,0.4)", marginTop: 6, lineHeight: 1.4, maxWidth: 180 }}>
+            <div style={{ fontSize: 10, color: "rgba(var(--ink),0.4)", marginTop: 6, lineHeight: 1.4, maxWidth: 180 }}>
               {qrCaption}
             </div>
             {wallet.chainFamily === "evm" && wcPhase === "error" && wcError && (
@@ -1289,9 +1289,9 @@ function OwnershipRow({
             )}
           </div>
           <div style={{ flex: 1, minWidth: 240 }}>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 4 }}>Challenge message</div>
+            <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginBottom: 4 }}>Challenge message</div>
             <pre style={preBlock}>{challenge.message}</pre>
-            <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginTop: 10, marginBottom: 4 }}>
+            <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginTop: 10, marginBottom: 4 }}>
               Shareable link (send to client)
             </div>
             <div style={{ display: "flex", gap: 6 }}>
@@ -1337,7 +1337,7 @@ function VerificationProof({
 
   const labelStyle: CSSProperties = {
     fontSize: 11,
-    color: "rgba(255,255,255,0.55)",
+    color: "rgba(var(--ink),0.55)",
     letterSpacing: "0.04em",
     textTransform: "uppercase",
     fontWeight: 700,
@@ -1345,11 +1345,11 @@ function VerificationProof({
   };
   const codeBox: CSSProperties = {
     background: "rgba(0,0,0,0.25)",
-    border: "1px solid rgba(255,255,255,0.06)",
+    border: "1px solid rgba(var(--ink),0.06)",
     borderRadius: 6,
     padding: 10,
     fontSize: 11,
-    color: "#fff",
+    color: "var(--heading)",
     fontFamily: "monospace",
     wordBreak: "break-all",
   };
@@ -1374,7 +1374,7 @@ function VerificationProof({
           flexWrap: "wrap",
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 700, color: "#6ee7b7" }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: "var(--a-6ee7b7)" }}>
           ✓ Cryptographic ownership proof
         </div>
         <a
@@ -1383,7 +1383,7 @@ function VerificationProof({
           rel="noreferrer"
           style={{
             fontSize: 12,
-            color: "#93c5fd",
+            color: "var(--a-93c5fd)",
             textDecoration: "none",
             border: "1px solid rgba(147,197,253,0.4)",
             padding: "4px 10px",
@@ -1396,7 +1396,7 @@ function VerificationProof({
       <div
         style={{
           fontSize: 11,
-          color: "rgba(255,255,255,0.55)",
+          color: "rgba(var(--ink),0.55)",
           marginBottom: 10,
           lineHeight: 1.5,
         }}
@@ -1404,7 +1404,7 @@ function VerificationProof({
         Off-chain {challenge.chainFamily === "evm" ? "EIP-191" : "Ed25519"} signature — no
         gas, no on-chain transaction. The data below is the complete proof and can be
         re-verified independently with{" "}
-        <code style={{ background: "rgba(255,255,255,0.05)", padding: "1px 4px", borderRadius: 3 }}>
+        <code style={{ background: "rgba(var(--ink),0.05)", padding: "1px 4px", borderRadius: 3 }}>
           {challenge.chainFamily === "evm" ? "ethers.verifyMessage(...)" : "nacl.sign.detached.verify(...)"}
         </code>{" "}
         or any standard verifier.
@@ -1429,8 +1429,8 @@ function VerificationProof({
               style={{
                 marginLeft: 8,
                 background: "transparent",
-                border: "1px solid rgba(255,255,255,0.15)",
-                color: "rgba(255,255,255,0.65)",
+                border: "1px solid rgba(var(--ink),0.15)",
+                color: "rgba(var(--ink),0.65)",
                 fontSize: 10,
                 padding: "1px 6px",
                 borderRadius: 3,
@@ -1444,7 +1444,7 @@ function VerificationProof({
 
         <div style={labelStyle}>Verifier link</div>
         <div style={codeBox}>
-          <a href={verifyUrl} target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+          <a href={verifyUrl} target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
             {verifyUrl}
           </a>
         </div>
@@ -1543,7 +1543,7 @@ function StepScan({
           {anyRunning ? <><Spinner /> &nbsp;Tracing…</> : "Run trace on all wallets"}
         </button>
         {progress && (
-          <span style={{ color: "rgba(255,255,255,0.7)", fontSize: 13 }}>
+          <span style={{ color: "rgba(var(--ink),0.7)", fontSize: 13 }}>
             Wallet {Math.min(progress.done + 1, progress.total)} / {progress.total}
           </span>
         )}
@@ -1638,8 +1638,8 @@ function TraceRow({
     <div style={walletCardStyle}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
         <div>
-          <code style={{ fontSize: 13, color: "#fff" }}>{wallet.address}</code>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+          <code style={{ fontSize: 13, color: "var(--heading)" }}>{wallet.address}</code>
+          <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 4 }}>
             {chainFamilyLabel(wallet.chainFamily)}
             {traces.length > 0 && ` · traced on ${traces.map((t) => t.chain).join(", ")}`}
           </div>
@@ -1665,7 +1665,7 @@ function TraceRow({
             background: "rgba(59,130,246,0.08)",
             border: "1px solid rgba(59,130,246,0.25)",
             borderRadius: 8,
-            color: "#cbd5f5",
+            color: "var(--a-cbd5f5)",
             fontSize: 13,
             display: "flex",
             alignItems: "center",
@@ -1685,10 +1685,10 @@ function TraceRow({
               value={`${(walletAttributedPct * 100).toFixed(1)}%`}
               color={
                 walletAttributedPct >= 0.9
-                  ? "#10b981"
+                  ? "var(--a-10b981)"
                   : walletAttributedPct >= 0.6
-                  ? "#f59e0b"
-                  : "#ef4444"
+                  ? "var(--a-f59e0b)"
+                  : "var(--a-ef4444)"
               }
             />
             <Stat
@@ -1709,7 +1709,7 @@ function TraceRow({
             <Stat
               label="Sanctions"
               value={walletSanctionsCount > 0 ? `${walletSanctionsCount} hit` : "Clean"}
-              color={walletSanctionsCount > 0 ? "#ef4444" : "#10b981"}
+              color={walletSanctionsCount > 0 ? "var(--a-ef4444)" : "var(--a-10b981)"}
             />
           </div>
 
@@ -1721,7 +1721,7 @@ function TraceRow({
                 borderRadius: 8,
                 background: "rgba(245,158,11,0.08)",
                 border: "1px solid rgba(245,158,11,0.35)",
-                color: "#fbbf24",
+                color: "var(--a-fbbf24)",
                 fontSize: 13,
               }}
             >
@@ -1768,8 +1768,8 @@ function ChainTraceCard({
   return (
     <div
       style={{
-        border: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(255,255,255,0.02)",
+        border: "1px solid rgba(var(--ink),0.08)",
+        background: "rgba(var(--ink),0.02)",
         borderRadius: 10,
         padding: 16,
       }}
@@ -1784,10 +1784,10 @@ function ChainTraceCard({
         }}
       >
         <div>
-          <div style={{ fontSize: 14, fontWeight: 800, color: "#fff", textTransform: "capitalize" }}>
+          <div style={{ fontSize: 14, fontWeight: 800, color: "var(--heading)", textTransform: "capitalize" }}>
             {trace.chain}
           </div>
-          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 2 }}>
+          <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 2 }}>
             {(trace.attributedPercentage * 100).toFixed(1)}% attributed ·{" "}
             {formatMoney(
               pickValue(trace.attributedValueChf, trace.attributedValueUsd ?? 0, currency),
@@ -1806,7 +1806,7 @@ function ChainTraceCard({
             <span
               style={{
                 fontSize: 11,
-                color: "#fca5a5",
+                color: "var(--a-fca5a5)",
                 background: "rgba(239,68,68,0.12)",
                 border: "1px solid rgba(239,68,68,0.4)",
                 padding: "3px 8px",
@@ -1855,7 +1855,7 @@ function ChainTraceCard({
             background: "rgba(245,158,11,0.08)",
             border: "1px solid rgba(245,158,11,0.4)",
             borderRadius: 6,
-            color: "#fbbf24",
+            color: "var(--a-fbbf24)",
             fontSize: 12,
             lineHeight: 1.5,
           }}
@@ -1878,7 +1878,7 @@ function ChainTraceCard({
                 style={{
                   cursor: "pointer",
                   fontSize: 12,
-                  color: "rgba(255,255,255,0.65)",
+                  color: "rgba(var(--ink),0.65)",
                   marginBottom: 8,
                 }}
               >
@@ -1953,10 +1953,10 @@ function Hop1InflowTable({
       <div
         style={{
           fontSize: 12,
-          color: "rgba(255,255,255,0.45)",
+          color: "rgba(var(--ink),0.45)",
           padding: 14,
-          background: "rgba(255,255,255,0.02)",
-          border: "1px solid rgba(255,255,255,0.06)",
+          background: "rgba(var(--ink),0.02)",
+          border: "1px solid rgba(var(--ink),0.06)",
           borderRadius: 6,
           textAlign: "center",
         }}
@@ -1973,27 +1973,27 @@ function Hop1InflowTable({
     fontSize: 10,
     letterSpacing: "0.06em",
     textTransform: "uppercase",
-    color: "rgba(255,255,255,0.55)",
+    color: "rgba(var(--ink),0.55)",
     fontWeight: 700,
     padding: "6px 8px",
-    borderBottom: "1px solid rgba(255,255,255,0.08)",
+    borderBottom: "1px solid rgba(var(--ink),0.08)",
     textAlign: "left",
     whiteSpace: "nowrap",
   };
   const cell: CSSProperties = {
     padding: "8px 8px",
-    borderBottom: "1px solid rgba(255,255,255,0.04)",
+    borderBottom: "1px solid rgba(var(--ink),0.04)",
     fontSize: 12,
     verticalAlign: "middle",
-    color: "rgba(255,255,255,0.85)",
+    color: "rgba(var(--ink),0.85)",
   };
 
   return (
     <div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.55)", marginBottom: 6 }}>
+      <div style={{ fontSize: 11, color: "rgba(var(--ink),0.55)", marginBottom: 6 }}>
         Latest {txs.length} ERC-20 + native incoming transfer{txs.length === 1 ? "" : "s"} ·{" "}
-        <span style={{ color: "#6ee7b7" }}>{labeledCount} labeled</span>{" "}
-        / <span style={{ color: "#fbbf24" }}>{txs.length - labeledCount} unknown</span>
+        <span style={{ color: "var(--a-6ee7b7)" }}>{labeledCount} labeled</span>{" "}
+        / <span style={{ color: "var(--a-fbbf24)" }}>{txs.length - labeledCount} unknown</span>
       </div>
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12 }}>
@@ -2016,12 +2016,12 @@ function Hop1InflowTable({
               const tier = tx.fromLabel?.exchangeTier;
               const dotColor =
                 status === "sanctioned"
-                  ? "#ef4444"
+                  ? "var(--a-ef4444)"
                   : status === "identified"
-                  ? "#10b981"
+                  ? "var(--a-10b981)"
                   : status === "infrastructure"
-                  ? "#cbd5f5"
-                  : "#fbbf24";
+                  ? "var(--a-cbd5f5)"
+                  : "var(--a-fbbf24)";
               const rowBg =
                 status === "sanctioned" ? "rgba(239,68,68,0.06)" : "transparent";
               const value = pickValue(tx.valueChf, tx.valueUsd, currency);
@@ -2056,7 +2056,7 @@ function Hop1InflowTable({
                         href={txExplorerUrl}
                         target="_blank"
                         rel="noreferrer"
-                        style={{ color: "#93c5fd", textDecoration: "none" }}
+                        style={{ color: "var(--a-93c5fd)", textDecoration: "none" }}
                         title={tx.txHash}
                       >
                         {shortHex(tx.txHash, 8, 4)}
@@ -2065,10 +2065,10 @@ function Hop1InflowTable({
                       <span title={tx.txHash}>{shortHex(tx.txHash, 8, 4)}</span>
                     )}
                   </td>
-                  <td style={{ ...cell, fontFamily: "monospace", color: "rgba(255,255,255,0.6)" }}>
+                  <td style={{ ...cell, fontFamily: "monospace", color: "rgba(var(--ink),0.6)" }}>
                     {tx.blockNumber ?? "—"}
                   </td>
-                  <td style={{ ...cell, color: "rgba(255,255,255,0.6)", whiteSpace: "nowrap" }}>
+                  <td style={{ ...cell, color: "rgba(var(--ink),0.6)", whiteSpace: "nowrap" }}>
                     {timeAgo(tx.timestamp)}
                   </td>
                   <td style={cell}>
@@ -2081,7 +2081,7 @@ function Hop1InflowTable({
                               target="_blank"
                               rel="noreferrer"
                               style={{
-                                color: "#fff",
+                                color: "var(--heading)",
                                 fontWeight: 600,
                                 textDecoration: "none",
                               }}
@@ -2089,7 +2089,7 @@ function Hop1InflowTable({
                               {tx.fromLabel.name}
                             </a>
                           ) : (
-                            <span style={{ color: "#fff", fontWeight: 600 }}>
+                            <span style={{ color: "var(--heading)", fontWeight: 600 }}>
                               {tx.fromLabel.name}
                             </span>
                           )}
@@ -2098,7 +2098,7 @@ function Hop1InflowTable({
                             <span
                               style={{
                                 fontSize: 9,
-                                color: "#fca5a5",
+                                color: "var(--a-fca5a5)",
                                 border: "1px solid rgba(239,68,68,0.5)",
                                 padding: "0 4px",
                                 borderRadius: 3,
@@ -2111,13 +2111,13 @@ function Hop1InflowTable({
                           )}
                         </>
                       ) : (
-                        <span style={{ color: "rgba(255,255,255,0.5)" }}>Unknown</span>
+                        <span style={{ color: "rgba(var(--ink),0.5)" }}>Unknown</span>
                       )}
                     </div>
                     <div
                       style={{
                         fontSize: 10,
-                        color: "rgba(255,255,255,0.45)",
+                        color: "rgba(var(--ink),0.45)",
                         fontFamily: "monospace",
                         marginTop: 2,
                       }}
@@ -2127,7 +2127,7 @@ function Hop1InflowTable({
                           href={fromExplorerUrl}
                           target="_blank"
                           rel="noreferrer"
-                          style={{ color: "rgba(255,255,255,0.45)", textDecoration: "none" }}
+                          style={{ color: "rgba(var(--ink),0.45)", textDecoration: "none" }}
                           title={tx.fromAddress}
                         >
                           {shortHex(tx.fromAddress, 10, 6)}
@@ -2143,7 +2143,7 @@ function Hop1InflowTable({
                         fontSize: 9,
                         fontWeight: 800,
                         letterSpacing: "0.05em",
-                        color: "#6ee7b7",
+                        color: "var(--a-6ee7b7)",
                         background: "rgba(16,185,129,0.1)",
                         border: "1px solid rgba(16,185,129,0.4)",
                         padding: "1px 6px",
@@ -2159,7 +2159,7 @@ function Hop1InflowTable({
                   <td style={{ ...cell, fontWeight: 600 }}>{tx.token}</td>
                   <td style={{ ...cell, textAlign: "right" }}>
                     {tx.unpriced ? (
-                      <span style={{ color: "rgba(255,255,255,0.4)" }}>unpriced</span>
+                      <span style={{ color: "rgba(var(--ink),0.4)" }}>unpriced</span>
                     ) : (
                       formatMoney(value, currency)
                     )}
@@ -2225,15 +2225,15 @@ function StepClassify({
         {caseFile.wallets.map((w) => (
           <div key={w.address} style={walletCardStyle}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-              <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+              <code style={{ fontSize: 13, color: "var(--heading)" }}>{w.address}</code>
               {w.classification ? (
                 <RiskPill tier={w.classification.tier} />
               ) : (
-                <span style={{ color: "rgba(255,255,255,0.5)", fontSize: 12 }}>Not classified</span>
+                <span style={{ color: "rgba(var(--ink),0.5)", fontSize: 12 }}>Not classified</span>
               )}
             </div>
             {w.classification && (
-              <ul style={{ marginTop: 10, paddingLeft: 20, fontSize: 13, color: "rgba(255,255,255,0.75)" }}>
+              <ul style={{ marginTop: 10, paddingLeft: 20, fontSize: 13, color: "rgba(var(--ink),0.75)" }}>
                 {w.classification.reasons.map((r, i) => (
                   <li key={i}>{r}</li>
                 ))}
@@ -2388,20 +2388,20 @@ function StepTtp({
               >
                 <div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <code style={{ fontSize: 13, color: "#fff" }}>{w.address}</code>
+                    <code style={{ fontSize: 13, color: "var(--heading)" }}>{w.address}</code>
                     {tier && <RiskPill tier={tier} />}
                     {isRequired && !hasReport && !isRunning && (
-                      <span style={{ fontSize: 11, color: "#fca5a5", fontWeight: 700 }}>
+                      <span style={{ fontSize: 11, color: "var(--a-fca5a5)", fontWeight: 700 }}>
                         REQUIRED
                       </span>
                     )}
                     {hasReport && (
-                      <span style={{ fontSize: 11, color: "#6ee7b7", fontWeight: 700 }}>
+                      <span style={{ fontSize: 11, color: "var(--a-6ee7b7)", fontWeight: 700 }}>
                         ✓ Report received
                       </span>
                     )}
                   </div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", marginTop: 4 }}>
+                  <div style={{ fontSize: 12, color: "rgba(var(--ink),0.55)", marginTop: 4 }}>
                     {chainFamilyLabel(w.chainFamily)}
                     {w.primaryChain && ` · ${w.primaryChain}`}
                   </div>
@@ -2418,16 +2418,16 @@ function StepTtp({
                       value={`${w.ttp.riskScore}/100`}
                       color={
                         w.ttp.riskLevel === "critical"
-                          ? "#ef4444"
+                          ? "var(--a-ef4444)"
                           : w.ttp.riskLevel === "high"
-                          ? "#f59e0b"
-                          : "#10b981"
+                          ? "var(--a-f59e0b)"
+                          : "var(--a-10b981)"
                       }
                     />
                     <Stat label="Risk level" value={w.ttp.riskLevel.toUpperCase()} />
                     <Stat label="Report ID" value={w.ttp.reportId} />
                   </div>
-                  <p style={{ fontSize: 13, color: "rgba(255,255,255,0.75)" }}>{w.ttp.summary}</p>
+                  <p style={{ fontSize: 13, color: "rgba(var(--ink),0.75)" }}>{w.ttp.summary}</p>
                   <h5 style={{ ...h4, fontSize: 12 }}>Exposure breakdown</h5>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 6 }}>
                     {Object.entries(w.ttp.exposureBreakdown).map(([k, v]) => (
@@ -2436,10 +2436,10 @@ function StepTtp({
                         style={{
                           fontSize: 11,
                           padding: "3px 8px",
-                          background: "rgba(255,255,255,0.06)",
-                          border: "1px solid rgba(255,255,255,0.1)",
+                          background: "rgba(var(--ink),0.06)",
+                          border: "1px solid rgba(var(--ink),0.1)",
                           borderRadius: 4,
-                          color: "rgba(255,255,255,0.85)",
+                          color: "rgba(var(--ink),0.85)",
                         }}
                       >
                         {k.replace(/_/g, " ")}: {v.toFixed(1)}%
@@ -2449,7 +2449,7 @@ function StepTtp({
                   {w.ttp.flaggedAddresses.length > 0 && (
                     <>
                       <h5 style={{ ...h4, fontSize: 12, marginTop: 12 }}>Flagged counterparties</h5>
-                      <ul style={{ paddingLeft: 20, fontSize: 12, color: "rgba(255,255,255,0.75)" }}>
+                      <ul style={{ paddingLeft: 20, fontSize: 12, color: "rgba(var(--ink),0.75)" }}>
                         {w.ttp.flaggedAddresses.map((f, i) => (
                           <li key={i}>
                             <code>{f.address.slice(0, 10)}…{f.address.slice(-6)}</code> —{" "}
@@ -2471,7 +2471,7 @@ function StepTtp({
           Proceed to report →
         </button>
         {redPending.length > 0 && (
-          <span style={{ marginLeft: 12, color: "rgba(255,255,255,0.55)", fontSize: 12 }}>
+          <span style={{ marginLeft: 12, color: "rgba(var(--ink),0.55)", fontSize: 12 }}>
             {redPending.length} RED wallet{redPending.length === 1 ? "" : "s"} still awaiting TTP result
           </span>
         )}
@@ -2574,10 +2574,10 @@ function StepReport({
             {signoffStatus === "saving" ? "Saving…" : "Save sign-off"}
           </button>
           {signoffStatus === "saved" && (
-            <span style={{ color: "#6ee7b7", fontSize: 12, fontWeight: 600 }}>✓ Saved</span>
+            <span style={{ color: "var(--a-6ee7b7)", fontSize: 12, fontWeight: 600 }}>✓ Saved</span>
           )}
           {signoffStatus === "error" && (
-            <span style={{ color: "#fca5a5", fontSize: 12 }}>{signoffError}</span>
+            <span style={{ color: "var(--a-fca5a5)", fontSize: 12 }}>{signoffError}</span>
           )}
         </div>
       </div>
@@ -2613,7 +2613,7 @@ function StepReport({
         </button>
       </div>
       {caseFile.reportGenerated && (
-        <div style={{ marginTop: 12, color: "rgba(255,255,255,0.6)", fontSize: 12 }}>
+        <div style={{ marginTop: 12, color: "rgba(var(--ink),0.6)", fontSize: 12 }}>
           Last generated: {caseFile.reportGeneratedAt}
         </div>
       )}
@@ -2625,10 +2625,10 @@ function StepReport({
 function Stat({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <div>
-      <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
+      <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", letterSpacing: "0.05em", textTransform: "uppercase" }}>
         {label}
       </div>
-      <div style={{ fontSize: 16, fontWeight: 700, color: color || "#fff", marginTop: 2 }}>{value}</div>
+      <div style={{ fontSize: 16, fontWeight: 700, color: color || "var(--heading)", marginTop: 2 }}>{value}</div>
     </div>
   );
 }
@@ -2636,10 +2636,10 @@ function Stat({ label, value, color }: { label: string; value: string; color?: s
 function RiskPill({ tier }: { tier: RiskTier }) {
   const c =
     tier === "GREEN"
-      ? { bg: "rgba(16,185,129,0.15)", fg: "#6ee7b7", border: "rgba(16,185,129,0.45)" }
+      ? { bg: "rgba(16,185,129,0.15)", fg: "var(--a-6ee7b7)", border: "rgba(16,185,129,0.45)" }
       : tier === "AMBER"
-      ? { bg: "rgba(245,158,11,0.15)", fg: "#fbbf24", border: "rgba(245,158,11,0.45)" }
-      : { bg: "rgba(239,68,68,0.15)", fg: "#fca5a5", border: "rgba(239,68,68,0.45)" };
+      ? { bg: "rgba(245,158,11,0.15)", fg: "var(--a-fbbf24)", border: "rgba(245,158,11,0.45)" }
+      : { bg: "rgba(239,68,68,0.15)", fg: "var(--a-fca5a5)", border: "rgba(239,68,68,0.45)" };
   return (
     <span
       style={{
@@ -2662,8 +2662,8 @@ function RiskPill({ tier }: { tier: RiskTier }) {
 /* ── Styles ── */
 const pageRoot: CSSProperties = {
   minHeight: "calc(100vh - 48px)",
-  background: "linear-gradient(180deg, #0b1220 0%, #07080f 100%)",
-  color: "#fff",
+  background: "linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)",
+  color: "var(--heading)",
   fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
 
@@ -2680,7 +2680,7 @@ const eyebrow: CSSProperties = {
   textTransform: "uppercase",
   color: UC7_ACCENT,
   fontWeight: 700,
-  background: `${UC7_ACCENT}1a`,
+  background: `color-mix(in srgb, ${UC7_ACCENT} 10%, transparent)`,
   padding: "4px 10px",
   borderRadius: 20,
   marginBottom: 12,
@@ -2695,7 +2695,7 @@ const h1: CSSProperties = {
 };
 
 const subtitle: CSSProperties = {
-  color: "rgba(255,255,255,0.65)",
+  color: "rgba(var(--ink),0.65)",
   fontSize: 15,
   maxWidth: 700,
   marginTop: 8,
@@ -2708,8 +2708,8 @@ const contentWrap: CSSProperties = {
 };
 
 const cardStyle: CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.03)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 14,
   padding: 24,
 };
@@ -2720,7 +2720,7 @@ const caseHeaderStyle: CSSProperties = {
   alignItems: "flex-start",
   gap: 12,
   paddingBottom: 16,
-  borderBottom: "1px solid rgba(255,255,255,0.07)",
+  borderBottom: "1px solid rgba(var(--ink),0.07)",
   marginBottom: 20,
 };
 
@@ -2736,32 +2736,32 @@ const stepBtn: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
   borderRadius: 6,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.03)",
-  color: "rgba(255,255,255,0.6)",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.03)",
+  color: "rgba(var(--ink),0.6)",
   cursor: "pointer",
 };
 const stepBtnActive: CSSProperties = {
-  background: `${UC7_ACCENT}22`,
-  borderColor: `${UC7_ACCENT}66`,
-  color: "#fff",
+  background: `color-mix(in srgb, ${UC7_ACCENT} 13%, transparent)`,
+  borderColor: `color-mix(in srgb, ${UC7_ACCENT} 40%, transparent)`,
+  color: "var(--heading)",
 };
 const stepBtnDone: CSSProperties = {
-  color: "rgba(255,255,255,0.85)",
+  color: "rgba(var(--ink),0.85)",
 };
 
 const h2: CSSProperties = { fontSize: 20, fontWeight: 800, margin: 0 };
 const h3: CSSProperties = { fontSize: 16, fontWeight: 700, marginTop: 0, marginBottom: 6 };
-const h4: CSSProperties = { fontSize: 13, fontWeight: 700, marginTop: 16, marginBottom: 6, color: "rgba(255,255,255,0.85)" };
-const para: CSSProperties = { color: "rgba(255,255,255,0.65)", fontSize: 14, marginTop: 4 };
+const h4: CSSProperties = { fontSize: 13, fontWeight: 700, marginTop: 16, marginBottom: 6, color: "rgba(var(--ink),0.85)" };
+const para: CSSProperties = { color: "rgba(var(--ink),0.65)", fontSize: 14, marginTop: 4 };
 
 const inputStyle: CSSProperties = {
   flex: 1,
   padding: "10px 12px",
   borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
-  color: "#fff",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.04)",
+  color: "var(--heading)",
   fontSize: 14,
   outline: "none",
   width: "100%",
@@ -2770,7 +2770,7 @@ const inputStyle: CSSProperties = {
 const labelStyle: CSSProperties = {
   display: "block",
   fontSize: 11,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(var(--ink),0.55)",
   letterSpacing: "0.05em",
   textTransform: "uppercase",
   marginBottom: 6,
@@ -2779,9 +2779,9 @@ const labelStyle: CSSProperties = {
 const primaryBtn: CSSProperties = {
   padding: "10px 16px",
   borderRadius: 8,
-  border: `1px solid ${UC7_ACCENT}66`,
-  background: `${UC7_ACCENT}1c`,
-  color: "#fff",
+  border: `1px solid color-mix(in srgb, ${UC7_ACCENT} 40%, transparent)`,
+  background: `color-mix(in srgb, ${UC7_ACCENT} 11%, transparent)`,
+  color: "var(--heading)",
   fontSize: 14,
   fontWeight: 600,
   cursor: "pointer",
@@ -2792,9 +2792,9 @@ const primaryBtn: CSSProperties = {
 const secondaryBtn: CSSProperties = {
   padding: "8px 14px",
   borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.15)",
-  background: "rgba(255,255,255,0.04)",
-  color: "rgba(255,255,255,0.85)",
+  border: "1px solid rgba(var(--ink),0.15)",
+  background: "rgba(var(--ink),0.04)",
+  color: "rgba(var(--ink),0.85)",
   fontSize: 13,
   fontWeight: 500,
   cursor: "pointer",
@@ -2805,7 +2805,7 @@ const dangerBtn: CSSProperties = {
   borderRadius: 6,
   border: "1px solid rgba(239,68,68,0.4)",
   background: "rgba(239,68,68,0.1)",
-  color: "#fca5a5",
+  color: "var(--a-fca5a5)",
   fontSize: 12,
   cursor: "pointer",
 };
@@ -2813,16 +2813,16 @@ const dangerBtn: CSSProperties = {
 const linkBtn: CSSProperties = {
   padding: "4px 10px",
   borderRadius: 6,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
-  color: "#fff",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.04)",
+  color: "var(--heading)",
   fontSize: 12,
   cursor: "pointer",
 };
 
 const walletCardStyle: CSSProperties = {
-  border: "1px solid rgba(255,255,255,0.07)",
-  background: "rgba(255,255,255,0.02)",
+  border: "1px solid rgba(var(--ink),0.07)",
+  background: "rgba(var(--ink),0.02)",
   borderRadius: 10,
   padding: 16,
 };
@@ -2836,28 +2836,28 @@ const tableStyle: CSSProperties = {
 const thStyle: CSSProperties = {
   textAlign: "left",
   fontSize: 11,
-  color: "rgba(255,255,255,0.55)",
+  color: "rgba(var(--ink),0.55)",
   letterSpacing: "0.04em",
   textTransform: "uppercase",
   padding: "8px 10px",
-  borderBottom: "1px solid rgba(255,255,255,0.08)",
+  borderBottom: "1px solid rgba(var(--ink),0.08)",
 };
 
 const trStyle: CSSProperties = {};
 
 const tdStyle: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.85)",
+  color: "rgba(var(--ink),0.85)",
   padding: "8px 10px",
-  borderBottom: "1px solid rgba(255,255,255,0.04)",
+  borderBottom: "1px solid rgba(var(--ink),0.04)",
 };
 
 const mutedBlock: CSSProperties = {
   padding: 20,
   textAlign: "center",
-  color: "rgba(255,255,255,0.45)",
+  color: "rgba(var(--ink),0.45)",
   fontSize: 13,
-  background: "rgba(255,255,255,0.02)",
+  background: "rgba(var(--ink),0.02)",
   borderRadius: 8,
   marginTop: 10,
 };
@@ -2868,17 +2868,17 @@ const errorBox: CSSProperties = {
   borderRadius: 8,
   background: "rgba(239,68,68,0.1)",
   border: "1px solid rgba(239,68,68,0.3)",
-  color: "#fca5a5",
+  color: "var(--a-fca5a5)",
   fontSize: 13,
 };
 
 const preBlock: CSSProperties = {
   background: "rgba(0,0,0,0.25)",
-  border: "1px solid rgba(255,255,255,0.06)",
+  border: "1px solid rgba(var(--ink),0.06)",
   borderRadius: 6,
   padding: 10,
   fontSize: 12,
-  color: "#fff",
+  color: "var(--heading)",
   whiteSpace: "pre-wrap",
   fontFamily: "monospace",
   margin: 0,
@@ -2888,8 +2888,8 @@ const codeInline: CSSProperties = {
   display: "inline-block",
   padding: "6px 10px",
   background: "rgba(0,0,0,0.25)",
-  border: "1px solid rgba(255,255,255,0.06)",
+  border: "1px solid rgba(var(--ink),0.06)",
   borderRadius: 6,
   fontSize: 11,
-  color: "#fff",
+  color: "var(--heading)",
 };

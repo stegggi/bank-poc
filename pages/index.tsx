@@ -30,7 +30,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC1 · eBanking",
     title: "Issue Crypto Wallet",
     desc: "A bank creates a seedless embedded wallet inside the banking app. No seed phrases, no browser extensions. Just a wallet that feels like a bank account.",
-    accent: "#3b82f6",
+    accent: "var(--a-3b82f6)",
     highlights: [
       "Seedless Privy embedded wallet",
       "Bank sponsored gas on first use",
@@ -43,7 +43,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC2 · Interbank Payment",
     title: "Travel Rule Payment",
     desc: "Bank A encrypts compliance data into a travel rule envelope and posts it on chain. Bank B decrypts, ACKs, and the token transfer executes with an immutable audit trail.",
-    accent: "#10b981",
+    accent: "var(--a-10b981)",
     highlights: [
       "HPKE encrypted travel rule envelope",
       "On chain ACK compliance gate",
@@ -56,7 +56,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC3 · Trust Credential",
     title: "KYC Badge for Wallets",
     desc: "Banks issue expiring, revocable trust badges to wallet addresses. Institutions and individuals can verify compliance status instantly without needing a wallet.",
-    accent: "#8b5cf6",
+    accent: "var(--a-8b5cf6)",
     highlights: [
       "Expiry + instant revocation by issuer",
       "Verifiable by anyone without a wallet",
@@ -69,7 +69,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC4 · Context Passport",
     title: "AI-Ready Banking Data",
     desc: "Customers create encrypted KYC context modules and grant banks' AI agents time bound access. Data portability with cryptographic consent. Plaintext never leaves the device.",
-    accent: "#f59e0b",
+    accent: "var(--a-f59e0b)",
     highlights: [
       "Client side AES-GCM encryption",
       "On chain time bound access grants",
@@ -82,7 +82,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC5 · AI Trading Agent",
     title: "Perp Trading Bot",
     desc: "An autonomous AI agent trades BTCUSD perpetual futures on Ethereal mainnet. It classifies market regimes, sizes positions by confidence, and manages risk around the clock.",
-    accent: "#ef4444",
+    accent: "var(--a-ef4444)",
     highlights: [
       "TREND / RANGE / UNKNOWN regime engine",
       "Linked signer on chain authorization",
@@ -95,7 +95,7 @@ const USE_CASES: UcDef[] = [
     tag: "UC6 · LP Automation",
     title: "Liquidity Provider Bot",
     desc: "A bot that autonomously manages concentrated liquidity positions on Base. It rebalances bands, harvests fees, and selects the best pool 24/7 without human intervention.",
-    accent: "#06b6d4",
+    accent: "var(--a-06b6d4)",
     highlights: [
       "Uniswap V3 & Aerodrome Slipstream",
       "Regime aware band rebalancing",
@@ -108,13 +108,26 @@ const USE_CASES: UcDef[] = [
     tag: "UC7 · Source of Wealth",
     title: "Crypto Onboarding SoW",
     desc: "A compliance tool for onboarding clients with crypto assets. Verifies wallet ownership, traces wealth back to regulated exchanges, classifies risk, and produces a FINMA-ready audit report.",
-    accent: "#ec4899",
+    accent: "var(--a-ec4899)",
     highlights: [
       "Multi-chain ownership proof + OFAC screening",
       "GREEN / AMBER / RED tier classification",
       "Third-party forensic escalation for high-risk wallets",
     ],
     links: [{ href: "/uc7", label: "Open Source of Wealth" }],
+  },
+  {
+    n: "08",
+    tag: "UC8 · Stablecoin Rail",
+    title: "Cross-Border & Treasury",
+    desc: "Limmat Bank runs cross-border remittances and corporate treasury on a Tempo stablecoin rail — a live per-corridor compliance map, a tokenized CHF deposit, and a just-in-time treasury agent. It shows where the bank earns.",
+    accent: "var(--a-6366f1)",
+    highlights: [
+      "Live TIP-20 settlement on Tempo (Moderato)",
+      "Per-corridor travel-rule compliance map",
+      "Tokenized deposit + just-in-time treasury agent",
+    ],
+    links: [{ href: "/uc8", label: "Open Stablecoin Rail" }],
   },
 ];
 
@@ -181,7 +194,7 @@ export default function Home() {
             <div style={eyebrowRow}>
               <span style={eyebrowPill}>Blockchain Concept Bank</span>
               <span style={eyebrowSep} />
-              <span style={eyebrowMeta}>7 use cases · Arbitrum &amp; Base</span>
+              <span style={eyebrowMeta}>8 use cases · Arbitrum · Base · Tempo</span>
             </div>
 
             {/* Headline */}
@@ -222,7 +235,7 @@ export default function Home() {
             )}
 
             {/* Journey prompt */}
-            <div style={scrollNudge}>Explore all 7 use cases below ↓</div>
+            <div style={scrollNudge}>Explore all 8 use cases below ↓</div>
           </div>
         </section>
 
@@ -253,7 +266,7 @@ export default function Home() {
       <style jsx global>{`
         html,
         body {
-          background: #07080f;
+          background: var(--bg);
           margin: 0;
           padding: 0;
           -webkit-font-smoothing: antialiased;
@@ -265,7 +278,7 @@ export default function Home() {
             radial-gradient(ellipse 70% 55% at 15% 45%, rgba(59, 130, 246, 0.13) 0%, transparent 60%),
             radial-gradient(ellipse 55% 50% at 82% 18%, rgba(139, 92, 246, 0.11) 0%, transparent 55%),
             radial-gradient(ellipse 65% 55% at 55% 85%, rgba(16, 185, 129, 0.09) 0%, transparent 55%),
-            #07080f;
+            var(--bg);
         }
 
         /* Rotating hero word */
@@ -292,9 +305,9 @@ export default function Home() {
         }
         .uc-card:hover {
           transform: translateY(-4px);
-          background: rgba(255, 255, 255, 0.055) !important;
+          background: rgba(var(--ink), 0.055) !important;
           box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55),
-            0 0 0 1px rgba(255, 255, 255, 0.11);
+            0 0 0 1px rgba(var(--ink), 0.11);
         }
 
         /* Link buttons */
@@ -379,9 +392,9 @@ function UcCard({ uc, isMobile }: { uc: UcDef; isMobile: boolean }) {
 /* ── Styles ── */
 
 const pageRoot: CSSProperties = {
-  background: "#07080f",
+  background: "var(--bg)",
   minHeight: "100vh",
-  color: "#e8e8f0",
+  color: "var(--text)",
   fontFamily:
     "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
 };
@@ -409,26 +422,26 @@ const eyebrowPill: CSSProperties = {
   alignItems: "center",
   padding: "5px 13px",
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.13)",
+  border: "1px solid rgba(var(--ink),0.13)",
   fontSize: 11,
   fontWeight: 700,
   letterSpacing: "0.09em",
   textTransform: "uppercase",
-  color: "rgba(255,255,255,0.55)",
-  background: "rgba(255,255,255,0.045)",
+  color: "rgba(var(--ink),0.55)",
+  background: "rgba(var(--ink),0.045)",
 };
 
 const eyebrowSep: CSSProperties = {
   width: 4,
   height: 4,
   borderRadius: "50%",
-  background: "rgba(255,255,255,0.18)",
+  background: "rgba(var(--ink),0.18)",
   flexShrink: 0,
 };
 
 const eyebrowMeta: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.50)",
+  color: "rgba(var(--ink),0.50)",
   fontWeight: 500,
 };
 
@@ -438,14 +451,14 @@ const heroH1: CSSProperties = {
   fontWeight: 900,
   lineHeight: 1.06,
   letterSpacing: "-0.025em",
-  color: "#ffffff",
+  color: "var(--heading)",
 };
 
 const heroAccentWord: CSSProperties = {
   display: "inline-block",
   padding: "4px 20px 6px",
   borderRadius: 999,
-  background: "linear-gradient(130deg, #3b82f6 0%, #8b5cf6 100%)",
+  background: "linear-gradient(130deg, var(--a-3b82f6) 0%, var(--a-8b5cf6) 100%)",
   color: "#fff",
   fontWeight: 900,
   letterSpacing: "-0.015em",
@@ -455,7 +468,7 @@ const heroSubtext: CSSProperties = {
   margin: "26px 0 0",
   fontSize: 17,
   lineHeight: 1.68,
-  color: "rgba(255,255,255,0.65)",
+  color: "rgba(var(--ink),0.65)",
   maxWidth: 620,
 };
 
@@ -472,7 +485,7 @@ const envWarning: CSSProperties = {
 
 const envIcon: CSSProperties = {
   fontSize: 15,
-  color: "#ef4444",
+  color: "var(--a-ef4444)",
   flexShrink: 0,
   marginTop: 1,
 };
@@ -480,26 +493,26 @@ const envIcon: CSSProperties = {
 const envTitle: CSSProperties = {
   fontWeight: 700,
   fontSize: 13,
-  color: "#fca5a5",
+  color: "var(--a-fca5a5)",
   marginBottom: 4,
 };
 
 const envBody: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.38)",
+  color: "rgba(var(--ink),0.38)",
 };
 
 const envCode: CSSProperties = {
   fontFamily:
     "ui-monospace, SFMono-Regular, Menlo, Monaco, 'Courier New', monospace",
   fontSize: 12,
-  color: "#fca5a5",
+  color: "var(--a-fca5a5)",
 };
 
 const scrollNudge: CSSProperties = {
   marginTop: 44,
   fontSize: 13,
-  color: "rgba(255,255,255,0.38)",
+  color: "rgba(var(--ink),0.38)",
   fontWeight: 500,
   letterSpacing: "0.02em",
 };
@@ -521,7 +534,7 @@ const dividerRow: CSSProperties = {
 const dividerLine: CSSProperties = {
   flex: 1,
   height: 1,
-  background: "rgba(255,255,255,0.06)",
+  background: "rgba(var(--ink),0.06)",
 };
 
 const dividerLabel: CSSProperties = {
@@ -529,7 +542,7 @@ const dividerLabel: CSSProperties = {
   fontWeight: 700,
   letterSpacing: "0.11em",
   textTransform: "uppercase",
-  color: "rgba(255,255,255,0.22)",
+  color: "rgba(var(--ink),0.22)",
   flexShrink: 0,
 };
 
@@ -541,8 +554,8 @@ const ucGrid: CSSProperties = {
 
 /* Card */
 const ucCard: CSSProperties = {
-  background: "rgba(255,255,255,0.032)",
-  border: "1px solid rgba(255,255,255,0.075)",
+  background: "rgba(var(--ink),0.032)",
+  border: "1px solid rgba(var(--ink),0.075)",
   borderTop: "2px solid", /* borderTopColor set per card */
   borderRadius: 16,
   padding: "24px 24px 22px",
@@ -568,7 +581,7 @@ const cardNumber: CSSProperties = {
 const cardTag: CSSProperties = {
   fontSize: 12,
   fontWeight: 600,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(var(--ink),0.42)",
   letterSpacing: "0.03em",
 };
 
@@ -576,7 +589,7 @@ const cardTitle: CSSProperties = {
   margin: "0 0 12px",
   fontSize: 22,
   fontWeight: 800,
-  color: "#ffffff",
+  color: "var(--heading)",
   lineHeight: 1.18,
   letterSpacing: "-0.022em",
 };
@@ -584,7 +597,7 @@ const cardTitle: CSSProperties = {
 const cardDesc: CSSProperties = {
   margin: "0 0 20px",
   fontSize: 14,
-  color: "rgba(255,255,255,0.62)",
+  color: "rgba(var(--ink),0.62)",
   lineHeight: 1.68,
   flexGrow: 1,
 };
@@ -603,7 +616,7 @@ const cardHighlightItem: CSSProperties = {
   alignItems: "center",
   gap: 9,
   fontSize: 13,
-  color: "rgba(255,255,255,0.70)",
+  color: "rgba(var(--ink),0.70)",
   fontWeight: 500,
   lineHeight: 1.4,
 };
@@ -636,20 +649,20 @@ const ctaBtn: CSSProperties = {
   textDecoration: "none",
   fontSize: 13,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
   letterSpacing: "0.01em",
   border: "1px solid transparent",
 };
 
 const ctaBtnGhost: CSSProperties = {
   background: "transparent",
-  border: "1px solid rgba(255,255,255,0.14)",
-  color: "rgba(255,255,255,0.55)",
+  border: "1px solid rgba(var(--ink),0.14)",
+  color: "rgba(var(--ink),0.55)",
 };
 
 const ctaHint: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.42)",
+  color: "rgba(var(--ink),0.42)",
   fontWeight: 500,
 };
 
@@ -658,6 +671,6 @@ const footer: CSSProperties = {
   textAlign: "center",
   padding: "28px 24px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.18)",
-  borderTop: "1px solid rgba(255,255,255,0.05)",
+  color: "rgba(var(--ink),0.18)",
+  borderTop: "1px solid rgba(var(--ink),0.05)",
 };

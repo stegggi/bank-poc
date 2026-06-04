@@ -277,8 +277,8 @@ export default function SignPage() {
 
   const pageStyle: CSSProperties = {
     minHeight: "100vh",
-    background: "linear-gradient(180deg, #0b1220 0%, #07080f 100%)",
-    color: "#fff",
+    background: "linear-gradient(180deg, var(--bg) 0%, var(--bg) 100%)",
+    color: "var(--heading)",
     fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif",
     display: "flex",
     alignItems: "center",
@@ -286,8 +286,8 @@ export default function SignPage() {
     padding: 20,
   };
   const cardStyle: CSSProperties = {
-    background: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    background: "rgba(var(--ink),0.04)",
+    border: "1px solid rgba(var(--ink),0.08)",
     borderRadius: 14,
     padding: 28,
     maxWidth: 500,
@@ -299,7 +299,7 @@ export default function SignPage() {
       <div style={pageStyle}>
         <div style={cardStyle}>
           <h1 style={{ margin: 0, fontSize: 20 }}>Digital Asset Ownership Verification</h1>
-          <p style={{ color: "rgba(255,255,255,0.6)", marginTop: 12 }}>
+          <p style={{ color: "rgba(var(--ink),0.6)", marginTop: 12 }}>
             {error || "Loading challenge…"}
           </p>
         </div>
@@ -310,38 +310,38 @@ export default function SignPage() {
   return (
     <div style={pageStyle}>
       <div style={cardStyle}>
-        <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
+        <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", letterSpacing: "0.08em", textTransform: "uppercase", marginBottom: 8 }}>
           Digital Asset Wallet Verification
         </div>
         <h1 style={{ margin: "0 0 6px", fontSize: 22 }}>Verify Wallet Ownership</h1>
-        <div style={{ color: "rgba(255,255,255,0.55)", fontSize: 13, marginBottom: 20 }}>
+        <div style={{ color: "rgba(var(--ink),0.55)", fontSize: 13, marginBottom: 20 }}>
           Reference {challenge.caseReference}
         </div>
 
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>Challenge message</div>
-          <pre style={{ fontSize: 12, color: "#fff", margin: 0, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>{challenge.message}</pre>
+        <div style={{ background: "rgba(var(--ink),0.03)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", marginBottom: 4 }}>Challenge message</div>
+          <pre style={{ fontSize: 12, color: "var(--heading)", margin: 0, fontFamily: "monospace", whiteSpace: "pre-wrap" }}>{challenge.message}</pre>
         </div>
 
-        <div style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.08)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4 }}>Wallet to sign with</div>
-          <code style={{ fontSize: 12, color: "#fff", wordBreak: "break-all" }}>{challenge.address}</code>
-          <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginTop: 4 }}>Chain: {challenge.chainFamily}</div>
+        <div style={{ background: "rgba(var(--ink),0.03)", border: "1px solid rgba(var(--ink),0.08)", borderRadius: 8, padding: 14, marginBottom: 20 }}>
+          <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", marginBottom: 4 }}>Wallet to sign with</div>
+          <code style={{ fontSize: 12, color: "var(--heading)", wordBreak: "break-all" }}>{challenge.address}</code>
+          <div style={{ fontSize: 11, color: "rgba(var(--ink),0.5)", marginTop: 4 }}>Chain: {challenge.chainFamily}</div>
         </div>
 
         {status === "done" ? (
-          <div style={{ padding: 14, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 8, color: "#6ee7b7" }}>
+          <div style={{ padding: 14, background: "rgba(16,185,129,0.1)", border: "1px solid rgba(16,185,129,0.4)", borderRadius: 8, color: "var(--a-6ee7b7)" }}>
             {result}
           </div>
         ) : (
           <>
             {status === "error" && (
-              <div style={{ padding: 14, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8, color: "#fca5a5", marginBottom: 14 }}>
+              <div style={{ padding: 14, background: "rgba(239,68,68,0.1)", border: "1px solid rgba(239,68,68,0.4)", borderRadius: 8, color: "var(--a-fca5a5)", marginBottom: 14 }}>
                 {error}
               </div>
             )}
             {status === "signing" || status === "verifying" ? (
-              <div style={{ padding: 14, color: "rgba(255,255,255,0.65)", textAlign: "center" }}>
+              <div style={{ padding: 14, color: "rgba(var(--ink),0.65)", textAlign: "center" }}>
                 {status === "signing" ? "Please sign the message in your wallet…" : "Verifying signature…"}
               </div>
             ) : (
@@ -362,7 +362,7 @@ export default function SignPage() {
                 <summary
                   style={{
                     cursor: "pointer",
-                    color: "rgba(255,255,255,0.65)",
+                    color: "rgba(var(--ink),0.65)",
                     fontSize: 13,
                     padding: "8px 0",
                   }}
@@ -371,8 +371,8 @@ export default function SignPage() {
                 </summary>
                 <div
                   style={{
-                    background: "rgba(255,255,255,0.03)",
-                    border: "1px solid rgba(255,255,255,0.08)",
+                    background: "rgba(var(--ink),0.03)",
+                    border: "1px solid rgba(var(--ink),0.08)",
                     borderRadius: 8,
                     padding: 14,
                     marginTop: 6,
@@ -381,7 +381,7 @@ export default function SignPage() {
                   <ol
                     style={{
                       fontSize: 12,
-                      color: "rgba(255,255,255,0.7)",
+                      color: "rgba(var(--ink),0.7)",
                       paddingLeft: 18,
                       margin: "0 0 10px",
                       lineHeight: 1.7,
@@ -407,9 +407,9 @@ export default function SignPage() {
                       minHeight: 70,
                       padding: 10,
                       borderRadius: 6,
-                      border: "1px solid rgba(255,255,255,0.1)",
+                      border: "1px solid rgba(var(--ink),0.1)",
                       background: "rgba(0,0,0,0.25)",
-                      color: "#fff",
+                      color: "var(--heading)",
                       fontFamily: "monospace",
                       fontSize: 11,
                       resize: "vertical",
@@ -425,9 +425,9 @@ export default function SignPage() {
                         marginTop: 6,
                         padding: 8,
                         borderRadius: 6,
-                        border: "1px solid rgba(255,255,255,0.1)",
+                        border: "1px solid rgba(var(--ink),0.1)",
                         background: "rgba(0,0,0,0.25)",
-                        color: "#fff",
+                        color: "var(--heading)",
                         fontFamily: "monospace",
                         fontSize: 11,
                       }}
@@ -440,9 +440,9 @@ export default function SignPage() {
                       marginTop: 10,
                       padding: "10px 14px",
                       borderRadius: 8,
-                      border: "1px solid rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "#fff",
+                      border: "1px solid rgba(var(--ink),0.15)",
+                      background: "rgba(var(--ink),0.06)",
+                      color: "var(--heading)",
                       fontSize: 13,
                       fontWeight: 600,
                       cursor: status === "verifying" || !manualSig.trim() ? "not-allowed" : "pointer",
@@ -457,7 +457,7 @@ export default function SignPage() {
           </>
         )}
 
-        <p style={{ color: "rgba(255,255,255,0.4)", fontSize: 11, marginTop: 20, lineHeight: 1.5 }}>
+        <p style={{ color: "rgba(var(--ink),0.4)", fontSize: 11, marginTop: 20, lineHeight: 1.5 }}>
           This challenge contains no personal information. Signing proves you control the wallet
           address without revealing any private keys, without paying gas, and without sending an
           on-chain transaction.
@@ -488,7 +488,7 @@ function SignButtons({
     borderRadius: 10,
     border: "1px solid rgba(59,130,246,0.4)",
     background: "rgba(59,130,246,0.15)",
-    color: "#fff",
+    color: "var(--heading)",
     fontSize: 15,
     fontWeight: 600,
     cursor: "pointer",
@@ -496,13 +496,13 @@ function SignButtons({
   };
   const btnSecondary: CSSProperties = {
     ...btn,
-    border: "1px solid rgba(255,255,255,0.15)",
-    background: "rgba(255,255,255,0.06)",
+    border: "1px solid rgba(var(--ink),0.15)",
+    background: "rgba(var(--ink),0.06)",
   };
   if (challenge.chainFamily === "evm") {
     const sectionLabel: CSSProperties = {
       fontSize: 11,
-      color: "rgba(255,255,255,0.45)",
+      color: "rgba(var(--ink),0.45)",
       letterSpacing: "0.05em",
       textTransform: "uppercase",
       fontWeight: 700,
@@ -545,7 +545,7 @@ function SignButtons({
                 <span>Sign with {w.info.name}</span>
               </button>
             ))}
-            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+            <p style={{ color: "rgba(var(--ink),0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
               {detectedWallets.length === 1
                 ? "Detected one wallet extension in this browser. Click to sign."
                 : `Detected ${detectedWallets.length} wallet extensions in this browser — pick the one that holds the address you registered.`}
@@ -556,7 +556,7 @@ function SignButtons({
             <button style={walletBtn} onClick={() => onEvm()}>
               Connect browser wallet
             </button>
-            <p style={{ color: "rgba(255,255,255,0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+            <p style={{ color: "rgba(var(--ink),0.5)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
               A wallet is injected in this browser but it doesn&rsquo;t advertise
               itself via EIP-6963 — we&rsquo;ll use whichever one currently holds{" "}
               <code>window.ethereum</code>. If that turns out to be the wrong
@@ -571,7 +571,7 @@ function SignButtons({
               background: "rgba(245,158,11,0.08)",
               border: "1px solid rgba(245,158,11,0.3)",
               borderRadius: 8,
-              color: "#fbbf24",
+              color: "var(--a-fbbf24)",
               fontSize: 12,
               lineHeight: 1.5,
             }}
@@ -583,27 +583,27 @@ function SignButtons({
             use, or trust):
             <ul style={{ paddingLeft: 18, marginTop: 6, marginBottom: 0 }}>
               <li>
-                <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                <a href="https://metamask.io/download/" target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
                   MetaMask
                 </a>
               </li>
               <li>
-                <a href="https://rabby.io/" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                <a href="https://rabby.io/" target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
                   Rabby
                 </a>
               </li>
               <li>
-                <a href="https://www.coinbase.com/wallet/downloads" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                <a href="https://www.coinbase.com/wallet/downloads" target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
                   Coinbase Wallet
                 </a>
               </li>
               <li>
-                <a href="https://trustwallet.com/download" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                <a href="https://trustwallet.com/download" target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
                   Trust Wallet
                 </a>
               </li>
               <li>
-                <a href="https://www.okx.com/web3" target="_blank" rel="noreferrer" style={{ color: "#93c5fd" }}>
+                <a href="https://www.okx.com/web3" target="_blank" rel="noreferrer" style={{ color: "var(--a-93c5fd)" }}>
                   OKX Wallet
                 </a>
               </li>
@@ -632,7 +632,7 @@ function SignButtons({
         >
           Scan QR with mobile wallet
         </button>
-        <p style={{ color: "rgba(255,255,255,0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
+        <p style={{ color: "rgba(var(--ink),0.55)", fontSize: 11, marginTop: 6, lineHeight: 1.5 }}>
           {walletConnectAvailable
             ? "Opens a QR code that any WalletConnect-compatible app can scan — MetaMask Mobile, Trust, Rainbow, Argent, Safe, Coinbase, OKX, Zerion, Ledger Live, Rabby, …"
             : "WalletConnect isn't configured on this server. Install a browser wallet above to sign instead."}
@@ -646,14 +646,14 @@ function SignButtons({
         <button style={btn} onClick={onSol}>
           Connect Solana wallet and sign
         </button>
-        <p style={{ color: "rgba(255,255,255,0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
+        <p style={{ color: "rgba(var(--ink),0.45)", fontSize: 11, marginTop: 8, lineHeight: 1.5 }}>
           Detects Phantom / Solflare automatically.
         </p>
       </>
     );
   }
   return (
-    <div style={{ padding: 14, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, color: "#fbbf24" }}>
+    <div style={{ padding: 14, background: "rgba(245,158,11,0.08)", border: "1px solid rgba(245,158,11,0.4)", borderRadius: 8, color: "var(--a-fbbf24)" }}>
       {challenge.chainFamily === "bitcoin"
         ? "Bitcoin signature verification is handled out-of-band in this prototype. Contact your compliance officer for instructions."
         : `Signing for ${challenge.chainFamily} is not supported in this prototype.`}

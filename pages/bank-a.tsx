@@ -592,54 +592,54 @@ export default function BankA() {
     <>
       <style jsx global>{`
         * { box-sizing: border-box; }
-        body { background: #07080f; color: #f0f0f0; }
+        body { background: var(--bg); color: var(--text); }
         .ba-input {
           width: 100%;
-          background: rgba(255,255,255,0.05);
-          border: 1px solid rgba(255,255,255,0.12);
+          background: rgba(var(--ink),0.05);
+          border: 1px solid rgba(var(--ink),0.12);
           border-radius: 8px;
           padding: 8px 12px;
-          color: #f0f0f0;
+          color: var(--text);
           font-family: inherit;
           font-size: 13px;
           outline: none;
           transition: border-color 160ms;
         }
-        .ba-input:focus { border-color: #10b981; }
+        .ba-input:focus { border-color: var(--a-10b981); }
         .ba-input[readonly] { opacity: 0.5; cursor: default; }
-        .ba-input::placeholder { color: rgba(255,255,255,0.25); }
+        .ba-input::placeholder { color: rgba(var(--ink),0.25); }
         .ba-btn {
           display: inline-flex;
           align-items: center;
           gap: 6px;
           padding: 9px 18px;
           border-radius: 8px;
-          border: 1px solid rgba(255,255,255,0.12);
-          background: rgba(255,255,255,0.07);
-          color: #f0f0f0;
+          border: 1px solid rgba(var(--ink),0.12);
+          background: rgba(var(--ink),0.07);
+          color: var(--text);
           font-family: inherit;
           font-size: 13px;
           font-weight: 600;
           cursor: pointer;
           transition: background 150ms, border-color 150ms;
         }
-        .ba-btn:hover { background: rgba(255,255,255,0.12); }
+        .ba-btn:hover { background: rgba(var(--ink),0.12); }
         .ba-btn:disabled { opacity: 0.35; cursor: not-allowed; pointer-events: none; }
         .ba-btn-primary {
-          background: #10b981;
-          border-color: #10b981;
+          background: var(--a-10b981);
+          border-color: var(--a-10b981);
           color: #fff;
         }
-        .ba-btn-primary:hover { background: #0ea572; border-color: #0ea572; }
+        .ba-btn-primary:hover { background: var(--a-0ea572); border-color: var(--a-0ea572); }
         .ba-btn-send-ready {
-          background: #10b981;
-          border-color: #10b981;
+          background: var(--a-10b981);
+          border-color: var(--a-10b981);
           color: #fff;
           font-weight: 700;
           box-shadow: 0 0 0 0 rgba(16,185,129,0.5);
           animation: sendPulse 1.8s ease-in-out infinite;
         }
-        .ba-btn-send-ready:hover { background: #0ea572 !important; border-color: #0ea572 !important; }
+        .ba-btn-send-ready:hover { background: var(--a-0ea572) !important; border-color: var(--a-0ea572) !important; }
         @keyframes sendPulse {
           0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.55); }
           60%  { box-shadow: 0 0 0 10px rgba(16,185,129,0); }
@@ -648,9 +648,9 @@ export default function BankA() {
         .wtm-tab {
           padding: 7px 14px;
           border-radius: 6px;
-          border: 1px solid rgba(255,255,255,0.08);
+          border: 1px solid rgba(var(--ink),0.08);
           background: transparent;
-          color: rgba(255,255,255,0.45);
+          color: rgba(var(--ink),0.45);
           font-family: inherit;
           font-size: 12px;
           font-weight: 600;
@@ -658,11 +658,11 @@ export default function BankA() {
           transition: all 150ms;
           white-space: nowrap;
         }
-        .wtm-tab:hover { color: rgba(255,255,255,0.8); border-color: rgba(255,255,255,0.2); }
+        .wtm-tab:hover { color: rgba(var(--ink),0.8); border-color: rgba(var(--ink),0.2); }
         .wtm-tab-active {
           background: rgba(16,185,129,0.15);
-          border-color: #10b981;
-          color: #10b981;
+          border-color: var(--a-10b981);
+          color: var(--a-10b981);
         }
         .wtm-panel { animation: wtmIn 220ms ease; }
         @keyframes wtmIn {
@@ -703,12 +703,12 @@ export default function BankA() {
                 {userEmail && (
                   <div style={metaRow}>
                     <span style={metaLabel}>eBanking login</span>
-                    <span style={{ color: "rgba(255,255,255,0.75)", fontSize: 13 }}>{userEmail}</span>
+                    <span style={{ color: "rgba(var(--ink),0.75)", fontSize: 13 }}>{userEmail}</span>
                   </div>
                 )}
                 <div style={metaRow}>
                   <span style={metaLabel}>xBank balance</span>
-                  <span style={{ ...monoVal, color: "#10b981" }}>{human(xbBal)} XB</span>
+                  <span style={{ ...monoVal, color: "var(--a-10b981)" }}>{human(xbBal)} XB</span>
                 </div>
                 <div style={{ ...dimText, fontSize: 11 }}>
                   Bank A ID: {BANK_A_ID} · Network: Arbitrum Sepolia
@@ -802,9 +802,9 @@ export default function BankA() {
                 type="checkbox"
                 checked={requireAck}
                 onChange={e => setRequireAck(e.target.checked)}
-                style={{ accentColor: "#10b981" }}
+                style={{ accentColor: "var(--a-10b981)" }}
               />
-              <span style={{ color: "rgba(255,255,255,0.75)", fontSize: 13 }}>
+              <span style={{ color: "rgba(var(--ink),0.75)", fontSize: 13 }}>
                 Require receiving bank ACK before sending tokens
               </span>
             </label>
@@ -814,8 +814,8 @@ export default function BankA() {
               <div style={ackReadyBanner}>
                 <span style={{ fontSize: 16 }}>✓</span>
                 <div>
-                  <div style={{ fontWeight: 700, color: "#10b981", marginBottom: 2 }}>ACK received from Bank B</div>
-                  <div style={{ fontSize: 12, color: "rgba(255,255,255,0.65)" }}>The receiving bank approved the request. Click <strong style={{ color: "#fff" }}>Send payment</strong> to complete the token transfer.</div>
+                  <div style={{ fontWeight: 700, color: "var(--a-10b981)", marginBottom: 2 }}>ACK received from Bank B</div>
+                  <div style={{ fontSize: 12, color: "rgba(var(--ink),0.65)" }}>The receiving bank approved the request. Click <strong style={{ color: "var(--heading)" }}>Send payment</strong> to complete the token transfer.</div>
                 </div>
               </div>
             )}
@@ -837,7 +837,7 @@ export default function BankA() {
             {/* Bank B prompt */}
             {showOpenBankBPrompt && (
               <div style={promptBox}>
-                <div style={{ color: "rgba(255,255,255,0.8)", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
+                <div style={{ color: "rgba(var(--ink),0.8)", fontSize: 13, marginBottom: 10, lineHeight: 1.5 }}>
                   Request posted to Payment Hub. To simulate Bank B reviewing and acknowledging, open Bank B in a new window.
                 </div>
                 <button className="ba-btn" onClick={handleOpenBankBTab}>Open Bank B →</button>
@@ -872,8 +872,8 @@ export default function BankA() {
             {status && (
               <div style={{
                 ...statusBox,
-                ...(isSentSuccess ? { borderColor: "#10b981", background: "rgba(16,185,129,0.1)", color: "#10b981" } : {}),
-                ...(isRejectedStatus ? { borderColor: "#ef4444", background: "rgba(239,68,68,0.1)", color: "#ef4444" } : {}),
+                ...(isSentSuccess ? { borderColor: "var(--a-10b981)", background: "rgba(16,185,129,0.1)", color: "var(--a-10b981)" } : {}),
+                ...(isRejectedStatus ? { borderColor: "var(--a-ef4444)", background: "rgba(239,68,68,0.1)", color: "var(--a-ef4444)" } : {}),
               }}>
                 {status}
               </div>
@@ -1062,14 +1062,14 @@ function WhyThisMatters({ requireAck, ackSeen }: { requireAck: boolean; ackSeen:
 
 /* ── Styles ──────────────────────────────────────────────────────────────────── */
 
-const UC_ACCENT = "#10b981";
+const UC_ACCENT = "var(--a-10b981)";
 const FONT = "-apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif";
 
 const pageWrap: CSSProperties = {
   minHeight: "100vh",
-  background: "#07080f",
+  background: "var(--bg)",
   fontFamily: FONT,
-  color: "#f0f0f0",
+  color: "var(--text)",
   paddingBottom: 80,
 };
 
@@ -1093,7 +1093,7 @@ const loadingDot: CSSProperties = {
   width: 32,
   height: 32,
   borderRadius: "50%",
-  border: "3px solid rgba(255,255,255,0.08)",
+  border: "3px solid rgba(var(--ink),0.08)",
   borderTopColor: UC_ACCENT,
   animation: "spin 0.8s linear infinite",
 };
@@ -1123,19 +1123,19 @@ const ucChip: CSSProperties = {
 const pageTitle: CSSProperties = {
   fontSize: 20,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
   lineHeight: 1.2,
 };
 
 const pageSubtitle: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.4)",
+  color: "rgba(var(--ink),0.4)",
   marginTop: 3,
 };
 
 const card: CSSProperties = {
-  background: "rgba(255,255,255,0.032)",
-  border: "1px solid rgba(255,255,255,0.08)",
+  background: "rgba(var(--ink),0.032)",
+  border: "1px solid rgba(var(--ink),0.08)",
   borderRadius: 16,
   padding: "20px 24px",
   display: "flex",
@@ -1160,7 +1160,7 @@ const metaRow: CSSProperties = {
 
 const metaLabel: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.52)",
+  color: "rgba(var(--ink),0.52)",
   minWidth: 110,
   flexShrink: 0,
 };
@@ -1168,19 +1168,19 @@ const metaLabel: CSSProperties = {
 const monoVal: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.85)",
+  color: "rgba(var(--ink),0.85)",
   wordBreak: "break-all",
 };
 
 const monoSmall: CSSProperties = {
   fontFamily: "ui-monospace, 'SFMono-Regular', Menlo, Monaco, Consolas, monospace",
   fontSize: 12,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   wordBreak: "break-all",
 };
 
 const dimText: CSSProperties = {
-  color: "rgba(255,255,255,0.6)",
+  color: "rgba(var(--ink),0.6)",
   fontSize: 13,
   lineHeight: 1.5,
 };
@@ -1193,7 +1193,7 @@ const extLink: CSSProperties = {
 
 const formNote: CSSProperties = {
   fontSize: 12,
-  color: "rgba(255,255,255,0.58)",
+  color: "rgba(var(--ink),0.58)",
   lineHeight: 1.55,
 };
 
@@ -1201,14 +1201,14 @@ const formSection: CSSProperties = {
   display: "flex",
   flexDirection: "column",
   gap: 10,
-  borderTop: "1px solid rgba(255,255,255,0.06)",
+  borderTop: "1px solid rgba(var(--ink),0.06)",
   paddingTop: 14,
 };
 
 const formSectionTitle: CSSProperties = {
   fontSize: 11,
   fontWeight: 700,
-  color: "rgba(255,255,255,0.62)",
+  color: "rgba(var(--ink),0.62)",
   letterSpacing: "0.07em",
   textTransform: "uppercase",
 };
@@ -1230,7 +1230,7 @@ const formLabel: CSSProperties = {
   flexDirection: "column",
   gap: 5,
   fontSize: 12,
-  color: "rgba(255,255,255,0.65)",
+  color: "rgba(var(--ink),0.65)",
 };
 
 const ackToggle: CSSProperties = {
@@ -1254,8 +1254,8 @@ const promptBox: CSSProperties = {
 };
 
 const txRefBox: CSSProperties = {
-  background: "rgba(255,255,255,0.025)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.025)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 8,
   padding: "10px 14px",
   display: "flex",
@@ -1272,7 +1272,7 @@ const txRefRow: CSSProperties = {
 
 const txRefLabel: CSSProperties = {
   fontSize: 11,
-  color: "rgba(255,255,255,0.45)",
+  color: "rgba(var(--ink),0.45)",
   minWidth: 52,
   paddingTop: 1,
   flexShrink: 0,
@@ -1281,10 +1281,10 @@ const txRefLabel: CSSProperties = {
 const statusBox: CSSProperties = {
   padding: "10px 14px",
   borderRadius: 8,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.04)",
   fontSize: 12,
-  color: "rgba(255,255,255,0.78)",
+  color: "rgba(var(--ink),0.78)",
   wordBreak: "break-all",
   lineHeight: 1.5,
 };
@@ -1313,7 +1313,7 @@ const wtmDivider: CSSProperties = {
 const wtmDividerLine: CSSProperties = {
   flex: 1,
   height: 1,
-  background: "rgba(255,255,255,0.06)",
+  background: "rgba(var(--ink),0.06)",
 };
 
 const wtmDividerLabel: CSSProperties = {
@@ -1321,13 +1321,13 @@ const wtmDividerLabel: CSSProperties = {
   fontWeight: 700,
   letterSpacing: "0.1em",
   textTransform: "uppercase",
-  color: "rgba(255,255,255,0.28)",
+  color: "rgba(var(--ink),0.28)",
   whiteSpace: "nowrap",
 };
 
 const wtmIntro: CSSProperties = {
   fontSize: 14,
-  color: "rgba(255,255,255,0.68)",
+  color: "rgba(var(--ink),0.68)",
   marginBottom: 16,
   lineHeight: 1.5,
   display: "flex",
@@ -1356,8 +1356,8 @@ const wtmTabStrip: CSSProperties = {
 };
 
 const wtmPanel: CSSProperties = {
-  background: "rgba(255,255,255,0.025)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.025)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 14,
   padding: "20px 22px",
 };
@@ -1367,13 +1367,13 @@ const wtmPanelHead: CSSProperties = { marginBottom: 16 };
 const wtmPanelTitle: CSSProperties = {
   fontSize: 16,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
   marginBottom: 5,
 };
 
 const wtmPanelSub: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.60)",
+  color: "rgba(var(--ink),0.60)",
   lineHeight: 1.5,
 };
 
@@ -1390,8 +1390,8 @@ const wtmGrid2: CSSProperties = {
 };
 
 const wtmCard: CSSProperties = {
-  background: "rgba(255,255,255,0.03)",
-  border: "1px solid rgba(255,255,255,0.07)",
+  background: "rgba(var(--ink),0.03)",
+  border: "1px solid rgba(var(--ink),0.07)",
   borderRadius: 12,
   padding: "14px 16px",
   display: "flex",
@@ -1402,12 +1402,12 @@ const wtmCard: CSSProperties = {
 const wtmCardTitle: CSSProperties = {
   fontSize: 13,
   fontWeight: 700,
-  color: "#fff",
+  color: "var(--heading)",
 };
 
 const wtmCardText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.70)",
+  color: "rgba(var(--ink),0.70)",
   lineHeight: 1.55,
 };
 
@@ -1426,7 +1426,7 @@ const wtmArrow: CSSProperties = {
 
 const wtmListText: CSSProperties = {
   fontSize: 13,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   lineHeight: 1.55,
 };
 
@@ -1436,7 +1436,7 @@ const wtmCallout: CSSProperties = {
   borderRadius: 10,
   padding: "12px 14px",
   fontSize: 13,
-  color: "rgba(255,255,255,0.72)",
+  color: "rgba(var(--ink),0.72)",
   lineHeight: 1.5,
 };
 
@@ -1450,9 +1450,9 @@ const pill: CSSProperties = {
   display: "inline-flex",
   padding: "3px 9px",
   borderRadius: 999,
-  border: "1px solid rgba(255,255,255,0.1)",
-  background: "rgba(255,255,255,0.04)",
+  border: "1px solid rgba(var(--ink),0.1)",
+  background: "rgba(var(--ink),0.04)",
   fontSize: 11,
   fontWeight: 600,
-  color: "rgba(255,255,255,0.48)",
+  color: "rgba(var(--ink),0.48)",
 };
