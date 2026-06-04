@@ -50,7 +50,7 @@ export default function Act2({ dark }: { dark: boolean }) {
 
   const nodeStatus = (s: SubCfg): MapNode["status"] => (s.scheduled ? "scheduled" : localBal[s.id] < s.floor ? "belowFloor" : "funded");
   const nodes: MapNode[] = [
-    { city: "Zürich", role: "Helvolt HQ · Limmat", status: "hub" },
+    { city: "Zürich", role: "Helvolt HQ · Limmat Bank", status: "hub" },
     ...SUBS.map((s): MapNode => ({ city: s.city, role: s.ccy, status: nodeStatus(s) })),
   ];
   const routes: MapRoute[] = SUBS.map((s) => ({ from: "Zürich", to: s.city, animated: s.id === "LAG", edge: { t: s.edge === "hard" ? 0.55 : 0.62, type: s.edge } }));
@@ -111,7 +111,7 @@ export default function Act2({ dark }: { dark: boolean }) {
           <span style={{ fontSize: 11, color: t.faint }}>at the conversion edges, never on float</span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-          <RevenueCard t={t} label="FX spread (30d)" value={`CHF ${fmtN(Math.round(fx.limmat))}`} hint="Limmat's share via priceConversion // VERIFY rates" />
+          <RevenueCard t={t} label="FX spread (30d)" value={`CHF ${fmtN(Math.round(fx.limmat))}`} hint="Limmat Bank's share via priceConversion // VERIFY rates" />
           <RevenueCard t={t} label="Flow fees (today)" value={`CHF ${fmtN(flowFee, 2)}`} hint="ticking · sub-cent per transfer // VERIFY" live />
           <RevenueCard t={t} label="Governance fee (monthly)" value={`CHF ${fmtN(25_000)}`} hint="// VERIFY — mandate / platform fee" />
         </div>
@@ -124,12 +124,12 @@ export default function Act2({ dark }: { dark: boolean }) {
                 <div key={q.toCcy} style={{ display: "flex", alignItems: "center", gap: 9, flexWrap: "wrap", fontSize: 12 }}>
                   <span style={{ fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontWeight: 700, color: t.heading, minWidth: 70 }}>{q.fromCcy}→{q.toCcy}</span>
                   <span style={{ fontSize: 10, fontWeight: 700, padding: "2px 8px", borderRadius: 999, background: lp[0], color: lp[1], border: `1px solid ${lp[2]}` }}>{q.liquidity}</span>
-                  <span style={{ color: t.muted }}>Limmat earns <strong style={{ color: t.heading }}>CHF {fmtN(Math.round(q.limmatEarns))}</strong> <span style={{ color: t.faint }}>({q.limmatBps} bps)</span></span>
+                  <span style={{ color: t.muted }}>Limmat Bank earns <strong style={{ color: t.heading }}>CHF {fmtN(Math.round(q.limmatEarns))}</strong> <span style={{ color: t.faint }}>({q.limmatBps} bps)</span></span>
                 </div>
               );
             })}
           </div>
-          <div style={{ fontSize: 10.5, color: t.faint, marginTop: 8 }}>Full spread to Limmat on liquid corridors; only a thin correspondent margin on the hard CHF→NGN (thin liquidity). // VERIFY rates/spreads</div>
+          <div style={{ fontSize: 10.5, color: t.faint, marginTop: 8 }}>Full spread to Limmat Bank on liquid corridors; only a thin correspondent margin on the hard CHF→NGN (thin liquidity). // VERIFY rates/spreads</div>
         </div>
       </section>
     </div>
@@ -196,7 +196,7 @@ function AgentPanel({ t, dark, onRailMoved, onSettled }: { t: Tokens; dark: bool
     <section style={{ ...panel(t), border: `1.5px solid ${t.accent}` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
         <h2 style={h2(t)}>Agent · Helvolt</h2>
-        <span style={{ fontSize: 11, color: t.faint }}>mandate held by Limmat · bank</span>
+        <span style={{ fontSize: 11, color: t.faint }}>mandate held by Limmat · Bank</span>
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(116px, 1fr))", gap: 10, marginTop: 12 }}>
         <Mini t={t} label="Scope" value="Payroll · Vendor" />

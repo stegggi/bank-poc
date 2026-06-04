@@ -28,8 +28,8 @@ const FOCAL: Record<Dest, RuleKey> = { NG: "recipient_licence", US: "counterpart
 type StepUi = "idle" | "pending" | "done" | "held" | "flagged";
 
 const BANKS: { name: string; city: string; dest?: Dest; rail?: boolean }[] = [
-  { name: "Limmat", city: "Zürich · the rail", rail: true },
-  { name: "Baobab", city: "Lagos", dest: "NG" },
+  { name: "Limmat Bank", city: "Zürich · the rail", rail: true },
+  { name: "Baobab Bank", city: "Lagos", dest: "NG" },
   { name: "Anchor National", city: "New York", dest: "US" },
   { name: "Banco do Tejo", city: "Lisbon", dest: "EU" },
 ];
@@ -62,7 +62,7 @@ export default function Act1({ dark }: { dark: boolean }) {
   const recvGate = receiveGate(corridor.rows);
   const activeCity = DEST_CITY[to];
   const nodes: MapNode[] = [
-    { city: "Zürich", role: "Amara · Limmat", status: "origin" },
+    { city: "Zürich", role: "Amara · Limmat Bank", status: "origin" },
     { city: activeCity, role: DEST_CCY[to], status: "active" },
     ...(["Lagos", "New York", "Lisbon"] as City[]).filter((c) => c !== activeCity).map((c): MapNode => ({ city: c, status: "inactive" })),
   ];
@@ -227,11 +227,11 @@ export default function Act1({ dark }: { dark: boolean }) {
       {/* ALL rules — expanded, no click-through. The most relevant rule per corridor is highlighted. */}
       <section style={panel(t)}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4, flexWrap: "wrap" }}>
-          <h2 style={{ fontSize: 14, fontWeight: 800, color: t.heading, margin: 0 }}>What the rules mean here</h2>
+          <h2 style={{ fontSize: 14, fontWeight: 800, color: t.heading, margin: 0 }}>Cross-border rules and regulations for selected corridor</h2>
           <span style={corridorTag(t)}>{corridor.tag}</span>
         </div>
         <p style={{ margin: "0 0 13px", fontSize: 11.5, lineHeight: 1.5, color: t.faint, maxWidth: 760 }}>
-          All five rules in plain language — what each means for this payment, and what Limmat sets up once versus runs on every transfer. The most relevant rule for this corridor is highlighted.
+          What each rule means for this payment, and what Limmat Bank sets up once versus runs on every transfer. The most relevant rule for this corridor is highlighted.
         </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {corridor.rows.map((r) => {

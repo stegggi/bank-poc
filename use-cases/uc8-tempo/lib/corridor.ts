@@ -5,7 +5,7 @@
 // Pure function, NO chain dependency: getCorridorRules(from, to, amountCHF) returns a
 // five-row compliance result that rewrites itself per corridor. Each row is written for a
 // non-expert: a shared plain-language `headline` (what the rule is really about), then the
-// per-corridor `meaning` (the so-what here), `setupOnce` (what Limmat does the first time it
+// per-corridor `meaning` (the so-what here), `setupOnce` (what Limmat Bank does the first time it
 // opens the corridor) and `perPayment` (what runs on each transfer), plus a `source` footnote.
 //
 // Headlines are CONSTANT across corridors; only meaning/setupOnce/perPayment/source vary.
@@ -37,7 +37,7 @@ export type CorridorRow = {
   status: RuleStatus;
   headline: string; // plain-language, SAME for all corridors — the only line you must read
   meaning: string; // the so-what for THIS corridor
-  setupOnce: string; // what Limmat does the first time it opens this corridor
+  setupOnce: string; // what Limmat Bank does the first time it opens this corridor
   perPayment: string; // what runs on each individual transfer
   source: string; // small grey footnote: the regulation name
 };
@@ -67,9 +67,9 @@ const LABEL: Record<RuleKey, string> = {
 // Headlines — constant across every corridor (the so-what of the rule itself).
 const HEADLINE: Record<RuleKey, string> = {
   travel_rule:
-    "Money can't travel anonymously — the sender's identity rides along with the payment.",
+    "Money can't travel anonymously, the sender's identity rides along with the payment.",
   counterparty:
-    "Limmat must know who's catching the money on the other side, not just who receives it.",
+    "Limmat Bankmust know who's processing the money on the other side, not just who receives it.",
   sanctions:
     "Check that neither sender nor recipient is on a blocked-persons list before money moves.",
   recipient_licence:
@@ -85,7 +85,7 @@ const TRAVEL_PER =
   "Attach Amara's verified identity and the recipient's details to this transfer.";
 const TRAVEL_SRC = "Swiss AMLO-FINMA Art. 10 · from CHF 1,000"; // VERIFY figure
 const SANCTIONS_SETUP =
-  "Connect Limmat's screening to the official watchlists and set the matching rules.";
+  "Connect Limmat Bank's screening to the official watchlists and set the matching rules.";
 const SANCTIONS_PER =
   "Screen both names live; a hit would freeze this transfer for review.";
 const DATA_PER =
@@ -125,12 +125,12 @@ function corridorNG(amountCHF: number): CorridorRow[] {
     travelRow(
       amountCHF,
       applies
-        ? `At CHF ${chf(amountCHF)} this is over the line, so Limmat must attach who Amara is before the money leaves.`
+        ? `At CHF ${chf(amountCHF)} this is above the regulatory threshold, so Limmat Bank must attach who Amara is before the money leaves.`
         : travelBelow(amountCHF),
     ),
     makeRow("counterparty", "unverified", {
       meaning:
-        "Nigeria's licensing regime is new, so Limmat can't assume the receiving institution is properly supervised — it checks rather than trusts.",
+        "Nigeria's licensing regime is new, so Limmat Bank can't assume the receiving institution is properly supervised. Checks are needed.",
       setupOnce:
         "Vet the Lagos partner, confirm its licence, and agree how both sides exchange data.",
       perPayment:
@@ -203,7 +203,7 @@ function corridorUS(amountCHF: number): CorridorRow[] {
     }),
     makeRow("data_secrecy", "restricted", {
       meaning:
-        "Swiss secrecy is strict; the US has no single federal privacy law but a patchwork of state rules, so Limmat protects the data to the stricter Swiss standard.",
+        "Swiss secrecy is strict; the US has no single federal privacy law but a patchwork of state rules, so Limmat Bank protects the data to the stricter Swiss standard.",
       setupOnce: DATA_SETUP,
       perPayment: DATA_PER,
       source: "Swiss bank-client confidentiality; US state privacy laws", // VERIFY
@@ -223,7 +223,7 @@ function corridorEU(amountCHF: number): CorridorRow[] {
     ),
     makeRow("counterparty", "applies", {
       meaning:
-        "The EU requires the receiving provider to exchange sender and recipient data on every transfer with no minimum, so the Lisbon side must match Limmat's data even on small amounts.",
+        "The EU requires the receiving provider to exchange sender and recipient data on every transfer with no minimum, so the Lisbon side must match Limmat Bank's data even on small amounts.",
       setupOnce:
         "Confirm the EU receiving institution is an authorised CASP and agree the data exchange.",
       perPayment:
