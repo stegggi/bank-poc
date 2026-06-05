@@ -205,7 +205,7 @@ export default function Uc7Page() {
                 {step === "scan" && (
                   <StepScan
                     caseFile={activeCase}
-                    onUpdated={refreshCase}
+                    setActiveCase={setActiveCase}
                     onNext={() => setStep("classify")}
                     currency={currency}
                   />
@@ -1463,12 +1463,12 @@ const TRACE_PROGRESS_STAGES = [
 
 function StepScan({
   caseFile,
-  onUpdated,
+  setActiveCase,
   onNext,
   currency,
 }: {
   caseFile: CaseFile;
-  onUpdated: (ref: string) => void;
+  setActiveCase: (c: CaseFile) => void;
   onNext: () => void;
   currency: Currency;
 }) {
@@ -1488,7 +1488,7 @@ function StepScan({
         });
       }
       try {
-        await fetch("/api/uc7/trace", {
+        const res = await fetch("/api/uc7/trace", {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
@@ -1497,7 +1497,13 @@ function StepScan({
             ...(chains && chains.length > 0 ? { chains } : {}),
           }),
         });
-        onUpdated(caseFile.caseReference);
+        // Apply the write response as the new source of truth. Re-fetching
+        // the case here can hit Vercel Blob's eventual-consistency window on
+        // a different Lambda and return a stale snapshot (without the traces
+        // we just wrote), which made results fail to render until a hard
+        // reload.
+        const json = (await res.json().catch(() => ({}))) as { case?: CaseFile };
+        if (res.ok && json.case) setActiveCase(json.case);
       } finally {
         setRunningSet((prev) => {
           const next = new Set(prev);
@@ -1513,7 +1519,7 @@ function StepScan({
         }
       }
     },
-    [caseFile.caseReference, onUpdated]
+    [caseFile.caseReference, setActiveCase]
   );
 
   const runAll = useCallback(async () => {

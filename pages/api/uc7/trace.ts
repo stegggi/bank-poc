@@ -109,5 +109,11 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   delete wallet.trace;
   if (!wallet.primaryChain) wallet.primaryChain = chains[0];
   await writeCase(caseFile);
-  return res.status(200).json({ traces: wallet.traces });
+  // Return the full case alongside the traces. The client applies this
+  // directly as its new source of truth instead of re-fetching via
+  // GET /case/:ref — a re-fetch can hit Vercel Blob's eventual-consistency
+  // window on a different Lambda instance and return a stale snapshot
+  // (without the traces we just wrote), making results fail to appear
+  // until a hard reload.
+  return res.status(200).json({ case: caseFile, traces: wallet.traces });
 }
