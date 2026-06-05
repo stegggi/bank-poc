@@ -11903,6 +11903,19 @@ class Uc6Bot {
       Number.isFinite(holdUntilMs) && holdUntilMs > Date.now()
         ? Math.round(((holdUntilMs - Date.now()) / 3_600_000) * 10) / 10
         : 0;
+    // Fresh recompute for the informational stats only (30d low/high, MAs, σ,
+    // vol proj, P5/P95). The bounds above stay pinned to the mint-time `active`
+    // corridor (the LP's real range), but these context stats should track the
+    // current market — otherwise "30d low" shows the value from mint time and
+    // can sit above a spot that has since crashed out of the corridor.
+    let liveStats = null;
+    try {
+      const fresh = this.computeCorridor();
+      if (fresh && fresh.ok) liveStats = fresh;
+    } catch {
+      liveStats = null;
+    }
+    if (!liveStats) liveStats = state?.candidate || active;
     return {
       enabled: cfg.enabled,
       active: active
@@ -11942,6 +11955,19 @@ class Uc6Bot {
                   ma200Ceiling: active.upperDrivers.ma200Ceiling != null ? Number(active.upperDrivers.ma200Ceiling) : null,
                 }
               : null,
+          }
+        : null,
+      live: liveStats
+        ? {
+            recentLow: liveStats.recentLow != null ? Number(liveStats.recentLow) : null,
+            recentHigh: liveStats.recentHigh != null ? Number(liveStats.recentHigh) : null,
+            ma200: liveStats.ma200 != null ? Number(liveStats.ma200) : null,
+            ma50: liveStats.ma50 != null ? Number(liveStats.ma50) : null,
+            p5: liveStats.p5 != null ? Number(liveStats.p5) : null,
+            p95: liveStats.p95 != null ? Number(liveStats.p95) : null,
+            dailySigma: Number(liveStats.dailySigma),
+            volProjectionPct: Number(liveStats.volProjectionPct ?? liveStats.volWidthPct),
+            computedAtIso: liveStats.computedAtIso || null,
           }
         : null,
       mintedAtIso: state?.mintedAtIso || null,

@@ -867,6 +867,17 @@ type Uc6Status = {
         ma200Ceiling?: number | null;
       } | null;
     } | null;
+    live?: {
+      recentLow?: number | null;
+      recentHigh?: number | null;
+      ma200?: number | null;
+      ma50?: number | null;
+      p5?: number | null;
+      p95?: number | null;
+      dailySigma?: number;
+      volProjectionPct?: number;
+      computedAtIso?: string | null;
+    } | null;
     mintedAtIso?: string | null;
     holdUntilIso?: string | null;
     holdRemainingHours?: number;
@@ -3469,7 +3480,14 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
     v == null || !Number.isFinite(Number(v)) ? "n/a" : `$${Number(v).toLocaleString()}`;
   const lowerDrivers = active.lowerDrivers || null;
   const upperDrivers = active.upperDrivers || null;
-  const volProjPct = Number(active.volProjectionPct ?? active.volWidthPct ?? 0);
+  // Informational stats track the *current* market (fresh recompute); the
+  // bounds and their drivers stay pinned to the mint-time corridor.
+  const stats = corridor.live || active;
+  const volProjPct = Number(stats.volProjectionPct ?? active.volProjectionPct ?? active.volWidthPct ?? 0);
+  // Bound distance vs current price, with a correct single sign: negative when
+  // the bound sits below spot (in range), positive when spot has dropped below
+  // it (out of range). Avoids the "--15.5%" double-minus.
+  const signedPct = (v: number) => `${v >= 0 ? "+" : ""}${v.toFixed(1)}%`;
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -3477,13 +3495,13 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
         <div>
           <Uc6Metric
             label="Lower bound"
-            value={`${fmtUsd(active.lower)} (-${Number(active.lowerPct || 0).toFixed(1)}%)`}
+            value={`${fmtUsd(active.lower)} (${signedPct(-Number(active.lowerPct || 0))})`}
           />
           {lowerDrivers && (
             <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", marginTop: 4, lineHeight: 1.5 }}>
               Vol: {fmtUsd(lowerDrivers.volProjection)}
               {lowerDrivers.ma200Floor != null ? ` · MA200: ${fmtUsd(lowerDrivers.ma200Floor)}` : ""}
-              {` · 30d low: ${fmtUsd(lowerDrivers.recentLow98)}`}
+              {` · 30d low@mint: ${fmtUsd(lowerDrivers.recentLow98)}`}
               {` · P5: ${fmtUsd(lowerDrivers.p5_98)}`}
             </div>
           )}
@@ -3491,13 +3509,13 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
         <div>
           <Uc6Metric
             label="Upper bound"
-            value={`${fmtUsd(active.upper)} (+${Number(active.upperPct || 0).toFixed(1)}%)`}
+            value={`${fmtUsd(active.upper)} (${signedPct(Number(active.upperPct || 0))})`}
           />
           {upperDrivers && (
             <div style={{ fontSize: 11, color: "rgba(232,232,240,0.35)", marginTop: 4, lineHeight: 1.5 }}>
               Vol: {fmtUsd(upperDrivers.volProjection)}
               {upperDrivers.ma200Ceiling != null ? ` · MA200: ${fmtUsd(upperDrivers.ma200Ceiling)}` : ""}
-              {` · 30d high: ${fmtUsd(upperDrivers.recentHigh101)}`}
+              {` · 30d high@mint: ${fmtUsd(upperDrivers.recentHigh101)}`}
               {` · P95: ${fmtUsd(upperDrivers.p95_102)}`}
             </div>
           )}
@@ -3527,11 +3545,11 @@ function CorridorCard({ corridor }: { corridor: NonNullable<Uc6Status["corridor"
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(100px, 1fr))", gap: 6 }}>
-        <Uc6Metric label="200d MA" value={fmtUsd(active.ma200)} />
-        <Uc6Metric label="50d MA" value={fmtUsd(active.ma50)} />
-        <Uc6Metric label="Daily σ" value={`${(Number(active.dailySigma || 0) * 100).toFixed(2)}%`} />
-        <Uc6Metric label="30d low" value={fmtUsd(active.recentLow)} />
-        <Uc6Metric label="30d high" value={fmtUsd(active.recentHigh)} />
+        <Uc6Metric label="200d MA" value={fmtUsd(stats.ma200)} />
+        <Uc6Metric label="50d MA" value={fmtUsd(stats.ma50)} />
+        <Uc6Metric label="Daily σ" value={`${(Number(stats.dailySigma || 0) * 100).toFixed(2)}%`} />
+        <Uc6Metric label="30d low" value={fmtUsd(stats.recentLow)} />
+        <Uc6Metric label="30d high" value={fmtUsd(stats.recentHigh)} />
         <Uc6Metric label="Vol proj" value={`±${volProjPct.toFixed(1)}%`} />
       </div>
 
