@@ -359,20 +359,35 @@ export default function ContextVaultPage() {
     if (isBytes32(derivedBankModuleId)) setBankModuleId(derivedBankModuleId);
   }, [mounted, derivedBankModuleId]);
 
+  async function ensureCustomerChain(prov: any) {
+    try {
+      await prov.request({
+        method: "wallet_switchEthereumChain",
+        params: [{ chainId: chainIdToHex(CHAIN_ID) }],
+      });
+    } catch (e: any) {
+      if (e?.code === 4902) {
+        await prov.request({
+          method: "wallet_addEthereumChain",
+          params: [{
+            chainId: chainIdToHex(CHAIN_ID),
+            chainName: "Arbitrum Sepolia",
+            nativeCurrency: { name: "Sepolia Ether", symbol: "ETH", decimals: 18 },
+            rpcUrls: [process.env.NEXT_PUBLIC_RPC_URL as string],
+            blockExplorerUrls: ["https://sepolia.arbiscan.io"],
+          }],
+        });
+      }
+    }
+  }
+
   async function getCustomerSigner() {
     if (!wallet) throw new Error("No customer wallet connected");
     const eip1193 = await wallet.getEthereumProvider();
+    await ensureCustomerChain(eip1193);
     const provider = new ethers.BrowserProvider(eip1193);
     const signer = await provider.getSigner();
     return { provider, signer };
-  }
-
-  async function ensureCustomerChain() {
-    try {
-      if (wallet?.switchChain) await wallet.switchChain(CHAIN_ID);
-    } catch {
-      // best-effort
-    }
   }
 
   async function loadModules() {
@@ -429,13 +444,13 @@ export default function ContextVaultPage() {
       }
       setModules(out);
     } catch (e: any) {
-      setErr(e?.message ?? String(e));
+      setErr(formatTxError(e));
     }
   }
 
   useEffect(() => {
     if (!canUseCustomer) return;
-    void ensureCustomerChain().then(loadModules);
+    void loadModules();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [canUseCustomer, walletAddress]);
 
