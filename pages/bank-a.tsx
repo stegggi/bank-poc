@@ -5,6 +5,7 @@ import { BrowserProvider, Interface } from "ethers";
 import { encodePacked, keccak256 } from "viem";
 import { hpkeSealJsonToEnvelopeHex } from "../use-cases/uc2-interbank-payment/lib/hpke";
 import { publicClient } from "../shared/lib/aa";
+import { formatTxError, withChunkRetry } from "../shared/lib/txError";
 import NavBar from "../shared/components/NavBar";
 import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
@@ -420,7 +421,7 @@ export default function BankA() {
       ]);
 
       setStatus("Posting request…");
-      const tx = await signer.sendTransaction({ to: HUB, data });
+      const tx = await withChunkRetry(() => signer.sendTransaction({ to: HUB, data }));
       setSubmitTxHash(tx.hash as `0x${string}`);
       setPaymentTxHash("");
 
@@ -435,7 +436,7 @@ export default function BankA() {
         pollAck(ref);
       }
     } catch (e: any) {
-      setStatus(`Post failed: ${e?.message ?? e}`);
+      setStatus(`Post failed: ${formatTxError(e)}`);
       setShowOpenBankBPrompt(false);
     }
   };
@@ -554,12 +555,12 @@ export default function BankA() {
       const data = erc20.encodeFunctionData("transfer", [DEMO_RECIPIENT, _amount]);
 
       setStatus("Sending xBank transfer…");
-      const tx = await signer.sendTransaction({ to: XBANK, data });
+      const tx = await withChunkRetry(() => signer.sendTransaction({ to: XBANK, data }));
       setPaymentTxHash(tx.hash as `0x${string}`);
       setStatus(`Sent! Interbank payment complete. ${arbTx(tx.hash)}`);
       await refreshXBankBalances(from);
     } catch (e: any) {
-      setStatus(`Send failed: ${e?.message ?? e}`);
+      setStatus(`Send failed: ${formatTxError(e)}`);
     }
   };
 

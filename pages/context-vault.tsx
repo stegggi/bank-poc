@@ -4,6 +4,7 @@ import { usePrivy, useSendTransaction, useWallets } from "@privy-io/react-auth";
 import NavBar from "../shared/components/NavBar";
 import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 import { publicClient } from "../shared/lib/aa";
+import { formatTxError, withChunkRetry } from "../shared/lib/txError";
 import CONTEXT_PASSPORT_ABI from "../use-cases/uc4-context-passport/lib/ContextPassportABI";
 import {
   UserModulePackageV1,
@@ -457,7 +458,9 @@ export default function ContextVaultPage() {
   }, [mounted]);
 
   async function txSendCustomer(data: string) {
-    const { hash } = await sendTransaction({ to: CONTRACT, data, value: 0 }, { sponsor: true, address: walletAddress });
+    const { hash } = await withChunkRetry(() =>
+      sendTransaction({ to: CONTRACT, data, value: 0 }, { sponsor: true, address: walletAddress })
+    );
     return hash;
   }
 
@@ -816,7 +819,7 @@ export default function ContextVaultPage() {
     setStatus("Claiming operator role (demo)…");
     const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
     const data = iface.encodeFunctionData("claimOperatorRole", []);
-    const tx = await signer.sendTransaction({ to: CONTRACT, data });
+    const tx = await withChunkRetry(() => signer.sendTransaction({ to: CONTRACT, data }));
     setStatus("Operator claim pending…");
     await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
     setStatus("Operator claimed ✅");
@@ -841,7 +844,7 @@ export default function ContextVaultPage() {
       const iface = new ethers.Interface(CONTEXT_PASSPORT_ABI as any);
       const data = iface.encodeFunctionData("operatorRequestAccess", [bankModuleId, pHash, bankAddr]);
 
-      const tx = await signer.sendTransaction({ to: CONTRACT, data });
+      const tx = await withChunkRetry(() => signer.sendTransaction({ to: CONTRACT, data }));
       setLastTx(tx.hash);
       setStatus(`Access request pending… ${tx.hash.slice(0, 14)}…`);
       await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
@@ -849,7 +852,7 @@ export default function ContextVaultPage() {
       if (canUseCustomer) await loadModules();
     } catch (e: any) {
       setStatus("");
-      setErr(e?.message ?? String(e));
+      setErr(formatTxError(e));
     }
   }
 
@@ -902,7 +905,7 @@ export default function ContextVaultPage() {
       await loadModules();
     } catch (e: any) {
       setStatus("");
-      setErr(e?.message ?? String(e));
+      setErr(formatTxError(e));
     }
   }
 
@@ -925,7 +928,7 @@ export default function ContextVaultPage() {
       await loadModules();
     } catch (e: any) {
       setStatus("");
-      setErr(e?.message ?? String(e));
+      setErr(formatTxError(e));
     }
   }
 

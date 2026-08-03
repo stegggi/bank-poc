@@ -6,6 +6,7 @@ import { BrowserProvider, Interface } from "ethers";
 import NavBar from "../shared/components/NavBar";
 import { publicClient } from "../shared/lib/aa";
 import { useBreakpoint } from "../shared/hooks/useBreakpoint";
+import { formatTxError, withChunkRetry } from "../shared/lib/txError";
 
 const BADGE = (process.env.NEXT_PUBLIC_KYC_BADGE_ADDRESS || "") as `0x${string}`;
 
@@ -207,37 +208,41 @@ export default function KYCBadge() {
     try {
       setIssuerStatus("");
       if (!isAddr(issueTarget)) { setIssuerStatus("Please enter a valid target wallet address (0x…)."); return; }
-      const { signer, addr } = await ensureIssuerReady();
-      await claimOperatorIfNeeded(signer, addr);
-      const days       = Number.isFinite(issueDays) && issueDays > 0 ? issueDays : 90;
-      const validUntil = Math.floor(Date.now() / 1000) + Math.floor(days * 86400);
-      const claims     = getClaimsMaskFromUI();
-      setIssuerStatus("Issuing / renewing badge…");
-      const data = BADGE_IFACE.encodeFunctionData("issue", [issueTarget as `0x${string}`, BigInt(validUntil), claims]);
-      const tx   = await signer.sendTransaction({ to: BADGE, data });
-      setIssuerStatus(`Issue pending… ${arbTx(tx.hash)}`);
-      await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
-      setIssuerStatus(`Issued ✅ ${arbTx(tx.hash)}`);
+      await withChunkRetry(async () => {
+        const { signer, addr } = await ensureIssuerReady();
+        await claimOperatorIfNeeded(signer, addr);
+        const days       = Number.isFinite(issueDays) && issueDays > 0 ? issueDays : 90;
+        const validUntil = Math.floor(Date.now() / 1000) + Math.floor(days * 86400);
+        const claims     = getClaimsMaskFromUI();
+        setIssuerStatus("Issuing / renewing badge…");
+        const data = BADGE_IFACE.encodeFunctionData("issue", [issueTarget as `0x${string}`, BigInt(validUntil), claims]);
+        const tx   = await signer.sendTransaction({ to: BADGE, data });
+        setIssuerStatus(`Issue pending… ${arbTx(tx.hash)}`);
+        await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
+        setIssuerStatus(`Issued ✅ ${arbTx(tx.hash)}`);
+      });
       setWalletToVerify(issueTarget);
       await verify();
-    } catch (e: any) { setIssuerStatus(`Issue failed: ${e?.message || e}`); }
+    } catch (e: any) { setIssuerStatus(`Issue failed: ${formatTxError(e)}`); }
   };
 
   const doRevoke = async () => {
     try {
       setIssuerStatus("");
       if (!isAddr(issueTarget)) { setIssuerStatus("Please enter a valid target wallet address (0x…)."); return; }
-      const { signer, addr } = await ensureIssuerReady();
-      await claimOperatorIfNeeded(signer, addr);
-      setIssuerStatus("Revoking badge…");
-      const data = BADGE_IFACE.encodeFunctionData("revoke", [issueTarget as `0x${string}`]);
-      const tx   = await signer.sendTransaction({ to: BADGE, data });
-      setIssuerStatus(`Revoke pending… ${arbTx(tx.hash)}`);
-      await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
-      setIssuerStatus(`Revoked ✅ ${arbTx(tx.hash)}`);
+      await withChunkRetry(async () => {
+        const { signer, addr } = await ensureIssuerReady();
+        await claimOperatorIfNeeded(signer, addr);
+        setIssuerStatus("Revoking badge…");
+        const data = BADGE_IFACE.encodeFunctionData("revoke", [issueTarget as `0x${string}`]);
+        const tx   = await signer.sendTransaction({ to: BADGE, data });
+        setIssuerStatus(`Revoke pending… ${arbTx(tx.hash)}`);
+        await publicClient.waitForTransactionReceipt({ hash: tx.hash as `0x${string}` });
+        setIssuerStatus(`Revoked ✅ ${arbTx(tx.hash)}`);
+      });
       setWalletToVerify(issueTarget);
       await verify();
-    } catch (e: any) { setIssuerStatus(`Revoke failed: ${e?.message || e}`); }
+    } catch (e: any) { setIssuerStatus(`Revoke failed: ${formatTxError(e)}`); }
   };
 
   // --- Badge status pill (dark theme) ---

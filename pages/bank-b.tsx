@@ -4,6 +4,7 @@ import { usePrivy, useWallets } from "@privy-io/react-auth";
 import { BrowserProvider, Interface } from "ethers";
 import { encodePacked, keccak256 } from "viem";
 import { publicClient } from "../shared/lib/aa";
+import { formatTxError, withChunkRetry } from "../shared/lib/txError";
 import NavBar from "../shared/components/NavBar";
 import { useBreakpoint } from "../shared/hooks/useBreakpoint";
 
@@ -681,12 +682,12 @@ export default function BankB() {
       setUpsertStatus(
         "Sending Directory upsertBank tx… (requires Directory owner wallet)"
       );
-      const tx = await signer.sendTransaction({ to: DIR, data });
+      const tx = await withChunkRetry(() => signer.sendTransaction({ to: DIR, data }));
       setUpsertStatus(`Upsert sent: ${arbTx(tx.hash as `0x${string}`)}`);
 
       await loadDirectory();
     } catch (e: any) {
-      setUpsertStatus(`Upsert failed: ${e?.message ?? e}`);
+      setUpsertStatus(`Upsert failed: ${formatTxError(e)}`);
     }
   };
 
@@ -872,11 +873,11 @@ for (let i = 0; i < logs.length; i += 1) {
         BigInt(BANK_B_ID),
       ]);
       setStatus("Claiming Bank B operator role…");
-      await signer.sendTransaction({ to: DIR, data: claimData });
+      await withChunkRetry(() => signer.sendTransaction({ to: DIR, data: claimData }));
 
       const ackData = iface.encodeFunctionData("acknowledge", [row.txRef]);
       setStatus("Sending ACK…");
-      const ackTx = await signer.sendTransaction({ to: HUB, data: ackData });
+      const ackTx = await withChunkRetry(() => signer.sendTransaction({ to: HUB, data: ackData }));
       setStatus(`ACK sent: ${arbTx(ackTx.hash)}`);
 
       saveAckToLocal(row.txRef, ackTx.hash as `0x${string}`);
@@ -891,7 +892,7 @@ for (let i = 0; i < logs.length; i += 1) {
       );
       setShowReturnToBankABanner(true);
     } catch (e: any) {
-      setStatus(`ACK failed: ${e?.message ?? e}`);
+      setStatus(`ACK failed: ${formatTxError(e)}`);
     }
   };
 
