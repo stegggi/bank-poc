@@ -2,6 +2,7 @@ import { useEffect } from 'react';
 import type { AppProps } from 'next/app';
 import { PrivyProvider } from '@privy-io/react-auth';
 import { ThemeProvider } from '../shared/lib/theme-context';
+import { arbSepolia } from '../shared/lib/aa';
 import '../styles/globals.css';
 
 const CHUNK_ERROR_RE = /loading chunk .* failed|chunkloaderror|failed to fetch dynamically imported module/i;
@@ -43,6 +44,7 @@ export default function App({ Component, pageProps }: AppProps) {
             ethereum: { createOnLogin: 'all-users' },
             solana: { createOnLogin: 'all-users' },
           },
+          defaultChain: arbSepolia,
         }}
       >
         <Component {...pageProps} />

@@ -474,7 +474,7 @@ export default function ContextVaultPage() {
 
   async function txSendCustomer(data: string) {
     const { hash } = await withChunkRetry(() =>
-      sendTransaction({ to: CONTRACT, data, value: 0 }, { sponsor: true, address: walletAddress })
+      sendTransaction({ to: CONTRACT, data, value: 0, chainId: CHAIN_ID }, { sponsor: true, address: walletAddress })
     );
     return hash;
   }
